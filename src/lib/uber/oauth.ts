@@ -17,7 +17,19 @@ function requireEnv(name: string): string {
   return value;
 }
 
-const REQUIRED_UBER_ENV_VARS = ["UBER_CLIENT_ID", "UBER_CLIENT_SECRET", "UBER_REDIRECT_URI"] as const;
+// MOBILITY_TOKEN_ENCRYPTION_KEY is required here too, not just in
+// src/lib/uber/crypto.ts: without it, the OAuth negotiation itself
+// succeeds (real Uber login, real code exchange) but encryptToken() throws
+// at the final step inside the callback route's try/catch, which only
+// surfaces as a generic "?uber=error" — a confusing failure after the user
+// already authorized Uber. Checking it here means /connect refuses to even
+// start the flow with an honest "needs setup" message instead.
+const REQUIRED_UBER_ENV_VARS = [
+  "UBER_CLIENT_ID",
+  "UBER_CLIENT_SECRET",
+  "UBER_REDIRECT_URI",
+  "MOBILITY_TOKEN_ENCRYPTION_KEY",
+] as const;
 
 export function isUberConfigured(): boolean {
   return getMissingUberEnvVars().length === 0;
