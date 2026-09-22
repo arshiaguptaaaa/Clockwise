@@ -32,7 +32,7 @@ async function checkGemini(): Promise<IntegrationStatus> {
     const res = await ai.models.generateContent({
       model,
       contents: [{ role: "user", parts: [{ text: "Reply with exactly one word: OK" }] }],
-      config: { maxOutputTokens: 5 },
+      config: { maxOutputTokens: 5, httpOptions: { timeout: 15_000 } },
     });
     if (res.text?.trim()) {
       return result("Gemini", "LIVE", `Model "${model}" responded to a real request.`);

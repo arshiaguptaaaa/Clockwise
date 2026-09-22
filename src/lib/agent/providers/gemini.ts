@@ -109,6 +109,13 @@ type Classification = {
 };
 
 function classifyError(err: unknown): Classification {
+  if (isTimeoutError(err)) {
+    // Transient by nature (slow network/upstream), so retryable — unlike
+    // the generic UNKNOWN fallback below, which assumes retrying a
+    // non-HTTP error won't help.
+    return { category: "TIMEOUT", retryable: true, retryDelayMs: null, httpStatus: null };
+  }
+
   if (!(err instanceof ApiError)) {
     return { category: "UNKNOWN", retryable: false, retryDelayMs: null, httpStatus: null };
   }
@@ -121,9 +128,17 @@ function classifyError(err: unknown): Classification {
   switch (httpStatus) {
     case 429:
       category = googleStatus === "RESOURCE_EXHAUSTED" ? "QUOTA_EXHAUSTED" : "RATE_LIMIT";
-      retryable = true; // per spec: retry 429 and 503 only
+      retryable = true; // per spec: retry 429, 503, and 504 only
       break;
     case 503:
+      category = "OVERLOADED";
+      retryable = true;
+      break;
+    case 504:
+      // Confirmed live during R1 hardening: a real 504 from Gemini fell
+      // through to UNKNOWN/non-retryable before this case existed, giving
+      // up after a single attempt on what's the same class of transient
+      // upstream issue as 503.
       category = "OVERLOADED";
       retryable = true;
       break;
@@ -151,6 +166,20 @@ function classifyError(err: unknown): Classification {
 const MAX_ATTEMPTS = 3; // total tries, i.e. up to 2 retries after the first failure
 const BASE_DELAY_MS = 500;
 
+// Per-attempt request timeout (SDK gives each retry attempt its own fresh
+// abort signal — this is not a total-call budget). Without this, a hung
+// connection to Gemini would block the turn indefinitely rather than
+// degrading to a normal fallback message the user can retry.
+const REQUEST_TIMEOUT_MS = 25_000;
+
+function isTimeoutError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (err instanceof Error && (err.name === "AbortError" || /abort|timed? ?out/i.test(err.message))) {
+    return true;
+  }
+  return false;
+}
+
 function backoffDelayMs(attempt: number, serverSuggestedMs: number | null): number {
   if (serverSuggestedMs !== null) return serverSuggestedMs;
   const exp = BASE_DELAY_MS * 2 ** attempt; // 500, 1000, 2000
@@ -174,6 +203,8 @@ function fallbackTextFor(category: AgentErrorCategory): string {
       return "Something about that request wasn't valid — this looks like a bug rather than a provider outage.";
     case "MISSING_KEY":
       return "I'd help with that, but I don't have a Gemini API key configured yet — set GEMINI_API_KEY to enable live answers.";
+    case "TIMEOUT":
+      return "That took too long to reach the model provider. Try again — it's usually a momentary network issue.";
     default:
       return "I couldn't reach my reasoning right now — the model provider is temporarily unavailable. Try again in a moment.";
   }
@@ -211,6 +242,7 @@ export class GeminiAgentProvider implements AgentModelProvider {
             systemInstruction: system,
             tools: toGeminiTools(tools),
             maxOutputTokens: 600,
+            httpOptions: { timeout: REQUEST_TIMEOUT_MS },
           },
         });
         break;

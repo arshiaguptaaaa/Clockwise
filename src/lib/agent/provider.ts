@@ -39,6 +39,7 @@ export type AgentErrorCategory =
   | "AUTH_ERROR"
   | "MALFORMED_REQUEST"
   | "MISSING_KEY"
+  | "TIMEOUT"
   | "UNKNOWN";
 
 export type AgentGenerateResult = {
