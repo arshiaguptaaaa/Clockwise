@@ -1,6 +1,50 @@
 import type { CardType } from "@prisma/client";
 import { ClockwiseActionCard } from "./ClockwiseActionCard";
+import { TripMapLoader } from "@/components/map/TripMapLoader";
+import type { MapMarker, MapRoute } from "@/components/map/types";
 import type { ActionCardData } from "@/lib/action-cards";
+
+// Live agent search results, not persisted trip state — always
+// `temporary: true` so TripMap renders them visually distinct from a
+// trip's own destinations, and nothing here is ever written back to the
+// Destination table.
+function placesToMarkers(places: ActionCardData["places"], title: string): MapMarker[] {
+  // The card doesn't carry a structured category, but the title is always
+  // our own tools.ts text (never user input) — safe to key off it for an
+  // icon hint rather than always falling back to the generic POI pin.
+  const kind = title.startsWith("Hotels near") ? "hotel" : "poi";
+  return (places ?? [])
+    .filter((p): p is typeof p & { latitude: number; longitude: number } => p.latitude != null && p.longitude != null)
+    .map((p, i) => ({
+      id: `place-${i}`,
+      kind,
+      position: { lat: p.latitude, lng: p.longitude },
+      label: p.name,
+      sublabel: p.formattedAddress ?? undefined,
+      temporary: true,
+    }));
+}
+
+function routeToMapData(route: ActionCardData["route"]): { markers: MapMarker[]; routes: MapRoute[] } {
+  if (!route?.from || !route?.to) return { markers: [], routes: [] };
+  const markers: MapMarker[] = [
+    { id: "route-from", kind: "transport", position: route.from, label: route.fromLabel, temporary: true },
+    { id: "route-to", kind: "transport", position: route.to, label: route.toLabel, temporary: true },
+  ];
+  const routes: MapRoute[] = route.geometry?.length
+    ? [
+        {
+          id: "route-geometry",
+          points: route.geometry,
+          mode: route.mode,
+          distanceMeters: route.distanceMeters,
+          durationSeconds: route.durationSeconds,
+          provider: "geoapify",
+        },
+      ]
+    : [];
+  return { markers, routes };
+}
 
 function formatDistance(meters: number | null): string | null {
   if (meters == null) return null;
@@ -24,6 +68,7 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
       : undefined;
 
   if (cardType === "PLACES" && data.places) {
+    const placeMarkers = placesToMarkers(data.places, data.title);
     return (
       <ClockwiseActionCard type="PLACES" title={data.title} context={data.context} status="CONFIRMED">
         <div className="mt-2.5 space-y-1.5">
@@ -41,12 +86,18 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
             </div>
           ))}
         </div>
+        {placeMarkers.length > 0 && (
+          <div className="mt-2.5">
+            <TripMapLoader markers={placeMarkers} heightClassName="h-48" />
+          </div>
+        )}
         {sourceNote && <p className="mt-2 text-[11px] text-muted-foreground">{sourceNote}</p>}
       </ClockwiseActionCard>
     );
   }
 
   if (cardType === "ROUTE" && data.route) {
+    const { markers: routeMarkers, routes } = routeToMapData(data.route);
     return (
       <ClockwiseActionCard
         type="ROUTE"
@@ -58,6 +109,11 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
           { label: data.route.mode === "walk" ? "Walking" : data.route.mode === "drive" ? "Driving" : "Transit", value: formatDuration(data.route.durationSeconds) },
         ]}
       >
+        {routeMarkers.length > 0 && (
+          <div className="mt-2.5">
+            <TripMapLoader markers={routeMarkers} routes={routes} heightClassName="h-48" />
+          </div>
+        )}
         {sourceNote && <p className="mt-2 text-[11px] text-muted-foreground">{sourceNote}</p>}
       </ClockwiseActionCard>
     );

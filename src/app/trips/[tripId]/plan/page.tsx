@@ -5,6 +5,8 @@ import { getTripById } from "@/lib/trip";
 import { DESTINATION_PHOTOS } from "@/lib/photos";
 import { formatDateRange } from "@/lib/format";
 import { avatarColor } from "@/lib/avatar";
+import { TripMapLoader } from "@/components/map/TripMapLoader";
+import { buildDestinationMarkers, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
 
 export default async function PlanOverviewPage({
   params,
@@ -15,12 +17,25 @@ export default async function PlanOverviewPage({
   const trip = await getTripById(tripId);
   const stops = [...trip.destinations].sort((a, b) => a.order - b.order);
   const middleStops = stops.filter((s) => s.name !== "Delhi");
+  const mapMarkers = buildDestinationMarkers(stops);
+  const unmapped = destinationsWithoutCoordinates(stops);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <TripMapLoader
+        markers={mapMarkers}
+        heightClassName="h-72"
+        emptyStateMessage="No mapped locations yet — add destinations with a place search to see them here."
+      />
+      {unmapped.length > 0 && mapMarkers.length > 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Not shown on the map (no stored location yet): {unmapped.map((d) => d.name).join(", ")}.
+        </p>
+      )}
+
       {middleStops.length > 0 && (
         <>
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="mt-6 grid grid-cols-2 gap-2.5">
             {middleStops.map((stop) => {
               const photo = DESTINATION_PHOTOS[stop.name];
               return (

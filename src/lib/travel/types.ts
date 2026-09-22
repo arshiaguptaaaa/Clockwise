@@ -26,6 +26,11 @@ export type RouteResult = {
   durationSeconds: number;
   provider: string;
   retrievedAt: string;
+  // The real routed path geometry, ordered start→end, downsampled for
+  // storage/render — present whenever the provider returns one (Geoapify
+  // does). Never fabricated: absent rather than a fake straight line when
+  // a provider doesn't supply geometry.
+  geometry?: LatLng[];
 };
 
 export type WeatherDay = {

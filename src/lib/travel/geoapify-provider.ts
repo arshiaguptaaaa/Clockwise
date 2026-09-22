@@ -161,8 +161,13 @@ export async function searchPlaceByText(query: string, near?: LatLng): Promise<P
   ];
 }
 
+type GeoapifyRouteGeometry = { type: "LineString" | "MultiLineString"; coordinates: number[][] | number[][][] };
+type GeoapifyRouteFeature = {
+  properties: { distance: number; time: number };
+  geometry?: GeoapifyRouteGeometry;
+};
 type GeoapifyRouteResponse = {
-  features?: { properties: { distance: number; time: number } }[];
+  features?: GeoapifyRouteFeature[];
 };
 
 const ROUTE_MODE_MAP: Record<TravelMode, string> = {
@@ -171,6 +176,28 @@ const ROUTE_MODE_MAP: Record<TravelMode, string> = {
   transit: "approximated_transit",
   bicycle: "bicycle",
 };
+
+const MAX_ROUTE_GEOMETRY_POINTS = 200;
+
+// GeoJSON coordinates are [lng, lat], and a MultiLineString nests one more
+// array level than a LineString — flatten both into a single ordered
+// lat/lng path, then decimate (keeping the real endpoints) so a ~5,000-
+// point turn-by-turn path from a long drive doesn't bloat every stored
+// ActionCard. This is still the actual routed path, just thinned for
+// rendering — never a fabricated straight line between two points.
+function extractRouteGeometry(geometry: GeoapifyRouteGeometry | undefined): LatLng[] | undefined {
+  if (!geometry) return undefined;
+  const segments = geometry.type === "MultiLineString" ? (geometry.coordinates as number[][][]) : [geometry.coordinates as number[][]];
+  const flat: LatLng[] = segments.flat().map(([lng, lat]) => ({ lat, lng }));
+  if (flat.length === 0) return undefined;
+  if (flat.length <= MAX_ROUTE_GEOMETRY_POINTS) return flat;
+
+  const stride = Math.ceil(flat.length / MAX_ROUTE_GEOMETRY_POINTS);
+  const decimated = flat.filter((_, i) => i % stride === 0);
+  const last = flat[flat.length - 1];
+  if (decimated[decimated.length - 1] !== last) decimated.push(last);
+  return decimated;
+}
 
 export async function getRoute(from: LatLng, to: LatLng, mode: TravelMode): Promise<RouteResult> {
   const key = requireApiKey();
@@ -182,14 +209,15 @@ export async function getRoute(from: LatLng, to: LatLng, mode: TravelMode): Prom
   const res = await fetch(`${ROUTING_URL}?${params}`);
   if (!res.ok) throw new Error(`Geoapify routing failed (${res.status})`);
   const data: GeoapifyRouteResponse = await res.json();
-  const props = data.features?.[0]?.properties;
-  if (!props) throw new Error("Geoapify returned no route for this pair of points");
+  const feature = data.features?.[0];
+  if (!feature) throw new Error("Geoapify returned no route for this pair of points");
 
   return {
     mode,
-    distanceMeters: props.distance,
-    durationSeconds: props.time,
+    distanceMeters: feature.properties.distance,
+    durationSeconds: feature.properties.time,
     provider: "geoapify",
     retrievedAt: nowIso(),
+    geometry: extractRouteGeometry(feature.geometry),
   };
 }

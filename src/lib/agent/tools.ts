@@ -574,7 +574,7 @@ async function searchPlacesTool(input: Record<string, unknown>, ctx: AgentContex
   const query = (input.query as string)?.trim();
   if (!query) return { output: "A place name is required." };
   if (!isGeoapifyConfigured()) {
-    return { output: "Live place search isn't configured yet (GEOAPIFY_API_KEY missing) — I can only reason from stored trip state." };
+    return { output: "Live place search is temporarily unavailable — I can only reason from stored trip state right now." };
   }
 
   const cityPoint = await resolveTripCityPoint(ctx.trip);
@@ -596,7 +596,13 @@ async function searchPlacesTool(input: Record<string, unknown>, ctx: AgentContex
     status: "CONFIRMED",
     data: {
       title: query,
-      places: results.map((r) => ({ name: r.name, formattedAddress: r.formattedAddress, distanceMeters: r.distanceMeters })),
+      places: results.map((r) => ({
+        name: r.name,
+        formattedAddress: r.formattedAddress,
+        distanceMeters: r.distanceMeters,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      })),
       provider: results[0].provider,
       retrievedAt: results[0].retrievedAt,
     },
@@ -624,7 +630,7 @@ async function resolveSearchPoint(
 
 async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
-    return { output: "Live hotel search isn't configured yet (GEOAPIFY_API_KEY missing)." };
+    return { output: "Live hotel search is temporarily unavailable." };
   }
   const located = await resolveSearchPoint((input.near as string | undefined)?.trim(), ctx);
   if ("error" in located) return { output: located.error };
@@ -644,7 +650,13 @@ async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContex
     data: {
       title: `Hotels near ${located.label}`,
       context: "Real names and locations only — live room rates/availability aren't connected yet.",
-      places: results.map((r) => ({ name: r.name, formattedAddress: r.formattedAddress, distanceMeters: r.distanceMeters })),
+      places: results.map((r) => ({
+        name: r.name,
+        formattedAddress: r.formattedAddress,
+        distanceMeters: r.distanceMeters,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      })),
       provider: results[0]?.provider,
       retrievedAt: results[0]?.retrievedAt,
     },
@@ -661,7 +673,7 @@ async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContex
 
 async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
-    return { output: "Live nearby search isn't configured yet (GEOAPIFY_API_KEY missing)." };
+    return { output: "Live nearby search is temporarily unavailable." };
   }
   const category = (input.category as string)?.trim();
   if (!category || !(category in NEARBY_CATEGORIES)) {
@@ -685,7 +697,13 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     status: "CONFIRMED",
     data: {
       title: `${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
-      places: results.map((r) => ({ name: r.name, formattedAddress: r.formattedAddress, distanceMeters: r.distanceMeters })),
+      places: results.map((r) => ({
+        name: r.name,
+        formattedAddress: r.formattedAddress,
+        distanceMeters: r.distanceMeters,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      })),
       provider: results[0]?.provider,
       retrievedAt: results[0]?.retrievedAt,
     },
@@ -699,7 +717,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
 
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
-    return { output: "Live routing isn't configured yet (GEOAPIFY_API_KEY missing) — I can't measure real distance/time." };
+    return { output: "Live routing is temporarily unavailable — I can't measure real distance/time right now." };
   }
   const fromText = (input.from as string)?.trim();
   const toText = (input.to as string)?.trim();
@@ -734,6 +752,9 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
         toLabel: to.label,
         distanceMeters: route.distanceMeters,
         durationSeconds: route.durationSeconds,
+        from: from.point,
+        to: to.point,
+        geometry: route.geometry,
       },
       provider: route.provider,
       retrievedAt: route.retrievedAt,

@@ -39,6 +39,8 @@ export type ActionCardData = {
     name: string;
     formattedAddress: string | null;
     distanceMeters: number | null;
+    latitude?: number | null;
+    longitude?: number | null;
   }[];
   route?: {
     mode: string;
@@ -46,6 +48,11 @@ export type ActionCardData = {
     toLabel: string;
     distanceMeters: number;
     durationSeconds: number;
+    from?: { lat: number; lng: number };
+    to?: { lat: number; lng: number };
+    // Real routed path geometry when the provider returned one — never a
+    // fabricated straight line (see src/lib/travel/geoapify-provider.ts).
+    geometry?: { lat: number; lng: number }[];
   };
   weather?: {
     temperatureC: number;

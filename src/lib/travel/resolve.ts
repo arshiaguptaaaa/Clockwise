@@ -140,7 +140,7 @@ export async function resolveTripLocationText(
   if (storedDestination) return storedDestination;
 
   if (!isGeoapifyConfigured()) {
-    return { error: "Live location search isn't configured yet (GEOAPIFY_API_KEY missing)." };
+    return { error: "Live location search is temporarily unavailable." };
   }
 
   const commitment = await prisma.commitment.findFirst({
