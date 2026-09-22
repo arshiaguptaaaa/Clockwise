@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getUberConnection } from "@/lib/uber/connection";
+import { getUberConnectionStatus } from "@/lib/uber/connection";
 import { getMissingUberEnvVars } from "@/lib/uber/oauth";
 import { disconnectUber } from "@/app/integration-actions";
 
@@ -20,12 +20,14 @@ export async function ConnectedServices({ tripId, viewerId }: { tripId: string; 
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
   const isOrganiser = viewerId === trip.createdBy;
 
-  const [connection, organiser] = await Promise.all([
-    getUberConnection(trip.createdBy),
+  const [{ status, connection }, organiser] = await Promise.all([
+    getUberConnectionStatus(trip.createdBy),
     prisma.user.findUniqueOrThrow({ where: { id: trip.createdBy } }),
   ]);
-  const connected = Boolean(connection && !connection.revokedAt);
-  const missingVars = isOrganiser && !connected ? getMissingUberEnvVars() : [];
+  // Only computed for display when actually NOT_CONFIGURED — the four
+  // states above are the single source of truth, this is just the detail
+  // list for one of them.
+  const missingVars = status === "NOT_CONFIGURED" ? getMissingUberEnvVars() : [];
 
   return (
     <div className="shrink-0 border-b border-border px-4 py-3">
@@ -35,23 +37,38 @@ export async function ConnectedServices({ tripId, viewerId }: { tripId: string; 
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Uber</p>
-          {connected ? (
+          {status === "CONNECTED" && (
             <p className="truncate text-xs text-muted-foreground">
               ✓ Connected as {connection!.providerName || maskEmail(connection!.providerEmail)}
             </p>
-          ) : isOrganiser ? (
-            <p className="text-xs text-muted-foreground">
-              Connect your Uber account to let Clockwise prepare and request rides after your approval.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Not connected — only {organiser.name} (trip organiser) can connect Uber.
-            </p>
+          )}
+          {status === "REAUTH_REQUIRED" &&
+            (isOrganiser ? (
+              <p className="text-xs text-warning">
+                Your Uber connection expired and needs to be renewed to request rides again.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {organiser.name}&apos;s Uber connection expired — only they can reconnect it.
+              </p>
+            ))}
+          {status === "NOT_CONNECTED" &&
+            (isOrganiser ? (
+              <p className="text-xs text-muted-foreground">
+                Connect your Uber account to let Clockwise prepare and request rides after your approval.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Not connected — only {organiser.name} (trip organiser) can connect Uber.
+              </p>
+            ))}
+          {status === "NOT_CONFIGURED" && (
+            <p className="text-xs text-muted-foreground">Uber isn&apos;t set up for this deployment yet.</p>
           )}
         </div>
-        {isOrganiser && missingVars.length === 0 && (
+        {isOrganiser && status !== "NOT_CONFIGURED" && (
           <>
-            {connected ? (
+            {status === "CONNECTED" ? (
               <form action={disconnectUber.bind(null, tripId)}>
                 <button
                   type="submit"
@@ -65,7 +82,7 @@ export async function ConnectedServices({ tripId, viewerId }: { tripId: string; 
                 href={`/api/integrations/uber/connect?tripId=${tripId}`}
                 className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition-opacity hover:opacity-90"
               >
-                Connect Uber
+                {status === "REAUTH_REQUIRED" ? "Reconnect Uber" : "Connect Uber"}
               </a>
             )}
           </>

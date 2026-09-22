@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { updateCardStatus, decodeCard, encodeCard } from "@/lib/action-cards";
 import { getOrganiserAuth, resolveRoute, assignVehicles, isFailure } from "@/lib/transport";
-import { getUberConnection } from "@/lib/uber/connection";
+import { getUberConnection, getUberConnectionStatus } from "@/lib/uber/connection";
 import {
   mobilityProvider,
   type VehicleOption,
@@ -61,7 +61,7 @@ export async function getTransportPlanState(planId: string): Promise<TransportPl
   const plan = await getPlanOrThrow(planId);
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: plan.tripId } });
   const organiser = await prisma.user.findUniqueOrThrow({ where: { id: trip.createdBy } });
-  const connection = await getUberConnection(trip.createdBy);
+  const { status: connectionStatus } = await getUberConnectionStatus(trip.createdBy);
   const viewerId = await getCurrentUserId();
 
   const participants = await prisma.transportParticipant.findMany({
@@ -102,7 +102,10 @@ export async function getTransportPlanState(planId: string): Promise<TransportPl
     })),
     organiserId: trip.createdBy,
     organiserName: organiser.name,
-    organiserConnected: Boolean(connection && !connection.revokedAt),
+    // REAUTH_REQUIRED counts as not-connected here too — a stale
+    // connection with no usable refresh path can't actually request
+    // rides, so the UI shouldn't imply it can.
+    organiserConnected: connectionStatus === "CONNECTED",
     viewerIsOrganiser: viewerId === trip.createdBy,
     sandbox: (process.env.UBER_ENV ?? "sandbox") === "sandbox",
   };
