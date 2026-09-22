@@ -78,6 +78,47 @@ enum CardStatus {
   EXPIRED
 }
 
+// What kind of external/irreversible action a Proposal is asking the group
+// to build consensus on, then asking the organiser to hard-confirm. New
+// integrations (bookings, payments, etc.) add a case here rather than
+// inventing a parallel approval mechanism — see Proposal model comment.
+enum ProposalType {
+  UBER_RIDE
+  ITINERARY_CHANGE
+  BOOKING
+  DOCUMENT_UPDATE
+  OTHER
+}
+
+// PROPOSED: Clockwise has drafted this from chat but hasn't posted it to
+//   the group yet (reserved for future use; today proposals are created
+//   already AWAITING_APPROVAL — see Proposal model comment).
+// AWAITING_APPROVAL: posted to the group room, members are voting.
+// APPROVED / REJECTED: group consensus reached (all-responded-or-deadline
+//   logic lives in application code, not this enum).
+// CONFIRMED: the organiser has explicitly hard-confirmed — group consensus
+//   alone can never reach this state.
+// EXECUTED / FAILED: the external action (e.g. requestRide) was actually
+//   attempted after CONFIRMED, and succeeded or failed.
+// CANCELLED: withdrawn before execution, by the organiser or a superseding
+//   proposal.
+enum ProposalStatus {
+  PROPOSED
+  AWAITING_APPROVAL
+  APPROVED
+  REJECTED
+  CONFIRMED
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id    String @id @default(cuid())
   name  String
@@ -125,6 +166,7 @@ model Trip {
   invites          Invite[]
   transportPlans   TransportPlan[]
   escalationEvents EscalationEvent[]
+  proposals        Proposal[]
 
   createdAt DateTime @default(now())
 }
@@ -174,6 +216,8 @@ model TripMember {
 
   privateProfile        PrivateProfile?
   transportParticipations TransportParticipant[]
+  proposalApprovals     ProposalApproval[]
+  proposalReminders     ProposalReminder[]
 
   @@unique([tripId, userId])
 }
@@ -271,6 +315,11 @@ model Message {
   trip      Trip  @relation(fields: [tripId], references: [id])
   sender    User? @relation("MessageSender", fields: [senderId], references: [id])
   recipient User? @relation("MessageRecipient", fields: [recipientId], references: [id])
+
+  // Reverse side of Proposal.groupMessageId — the group-room card that
+  // surfaced this proposal, if any. A proposal always has exactly one
+  // originating message; a message has at most one proposal.
+  proposal Proposal?
 }
 
 model Decision {
@@ -583,4 +632,101 @@ model EscalationEvent {
   resolvedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+// The one reusable lifecycle for every group-impacting, potentially
+// external/irreversible action Clockwise proposes — Uber rides today,
+// bookings/payments/itinerary changes later. Deliberately generic so a new
+// integration adds a ProposalType case, not a parallel approval mechanism.
+//
+// Hard rule this model exists to enforce: member approvals (ProposalApproval
+// rows) can only move a proposal to APPROVED/REJECTED. Only an explicit
+// organiserConfirmedBy/organiserConfirmedAt write — never inferred from
+// approvals, never automatic — can move it to CONFIRMED, which is the one
+// state application code is allowed to treat as "safe to actually execute."
+model Proposal {
+  id     String         @id @default(cuid())
+  tripId String
+  trip   Trip           @relation(fields: [tripId], references: [id])
+  type   ProposalType
+  status ProposalStatus @default(AWAITING_APPROVAL)
+
+  title   String
+  summary String
+  // JSON-encoded, shape depends on `type` (see src/lib/proposals.ts) —
+  // follows the same encode/decode-via-String convention as
+  // Message.cardData, not a Prisma Json column, for consistency with the
+  // rest of this schema. Holds exactly what requirement #7 says the
+  // organiser's hard-confirm card must show: provider, people affected,
+  // timing, destination, price, cancellation implications.
+  payload String
+
+  createdBy String
+
+  // The group-room card that surfaced this proposal. Optional so a
+  // Proposal can be created before its announcing Message is written.
+  groupMessageId String?  @unique
+  groupMessage   Message? @relation(fields: [groupMessageId], references: [id])
+
+  // Self-relation: a revised proposal (e.g. pickup time changed after
+  // feedback) points back at what it replaced, so "what changed from the
+  // previous proposal" is always answerable without diffing free text.
+  supersedesId String?   @unique
+  supersedes   Proposal? @relation("ProposalRevision", fields: [supersedesId], references: [id])
+  supersededBy Proposal? @relation("ProposalRevision")
+
+  // Set ONLY by the organiser hard-confirm server action (requirement #6/7).
+  // organiserConfirmedBy is a userId, deliberately not constrained to the
+  // trip's createdBy at the schema level — enforced in application code,
+  // matching how Uber's own organiser-only connect flow already checks
+  // trip.createdBy in src/app/api/integrations/uber/connect/route.ts.
+  organiserConfirmedBy String?
+  organiserConfirmedAt DateTime?
+
+  // Populated once the actual external call (e.g. requestRide) has been
+  // attempted post-confirmation.
+  executedAt      DateTime?
+  executionResult String?
+  failureReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  approvals ProposalApproval[]
+  reminders ProposalReminder[]
+}
+
+// One traveller's vote on a Proposal. @@unique means re-voting updates the
+// same row instead of accumulating duplicate votes.
+model ProposalApproval {
+  id           String   @id @default(cuid())
+  proposalId   String
+  proposal     Proposal @relation(fields: [proposalId], references: [id])
+  tripMemberId String
+  tripMember   TripMember @relation(fields: [tripMemberId], references: [id])
+
+  decision    ApprovalDecision @default(PENDING)
+  respondedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([proposalId, tripMemberId])
+}
+
+// A sent reminder for one traveller's outstanding vote on one proposal.
+// Existence of a row at a given tier is the dedup check — application code
+// must look for an existing row at the current tier before creating
+// another, the same insert-before-mutate pattern AgentLock already uses to
+// prevent duplicate/concurrent effects (see src/lib/agent-lock.ts).
+model ProposalReminder {
+  id           String   @id @default(cuid())
+  proposalId   String
+  proposal     Proposal @relation(fields: [proposalId], references: [id])
+  tripMemberId String
+  tripMember   TripMember @relation(fields: [tripMemberId], references: [id])
+
+  tier   Int      @default(1)
+  sentAt DateTime @default(now())
+
+  @@unique([proposalId, tripMemberId, tier])
 }
