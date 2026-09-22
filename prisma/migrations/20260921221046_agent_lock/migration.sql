@@ -1,0 +1,5 @@
+-- CreateTable
+CREATE TABLE "AgentLock" (
+    "key" TEXT NOT NULL PRIMARY KEY,
+    "lockedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

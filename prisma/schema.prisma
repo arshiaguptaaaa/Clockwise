@@ -1,0 +1,586 @@
+// Clockwise data model.
+// Structured Trip State lives here — chat is an input to this model, never the model itself.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Insert-to-acquire / delete-to-release mutex, keyed by conversation
+// (`${tripId}:${channel}:${recipientId ?? "group"}`). Lets a human keep
+// composing while a previous Clockwise turn on the SAME conversation is
+// still in flight, without letting two agent turns run concurrently and
+// read/write overlapping state — the second turn simply waits, then reads
+// the fully-updated context (including the first turn's own reply)
+// before it runs. DB-backed rather than in-memory so it's safe across
+// serverless instances, not just one Node process.
+model AgentLock {
+  key      String   @id
+  lockedAt DateTime @default(now())
+}
+
+enum Visibility {
+  GROUP
+  PRIVATE
+  AGENT_ONLY
+}
+
+enum Channel {
+  GROUP
+  PRIVATE
+}
+
+enum ClaimType {
+  TENTATIVE
+  PREFERENCE
+  HARD_CONSTRAINT
+  DECISION
+}
+
+enum DecisionStatus {
+  CANDIDATE
+  UNRESOLVED
+  CONFIRMED
+}
+
+enum CommitmentStatus {
+  ON_TRACK
+  AT_RISK
+  MISSED
+  RECOVERING
+}
+
+enum CardType {
+  TRANSPORT
+  PAYMENT
+  BOOKING
+  REMINDER
+  ETA_CHANGE
+  DOCUMENT
+  DECISION
+  RECOVERY
+  // Informational-only — no PENDING/CONFIRMED action lifecycle, rendered
+  // read-only regardless of cardStatus. Real live-search results only,
+  // never fabricated.
+  PLACES
+  ROUTE
+  WEATHER
+}
+
+enum CardStatus {
+  PENDING
+  CONFIRMED
+  DISMISSED
+  EXPIRED
+}
+
+model User {
+  id    String @id @default(cuid())
+  name  String
+  phone String?
+  email String?
+
+  // Explicit, visible opt-in (My Clockwise → Critical Trip Alerts) — never
+  // silently enrolled. Reuses the existing `phone` field as the call
+  // target rather than adding a second phone column.
+  voiceEscalationOptIn Boolean @default(false)
+
+  memberships         TripMember[]
+  sentMessages        Message[]        @relation("MessageSender")
+  receivedMessages    Message[]        @relation("MessageRecipient")
+  privateProfiles     PrivateProfile[]
+  permissions         Permission[]
+  mobilityConnections MobilityConnection[]
+  escalationEvents    EscalationEvent[]
+
+  createdAt DateTime @default(now())
+}
+
+model Trip {
+  id            String    @id @default(cuid())
+  name          String
+  // Nullable: a trip can exist before dates are decided ("Not sure yet").
+  coreStartDate DateTime?
+  coreEndDate   DateTime?
+  status        String    @default("PLANNING")
+  createdBy     String
+  // True only for the one seeded Central Europe trip. This is how
+  // getDemoTrip() finds "the" demo trip reliably regardless of how many
+  // real trips exist — never inferred from name or creation order.
+  isDemo        Boolean   @default(false)
+
+  destinations   Destination[]
+  members        TripMember[]
+  messages       Message[]
+  decisions      Decision[]
+  commitments    Commitment[]
+  bookings       Booking[]
+  journeys       Journey[]
+  permissions    Permission[]
+  auditLog       AuditLog[]
+  invites          Invite[]
+  transportPlans   TransportPlan[]
+  escalationEvents EscalationEvent[]
+
+  createdAt DateTime @default(now())
+}
+
+// Structured identity follows the ONE canonical shape (src/lib/location/
+// types.ts CanonicalPlace) — every field here maps 1:1 to it. Nullable
+// throughout: a destination added as free-text fallback (autocomplete
+// returned nothing, or the search API was unreachable) has no verified
+// identity — trip creation must still work in that case.
+model Destination {
+  id          String    @id @default(cuid())
+  tripId      String
+  trip        Trip      @relation(fields: [tripId], references: [id])
+  name        String
+  displayName String?
+  city        String?
+  region      String?
+  country     String?
+  countryCode String?
+  latitude    Float?
+  longitude   Float?
+  // Stable id from whichever provider resolved it — see `provider`.
+  placeId     String?
+  // "open-meteo" | "geoapify" | null (null = free-text fallback, never
+  // geocoded). Lets downstream code know which system identified this
+  // place without guessing from field presence alone.
+  provider    String?
+  order     Int
+  startDate DateTime?
+  endDate   DateTime?
+}
+
+model TripMember {
+  id     String @id @default(cuid())
+  tripId String
+  userId String
+  trip   Trip   @relation(fields: [tripId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Nullable: a newly-joined real traveller hasn't necessarily told
+  // Clockwise their dates yet — that's private info they share in My
+  // Clockwise, not something the organiser enters on their behalf.
+  participationStart DateTime?
+  participationEnd   DateTime?
+  departureCity      String?
+  role               String    @default("TRAVELLER")
+
+  privateProfile        PrivateProfile?
+  transportParticipations TransportParticipant[]
+
+  @@unique([tripId, userId])
+}
+
+model Invite {
+  id               String    @id @default(cuid())
+  tripId           String
+  trip             Trip      @relation(fields: [tripId], references: [id])
+  // Short, URL-safe, human-shareable — distinct from the internal cuid()
+  // ids used everywhere else in this schema.
+  token            String    @unique
+  inviteeName      String
+  contact          String?   // email or phone, free text for MVP
+  invitedBy        String    // userId of the organiser who added them
+  status           String    @default("PENDING") // PENDING | ACCEPTED
+  // Set only once someone actually opens the link and joins — an Invite
+  // deliberately has no User/TripMember until that moment (see build
+  // notes: no "ghost" members before someone has actually joined).
+  acceptedByUserId String?
+  createdAt        DateTime  @default(now())
+  acceptedAt       DateTime?
+}
+
+model PrivateProfile {
+  id     String @id @default(cuid())
+  tripId String
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  tripMember TripMember @relation(fields: [tripId, userId], references: [tripId, userId])
+
+  budgetCeiling    Int?
+  budgetVisibility Visibility @default(AGENT_ONLY)
+
+  hardCommitments String?
+  roomPreference  String?
+  roomSharingWith String?
+  seatPreference  String?
+  accessibilityNeeds String?
+
+  passportStatus String?
+  visaStatus     String?
+
+  paymentPreference String?
+
+  @@unique([tripId, userId])
+}
+
+model Permission {
+  id             String   @id @default(cuid())
+  tripId         String
+  userId         String
+  trip           Trip     @relation(fields: [tripId], references: [id])
+  user           User     @relation(fields: [userId], references: [id])
+
+  permissionType String
+  visibility     Visibility
+  purpose        String?
+  startTime      DateTime?
+  endTime        DateTime?
+  revokedAt      DateTime?
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  tripId      String
+  senderId    String
+  channel     Channel
+  content     String
+  timestamp   DateTime    @default(now())
+
+  // PRIVATE messages need to know whose thread they belong to (both a
+  // user's own message about themselves, and Clockwise's replies to that
+  // specific user, share the same recipientId). Null for GROUP messages.
+  recipientId String?
+
+  // Present only when this message is an embedded Clockwise action card
+  // rather than plain conversation. cardData is a JSON-encoded
+  // ActionCardData payload (see src/lib/action-cards.ts).
+  cardType   CardType?
+  cardData   String?
+  cardStatus CardStatus?
+
+  // Debug/audit trail of which agent tool(s) fired for this turn, if any.
+  // JSON array of {name, input}. Never rendered in the UI.
+  toolCalls  String?
+
+  // True only for a Clockwise reply that represents an exhausted-retry
+  // provider failure (not a normal "I don't know" answer). Drives the
+  // Retry button in the UI. Safe to retry: this state is only ever set
+  // when the model call itself failed, which by construction happens
+  // before any tool in that turn could have executed.
+  failed     Boolean     @default(false)
+
+  trip      Trip  @relation(fields: [tripId], references: [id])
+  sender    User? @relation("MessageSender", fields: [senderId], references: [id])
+  recipient User? @relation("MessageRecipient", fields: [recipientId], references: [id])
+}
+
+model Decision {
+  id               String         @id @default(cuid())
+  tripId           String
+  trip             Trip           @relation(fields: [tripId], references: [id])
+  type             ClaimType
+  value            String
+  confidence       String
+  status           DecisionStatus @default(CANDIDATE)
+  sourceMessageIds String
+  confirmedBy      String?
+  createdAt        DateTime       @default(now())
+}
+
+model Commitment {
+  id             String           @id @default(cuid())
+  tripId         String
+  trip           Trip             @relation(fields: [tripId], references: [id])
+  name           String
+  targetTime     DateTime
+  location       String
+  participantIds String
+  hardThreshold  DateTime?
+  nextCheckpoint String?
+  status         CommitmentStatus @default(ON_TRACK)
+
+  transportPlans   TransportPlan[]
+  escalationEvents EscalationEvent[]
+}
+
+model Booking {
+  id             String    @id @default(cuid())
+  tripId         String
+  trip           Trip      @relation(fields: [tripId], references: [id])
+  type           String
+  status         String
+  participantIds String
+  payerId        String?
+  amount         Int?
+  currency       String?
+  provider       String
+  confirmationId String?
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  // Structured location, populated once a real booking (e.g. a hotel) has
+  // a verified place behind it — lets "where is our hotel"/"how far is
+  // dinner from the hotel" resolve from stored coordinates instead of
+  // asking the LLM to guess. Null until a real booking carries a real
+  // address; never backfilled with a guess. Follows the same canonical
+  // shape as Destination (src/lib/location/types.ts CanonicalPlace).
+  // `locationProvider` (not `provider` — that field already means the
+  // booking/payment provider, e.g. "uber") records which geocoder
+  // resolved this place.
+  placeName        String?
+  formattedAddress String?
+  city             String?
+  region           String?
+  country          String?
+  countryCode      String?
+  latitude         Float?
+  longitude        Float?
+  providerPlaceId  String?
+  locationProvider String?
+
+  rideOrder RideOrder?
+}
+
+model Journey {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  name        String
+  origin      String
+  destination String
+  startTime   DateTime
+  status      String
+
+  // Architectural wire-up only for this pass — lets a RideOrder become the
+  // start of a Live Journey later without inventing a parallel tracking
+  // model. No Live Journey UI reads this yet.
+  rideOrderId String?  @unique
+  rideOrder   RideOrder? @relation(fields: [rideOrderId], references: [id])
+
+  participants JourneyParticipant[]
+}
+
+model JourneyParticipant {
+  id                  String           @id @default(cuid())
+  journeyId           String
+  userId              String
+  journey             Journey          @relation(fields: [journeyId], references: [id])
+
+  vehicleId           String?
+  locationVisibility  Visibility       @default(AGENT_ONLY)
+  currentMockLocation String?
+  eta                 DateTime?
+  readinessStatus     CommitmentStatus @default(ON_TRACK)
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  tripId         String
+  trip           Trip     @relation(fields: [tripId], references: [id])
+  actorId        String
+  actionType     String
+  payloadSummary String
+  confirmedAt    DateTime @default(now())
+}
+
+// Early-access demand-test data — deliberately separate from Trip/User so
+// it can never be seeded or contaminated by demo/dev trip data. Every row
+// here must correspond to a real visitor action, never a fixture.
+model WaitlistSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  source    String?
+  medium    String?
+  campaign  String?
+  referrer  String?
+  createdAt DateTime @default(now())
+}
+
+model PageView {
+  id        String   @id @default(cuid())
+  page      String
+  visitorId String
+  source    String?
+  medium    String?
+  campaign  String?
+  referrer  String?
+  createdAt DateTime @default(now())
+}
+
+// Singleton row — reach/impressions live outside Clockwise (Instagram,
+// LinkedIn, etc.) and can only be entered by a human who looked at those
+// platforms' own dashboards, never inferred from our own traffic data.
+model ExternalReachMetric {
+  id                   String   @id @default(cuid())
+  instagramReach       Int?
+  instagramImpressions Int?
+  linkedinImpressions  Int?
+  communityReach       Int?
+  adSpend              Float?
+  updatedAt            DateTime @updatedAt
+}
+
+// A user's link to an external mobility provider (Uber). Tokens are
+// encrypted at rest (src/lib/uber/crypto.ts) — this row is the only place
+// an Uber credential exists outside Uber's own servers, and it is never
+// read by anything other than deterministic server code (never by Gemini,
+// never serialized to the client).
+model MobilityConnection {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  provider         String // "uber" for this pass
+  providerUserId   String? // Uber's own account id, fetched via /me once connected
+  providerName     String? // display name from Uber's profile, safe to show in UI
+  providerEmail    String? // from Uber's profile, safe to show in UI (masked in UI)
+  scope            String
+  encryptedAccessToken  String
+  encryptedRefreshToken String?
+  expiresAt        DateTime
+
+  connectedAt DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@unique([userId, provider])
+}
+
+// One coordinated transport need for a subset of the trip's travellers —
+// created from a Commitment ("Dinner at 8, leave at 7:15") once the group
+// confirms who is actually leaving together. A TransportPlan may resolve
+// into multiple RideOrders (one per vehicle) because Uber has no concept
+// of "book two cars for one party" as a single unit.
+model TransportPlan {
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id])
+
+  commitmentId String?
+  commitment   Commitment? @relation(fields: [commitmentId], references: [id])
+
+  createdBy String // userId who initiated (agent-prepared or human-initiated)
+
+  // The organiser whose connected MobilityConnection authorises and pays
+  // for every RideOrder under this plan (see product decision: one
+  // authorised requester per multi-car plan, not per-rider accounts).
+  requesterConnectionId String?
+
+  pickup      String
+  destination String
+  partySize   Int
+
+  // DRAFT (participants being confirmed) -> OPTIONS_READY (real estimate
+  // fetched) -> CONFIRMED (all ride orders succeeded) -> PARTIAL (some
+  // failed) -> FAILED -> CANCELLED
+  status String @default("DRAFT")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rideOrders   RideOrder[]
+  participants TransportParticipant[]
+}
+
+// One real (sandbox or production) Uber ride request — always exactly one
+// vehicle. Never created except by an explicit human confirmation server
+// action; Gemini can read but never write this model.
+model RideOrder {
+  id              String        @id @default(cuid())
+  transportPlanId String
+  transportPlan   TransportPlan @relation(fields: [transportPlanId], references: [id])
+
+  // Mirrors this ride into the existing Booking/action-card system so the
+  // rest of the app's rendering doesn't need a parallel code path.
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  provider       String  @default("uber")
+  providerRideId String? // Uber's request_id once actually requested
+  productId      String? // Uber product_id chosen for this vehicle
+  productName    String? // e.g. "UberX" — cached for display without a refetch
+
+  // REQUESTING | PROCESSING | ACCEPTED | ARRIVING | IN_PROGRESS | COMPLETED
+  // | RIDER_CANCELLED | DRIVER_CANCELLED | FAILED
+  status String @default("REQUESTING")
+
+  fareEstimateLow  Float?
+  fareEstimateHigh Float?
+  fareAmount       Float? // settled fare once available from a receipt
+  currency         String?
+  pickupEtaMinutes Int?
+  surgeMultiplier  Float?
+
+  // Real, non-fabricated failure detail — shown to the user, never hidden
+  // behind a generic "something went wrong."
+  errorMessage String?
+
+  // Guards double-submission (e.g. a double-clicked Confirm button) — the
+  // confirm server action upserts on this key instead of blindly creating.
+  idempotencyKey String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants TransportParticipant[]
+  journey      Journey?
+}
+
+// Which trip member is part of a TransportPlan's party, and — once vehicles
+// are assigned — which specific RideOrder (vehicle) they're riding in.
+model TransportParticipant {
+  id              String        @id @default(cuid())
+  transportPlanId String
+  transportPlan   TransportPlan @relation(fields: [transportPlanId], references: [id])
+
+  tripMemberId String
+  tripMember   TripMember @relation(fields: [tripMemberId], references: [id])
+
+  // CONFIRMED (leaving together) | LEAVING_LATER | PENDING
+  status String @default("PENDING")
+
+  rideOrderId String?
+  rideOrder   RideOrder? @relation(fields: [rideOrderId], references: [id])
+
+  @@unique([transportPlanId, tripMemberId])
+}
+
+// One instance of the deterministic escalation policy acting on a single
+// traveller's expected action for a single Commitment — never created by
+// Gemini deciding "I feel like calling someone." A voice call only ever
+// happens after: the traveller opted in (User.voiceEscalationOptIn), a
+// real hardThreshold exists on the Commitment, acknowledgement is still
+// missing, and lower-tier reminders have already failed.
+model EscalationEvent {
+  id           String     @id @default(cuid())
+  tripId       String
+  trip         Trip       @relation(fields: [tripId], references: [id])
+  commitmentId String
+  commitment   Commitment @relation(fields: [commitmentId], references: [id])
+  travellerId  String
+  traveller    User       @relation(fields: [travellerId], references: [id])
+
+  expectedActionAt DateTime
+  hardThresholdAt  DateTime?
+  reminderSentAt   DateTime?
+  acknowledgedAt   DateTime?
+
+  // PENDING -> REMINDED -> ESCALATING -> CALLED -> RESOLVED, or FAILED at
+  // any point a call attempt itself couldn't be placed.
+  status String @default("PENDING")
+
+  // DEMO rows are simulated outcomes for demonstrating the downstream
+  // reasoning (see spec) — never rendered as if they were a real call.
+  mode String @default("DEMO") // DEMO | REAL
+
+  provider              String? // "gnani" once a real call is placed
+  providerConversationId String?
+  callStatus            String? // provider's raw call status
+  callTranscript         String?
+  callDisposition        String? // e.g. NOT_LEFT, LEFT, DELAYED — provider-configured category
+  estimatedDelayMinutes  Int?
+  failureReason          String? // set only when the provider genuinely could not place/complete the call
+
+  triggeredAt DateTime?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
