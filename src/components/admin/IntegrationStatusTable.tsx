@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { runIntegrationChecks } from "@/app/admin/integrations/actions";
 import type { IntegrationStatus } from "@/lib/integration-status";
 
-const PROVIDER_NAMES = ["Gemini", "Open-Meteo Weather", "Geoapify", "Resend", "Uber", "Gnani"];
+const PROVIDER_NAMES = ["Gemini", "Open-Meteo Weather", "Geoapify", "Resend", "Uber", "Gnani", "Blob Storage"];
 
 const STATUS_STYLE: Record<string, string> = {
   LIVE: "bg-success-tint text-success",

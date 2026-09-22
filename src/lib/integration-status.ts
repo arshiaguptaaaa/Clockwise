@@ -4,10 +4,12 @@
 // effects — never sends a real email, never places a real call/ride) or
 // is transparent about why it can't be independently verified.
 import { GoogleGenAI } from "@google/genai";
+import { list as listBlobs } from "@vercel/blob";
 import { getWeather } from "@/lib/travel/open-meteo-weather";
 import { resolveLocationText, isGeoapifyConfigured } from "@/lib/travel/geoapify-provider";
 import { getMissingUberEnvVars } from "@/lib/uber/oauth";
 import { getMissingGnaniEnvVars } from "@/lib/voice-escalation/gnani-provider";
+import { isBlobConfigured } from "@/lib/attachments";
 
 export type IntegrationStatusValue = "LIVE" | "NOT_CONFIGURED" | "DEMO_MODE" | "ERROR";
 
@@ -133,6 +135,17 @@ async function checkGnani(): Promise<IntegrationStatus> {
   }
 }
 
+async function checkBlob(): Promise<IntegrationStatus> {
+  if (!isBlobConfigured()) return result("Blob Storage", "NOT_CONFIGURED", "BLOB_READ_WRITE_TOKEN is missing.");
+  try {
+    // Read-only — lists at most 1 blob, never uploads/deletes anything.
+    await listBlobs({ limit: 1 });
+    return result("Blob Storage", "LIVE", "Token authenticated via a real read-only list request.");
+  } catch (err) {
+    return result("Blob Storage", "ERROR", err instanceof Error ? err.message : "Unknown error.");
+  }
+}
+
 export async function checkAllIntegrations(): Promise<IntegrationStatus[]> {
   return Promise.all([
     checkGemini(),
@@ -141,5 +154,6 @@ export async function checkAllIntegrations(): Promise<IntegrationStatus[]> {
     checkResend(),
     checkUber(),
     checkGnani(),
+    checkBlob(),
   ]);
 }

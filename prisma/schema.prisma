@@ -137,6 +137,7 @@ model User {
   permissions         Permission[]
   mobilityConnections MobilityConnection[]
   escalationEvents    EscalationEvent[]
+  attachments         Attachment[]
 
   createdAt DateTime @default(now())
 }
@@ -167,6 +168,7 @@ model Trip {
   transportPlans   TransportPlan[]
   escalationEvents EscalationEvent[]
   proposals        Proposal[]
+  attachments      Attachment[]
 
   createdAt DateTime @default(now())
 }
@@ -320,6 +322,8 @@ model Message {
   // surfaced this proposal, if any. A proposal always has exactly one
   // originating message; a message has at most one proposal.
   proposal Proposal?
+
+  attachments Attachment[]
 }
 
 model Decision {
@@ -729,4 +733,43 @@ model ProposalReminder {
   sentAt DateTime @default(now())
 
   @@unique([proposalId, tripMemberId, tier])
+}
+
+// A trip file (ticket, confirmation, itinerary, photo, etc.) stored in
+// Vercel Blob. channel/recipientId deliberately mirror Message's own
+// shape exactly — PRIVATE/GROUP visibility for an attachment is the same
+// rule already enforced for private/group chat, not a parallel one. Every
+// read of blobUrl/blobPathname MUST go through the authorization check in
+// src/app/api/attachments/[id]/route.ts — these fields are never sent to a
+// client directly (see src/lib/attachments.ts for the full authorization
+// design). recipientId is a plain string, not a relation, the same choice
+// Message.recipientId already made for the identical shape.
+model Attachment {
+  id         String  @id @default(cuid())
+  tripId     String
+  trip       Trip    @relation(fields: [tripId], references: [id])
+  uploaderId String
+  uploader   User    @relation(fields: [uploaderId], references: [id])
+
+  channel     Channel
+  recipientId String?
+
+  // Nullable: an attachment can exist before (or without ever) being
+  // shared into a specific chat message — e.g. uploaded directly via
+  // /room/files. Not unique: a future message could reference more than
+  // one attachment.
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id])
+
+  // Sanitized for display only — never used to construct the Blob
+  // pathname (that's a random id, see src/lib/attachments.ts) to keep
+  // user-controlled text out of any storage key.
+  filename String
+  mimeType String
+  sizeBytes Int
+
+  blobUrl      String
+  blobPathname String
+
+  createdAt DateTime @default(now())
 }
