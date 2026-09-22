@@ -7,13 +7,23 @@
 // src/app/transport-actions.ts split.
 import type { ApprovalDecision, ProposalStatus, ProposalType } from "@prisma/client";
 import { prisma } from "./prisma";
+import { executeConfirmedProposal, type ExecutionResult } from "./proposal-execution";
 
 export type ProposalPayload = {
   provider?: string;
   peopleAffected?: string[];
   timing?: string;
+  // For ITINERARY_CHANGE: the place name/text to resolve into a canonical
+  // Destination on confirm (src/lib/proposal-execution.ts) — resolved the
+  // same way chat's location tools already do (stored destination first,
+  // then live geocode), never fabricated.
   destination?: string;
   price?: string;
+  // Structured amount/currency for BOOKING proposals — kept separate from
+  // the free-text `price` display string so proposal-execution.ts can
+  // write a real Booking.amount/currency without re-parsing prose.
+  amount?: number;
+  currency?: string;
   cancellationTerms?: string;
 };
 
@@ -33,12 +43,16 @@ const VOTABLE_STATUSES: ProposalStatus[] = ["AWAITING_APPROVAL", "APPROVED", "RE
 // Statuses organiserHardConfirm is allowed to act from. Deliberately
 // includes AWAITING_APPROVAL (not just APPROVED) — the organiser is the
 // final authority per spec, not gated on full member consensus first.
-// REJECTED, CANCELLED, EXECUTED and FAILED are excluded: a proposal the
-// group rejected, or one already cancelled/executed/failed, cannot be
-// hard-confirmed — a revised proposal must supersede it instead.
-const CONFIRMABLE_STATUSES: ProposalStatus[] = ["AWAITING_APPROVAL", "APPROVED"];
+// FAILED is included too: it means "confirmed, but the structured
+// mutation itself failed" (e.g. a transient geocoding error), which is
+// meant to be retryable by confirming again — not a dead end that forces
+// a whole new superseding proposal for a temporary failure. REJECTED,
+// CANCELLED and EXECUTED are excluded: a proposal the group rejected, or
+// one already cancelled/executed, cannot be (re-)confirmed — a revised
+// proposal must supersede it instead.
+const CONFIRMABLE_STATUSES: ProposalStatus[] = ["AWAITING_APPROVAL", "APPROVED", "FAILED"];
 
-const CANCELLABLE_STATUSES: ProposalStatus[] = ["AWAITING_APPROVAL", "APPROVED", "REJECTED"];
+const CANCELLABLE_STATUSES: ProposalStatus[] = ["AWAITING_APPROVAL", "APPROVED", "REJECTED", "FAILED"];
 
 export function isConfirmable(status: ProposalStatus): boolean {
   return CONFIRMABLE_STATUSES.includes(status);
@@ -211,7 +225,7 @@ export async function castApprovalVote(
 }
 
 export type OrganiserConfirmResult =
-  | { ok: true; alreadyConfirmed: boolean }
+  | { ok: true; alreadyExecuted: boolean; executionSummary?: string }
   | { ok: false; error: string };
 
 // THE hard-confirmation gate. Deliberately the only function in this file
@@ -220,6 +234,13 @@ export type OrganiserConfirmResult =
 // specifically (same check already used for Uber connect in
 // src/app/api/integrations/uber/connect/route.ts), not "any organiser-role
 // TripMember" — there is exactly one authority here, the trip creator.
+//
+// Confirmation and execution happen together, in this one call: the whole
+// point of the hard-confirm gate is that this is the last moment before
+// the structured mutation (or, for types wired in a later stage, the
+// external action) actually happens — not a separate third step. FAILED
+// is retryable (a transient resolution failure shouldn't strand a
+// proposal forever); EXECUTED is the one truly terminal success state.
 export async function organiserHardConfirm(proposalId: string, actorId: string): Promise<OrganiserConfirmResult> {
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
@@ -232,10 +253,11 @@ export async function organiserHardConfirm(proposalId: string, actorId: string):
     return { ok: false, error: "Only the trip organiser can give final confirmation." };
   }
 
-  if (proposal.status === "CONFIRMED") {
-    // Idempotent: a repeated/double-clicked confirm on an already-confirmed
-    // proposal succeeds without writing a second AuditLog entry.
-    return { ok: true, alreadyConfirmed: true };
+  if (proposal.status === "EXECUTED") {
+    // Idempotent: a repeated/double-clicked confirm on an already-executed
+    // proposal succeeds without re-running the mutation or writing a
+    // second AuditLog entry.
+    return { ok: true, alreadyExecuted: true };
   }
 
   if (proposal.supersededBy) {
@@ -254,7 +276,7 @@ export async function organiserHardConfirm(proposalId: string, actorId: string):
   if (claimed.count === 0) {
     // Lost a race with another confirm/cancel/vote — report what actually won.
     const latest = await prisma.proposal.findUniqueOrThrow({ where: { id: proposalId } });
-    if (latest.status === "CONFIRMED") return { ok: true, alreadyConfirmed: true };
+    if (latest.status === "EXECUTED") return { ok: true, alreadyExecuted: true };
     return { ok: false, error: `This proposal is ${latest.status.toLowerCase()} and can no longer be confirmed.` };
   }
 
@@ -267,7 +289,44 @@ export async function organiserHardConfirm(proposalId: string, actorId: string):
     },
   });
 
-  return { ok: true, alreadyConfirmed: false };
+  const confirmedProposal = await prisma.proposal.findUniqueOrThrow({ where: { id: proposalId } });
+
+  let execution: ExecutionResult;
+  try {
+    execution = await executeConfirmedProposal(confirmedProposal);
+  } catch (err) {
+    execution = { ok: false, error: err instanceof Error ? err.message : "Execution failed unexpectedly." };
+  }
+
+  if (execution.ok) {
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: { status: "EXECUTED", executedAt: new Date(), executionResult: execution.summary },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tripId: proposal.tripId,
+        actorId,
+        actionType: "PROPOSAL_EXECUTED",
+        payloadSummary: `Proposal "${proposal.title}" (${proposalId}) executed: ${execution.summary}`,
+      },
+    });
+    return { ok: true, alreadyExecuted: false, executionSummary: execution.summary };
+  }
+
+  await prisma.proposal.update({
+    where: { id: proposalId },
+    data: { status: "FAILED", failureReason: execution.error },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tripId: proposal.tripId,
+      actorId,
+      actionType: "PROPOSAL_EXECUTION_FAILED",
+      payloadSummary: `Proposal "${proposal.title}" (${proposalId}) confirmed but execution failed: ${execution.error}`,
+    },
+  });
+  return { ok: false, error: `Confirmed, but execution failed: ${execution.error}` };
 }
 
 export type CancelProposalResult = { ok: true } | { ok: false; error: string };

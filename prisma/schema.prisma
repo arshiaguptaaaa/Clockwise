@@ -199,6 +199,16 @@ model Destination {
   order     Int
   startDate DateTime?
   endDate   DateTime?
+
+  // The Proposal whose organiser hard-confirmation created or most
+  // recently updated this row — plain string, not a relation, matching
+  // how Trip.createdBy/Booking.payerId already reference User by id
+  // without a relation object. @unique so a revision proposal
+  // (Proposal.supersedesId) can look up "does the proposal I'm
+  // superseding already have a structured record?" and update it in
+  // place instead of creating a duplicate — see
+  // src/lib/proposal-execution.ts.
+  sourceProposalId String? @unique
 }
 
 model TripMember {
@@ -389,6 +399,12 @@ model Booking {
   longitude        Float?
   providerPlaceId  String?
   locationProvider String?
+
+  // Same purpose as Destination.sourceProposalId — see that field's
+  // comment. Plain string, not a relation, matching this model's own
+  // existing convention (payerId, provider, etc. are already plain
+  // strings here).
+  sourceProposalId String? @unique
 
   rideOrder RideOrder?
 }
