@@ -1,19 +1,25 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { MoreVertical } from "lucide-react";
+import { MoreVertical, UserPlus } from "lucide-react";
 import { switchTraveller } from "@/app/actions";
+import { InviteTravellersPanel } from "@/components/trip-room/InviteTravellersPanel";
 
 export function TopBar({
   title,
   subtitle,
   currentUserName,
+  tripId,
+  isOrganiser,
 }: {
   title: string;
   subtitle: string;
   currentUserName: string;
+  tripId: string;
+  isOrganiser: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -25,6 +31,24 @@ export function TopBar({
           </p>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Invite travellers"
+            onClick={() => setInviteOpen(true)}
+            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-accent hover:text-accent"
+          >
+            <UserPlus className="size-3.5" /> Invite
+          </button>
+
+          {inviteOpen && (
+            <InviteTravellersPanel
+              tripId={tripId}
+              isOrganiser={isOrganiser}
+              onClose={() => setInviteOpen(false)}
+            />
+          )}
 
         <div ref={containerRef} className="relative">
           <button
@@ -57,6 +81,7 @@ export function TopBar({
               </div>
             </>
           )}
+        </div>
         </div>
       </div>
     </header>

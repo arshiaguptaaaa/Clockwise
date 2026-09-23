@@ -1,12 +1,54 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { setCurrentUserId } from "@/lib/session";
+import { getCurrentUserId, setCurrentUserId } from "@/lib/session";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { emailProvider } from "@/lib/email/resend-provider";
 import { tripJoinConfirmationEmail, tripJoinNotificationEmail } from "@/lib/email/templates";
 import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
+import { createAndEmailInvite } from "@/lib/invite";
+
+export type CreateInviteResult = { ok: true; token: string } | { ok: false; error: string };
+
+// Invite someone to an EXISTING trip — the only invite-creation path
+// before this was inline in createTrip() (wizard-actions.ts), run once at
+// trip setup, with no way to invite anyone afterward. This reuses the
+// exact same createAndEmailInvite() helper, not a parallel system.
+// Organiser-only, matching how naming travellers during trip creation was
+// always implicitly organiser-scoped (only the creator fills that form).
+export async function createInvite(
+  tripId: string,
+  name: string,
+  contact: string
+): Promise<CreateInviteResult> {
+  const actorId = await getCurrentUserId();
+  if (!actorId) return { ok: false, error: "Sign in first." };
+
+  const [trip, actor] = await Promise.all([
+    prisma.trip.findUnique({ where: { id: tripId } }),
+    prisma.user.findUnique({ where: { id: actorId } }),
+  ]);
+  if (!trip) return { ok: false, error: "Trip not found." };
+  if (trip.createdBy !== actorId) return { ok: false, error: "Only the trip organiser can invite travellers." };
+
+  const trimmedName = name.trim() || "Traveller";
+  const trimmedContact = contact.trim();
+
+  const { token } = await createAndEmailInvite({
+    tripId,
+    tripName: trip.name,
+    inviterName: actor?.name ?? "Your trip organiser",
+    invitedBy: actorId,
+    inviteeName: trimmedName,
+    contact: trimmedContact || null,
+  });
+
+  revalidatePath(`/trips/${tripId}/room`);
+  revalidatePath(`/trips/${tripId}/plan/travellers`);
+  return { ok: true, token };
+}
 
 // Deliberately the first and only place a real TripMember gets created for
 // an invited traveller — see build notes on Invite: no "ghost" member
