@@ -6,6 +6,7 @@ import { MessageRow, type MessageAttachment } from "./MessageRow";
 import { FailedClockwiseMessage } from "./FailedClockwiseMessage";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { Composer } from "./Composer";
+import { ProposalCard, type ProposalCardData } from "./ProposalCard";
 import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
 
@@ -20,6 +21,7 @@ export type ChatThreadMessage = {
   cardData: string | null;
   cardStatus: CardStatus | null;
   attachments: MessageAttachment[];
+  proposal: ProposalCardData | null;
 };
 
 export function ChatThread({
@@ -28,6 +30,7 @@ export function ChatThread({
   messages,
   roster,
   currentUserId,
+  organiserId,
   postAction,
   runAgentAction,
   placeholder,
@@ -39,6 +42,7 @@ export function ChatThread({
   messages: ChatThreadMessage[];
   roster: CardPerson[];
   currentUserId: string | null;
+  organiserId: string;
   // Fast: persists the human message only, returns immediately.
   postAction: (formData: FormData) => Promise<{ senderId: string } | void>;
   // Slow: the actual agent turn. Deliberately a SEPARATE transition from
@@ -71,7 +75,14 @@ export function ChatThread({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto px-4 py-4">
         {messages.map((message) =>
-          message.failed ? (
+          message.proposal ? (
+            <ProposalCard
+              key={message.id}
+              proposal={message.proposal}
+              viewerId={currentUserId}
+              isOrganiser={currentUserId === organiserId}
+            />
+          ) : message.failed ? (
             <FailedClockwiseMessage
               key={message.id}
               messageId={message.id}

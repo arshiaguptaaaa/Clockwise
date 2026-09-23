@@ -18,6 +18,7 @@ import {
   isResolveFailure,
 } from "@/lib/travel/resolve";
 import { computeReadinessStatus } from "@/lib/readiness";
+import { createProposal } from "@/lib/proposals";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
 import type { AgentContext } from "./context";
 import type { AgentToolSchema } from "./provider";
@@ -125,6 +126,20 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
       },
       required: ["type", "value", "confidence"],
+    },
+  },
+  {
+    name: "propose_itinerary_change",
+    description:
+      "Propose adding or changing a destination/stop for the WHOLE GROUP to vote on, in either GROUP or PRIVATE conversation — a private hint ('might be nice to see Salzburg') can still produce a group proposal. This does NOT change the Plan directly: it posts a group-visible proposal that travellers vote on and the organiser must explicitly hard-confirm before anything is added. Only call this for a genuinely concrete, specific idea the conversation is ready to consider — never for vague brainstorming ('somewhere fun?', 'maybe a beach?') and never twice for the same idea in one turn.",
+    parameters: {
+      type: "object",
+      properties: {
+        destination: { type: "string", description: "The place name to add, e.g. 'Salzburg, Austria' — as specific as the conversation gave you" },
+        timing: { type: "string", description: "When, if mentioned, e.g. 'as a day trip on the 14th'" },
+        summary: { type: "string", description: "One plain sentence explaining the proposal to the group" },
+      },
+      required: ["destination", "summary"],
     },
   },
   {
@@ -258,6 +273,8 @@ export async function executeTool(
       return createCommitment(input, ctx);
     case "update_trip_decision":
       return updateTripDecision(input, ctx);
+    case "propose_itinerary_change":
+      return proposeItineraryChange(input, ctx);
     case "check_readiness":
       return checkReadiness(input, ctx);
     case "update_participation_window":
@@ -509,6 +526,47 @@ async function updateTripDecision(input: Record<string, unknown>, ctx: AgentCont
   });
 
   return { output: `Recorded decision: ${type} = ${value} (confidence ${confidence}).` };
+}
+
+// The one place chat conversation (either channel) turns into a real
+// Proposal — see src/lib/proposals.ts. Deliberately does NOT touch
+// Destination/Booking itself: this only ever creates an
+// AWAITING_APPROVAL proposal and posts the group-visible card:
+// approvals and the organiser's hard-confirm (src/app/proposal-actions.ts,
+// rendered by ProposalCard.tsx) are what can eventually make it real Plan
+// state, never this tool call by itself.
+async function proposeItineraryChange(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const destination = (input.destination as string | undefined)?.trim();
+  const summary = (input.summary as string | undefined)?.trim();
+  const timing = (input.timing as string | undefined)?.trim();
+
+  if (!destination || !summary) {
+    return { output: "Need both a destination and a one-sentence summary to post this as a group proposal." };
+  }
+
+  const proposal = await createProposal({
+    tripId: ctx.trip.id,
+    type: "ITINERARY_CHANGE",
+    title: `Add ${destination}?`,
+    summary,
+    payload: { destination, timing },
+    createdBy: ctx.clockwiseUserId,
+  });
+
+  const message = await prisma.message.create({
+    data: {
+      tripId: ctx.trip.id,
+      senderId: ctx.clockwiseUserId,
+      channel: "GROUP",
+      content: `Proposal: ${proposal.title} — ${summary}`,
+    },
+  });
+  await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
+
+  return {
+    output: `Posted a group proposal to add ${destination}${timing ? ` (${timing})` : ""} — travellers can vote in Trip Room, and the organiser can give final confirmation once ready.`,
+    posted: true,
+  };
 }
 
 async function checkReadiness(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {

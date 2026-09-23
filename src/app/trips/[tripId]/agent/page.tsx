@@ -92,9 +92,14 @@ export default async function MyClockwisePage({
           cardData: m.cardData,
           cardStatus: m.cardStatus,
           attachments: m.attachments,
+          // Proposals are always posted to GROUP (a proposal is inherently
+          // group-visible even when the idea originated in a private
+          // conversation) — PRIVATE messages never carry one.
+          proposal: null,
         }))}
         roster={roster}
         currentUserId={currentUserId}
+        organiserId={trip.createdBy}
         postAction={postPrivateMessage.bind(null, tripId)}
         runAgentAction={runPrivateAgentTurn.bind(null, tripId)}
         placeholder="Message Clockwise privately…"
