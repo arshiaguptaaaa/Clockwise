@@ -4,6 +4,9 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { setCurrentUserId } from "@/lib/session";
 import { getClockwiseUserId } from "@/lib/clockwise";
+import { emailProvider } from "@/lib/email/resend-provider";
+import { tripJoinConfirmationEmail, tripJoinNotificationEmail } from "@/lib/email/templates";
+import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
 
 // Deliberately the first and only place a real TripMember gets created for
 // an invited traveller — see build notes on Invite: no "ghost" member
@@ -52,6 +55,35 @@ export async function acceptInvite(token: string) {
         "Anything you tell me here stays within the permissions you choose — I'll use it to help coordinate your part of the trip without unnecessarily sharing your private information with the group.\n\nBefore we start, is there anything about this trip I should know privately?",
     },
   });
+
+  // Email failures never undo the join or block the redirect below — the
+  // TripMember row is already saved regardless of delivery outcome, same
+  // rule the waitlist flow already follows.
+  if (invite.contact?.includes("@")) {
+    const confirmation = tripJoinConfirmationEmail({ tripName: trip.name });
+    const confirmationResult = await emailProvider.send({
+      to: invite.contact,
+      subject: confirmation.subject,
+      html: confirmation.html,
+    });
+    if (!confirmationResult.sent) {
+      console.warn(`Trip-join confirmation email not sent to ${invite.contact}: ${confirmationResult.reason}`);
+    }
+  }
+
+  const notification = tripJoinNotificationEmail({
+    inviteeName: invite.inviteeName,
+    tripName: trip.name,
+    joinedAt: new Date(),
+  });
+  const notificationResult = await emailProvider.send({
+    to: ADMIN_NOTIFY_EMAIL,
+    subject: notification.subject,
+    html: notification.html,
+  });
+  if (!notificationResult.sent) {
+    console.warn(`Trip-join admin notification not sent: ${notificationResult.reason}`);
+  }
 
   await setCurrentUserId(newUser.id);
   redirect(`/trips/${invite.tripId}/agent`);

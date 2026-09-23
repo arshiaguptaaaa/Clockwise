@@ -7,6 +7,9 @@ import { getClockwiseUserId } from "@/lib/clockwise";
 import { generateUniqueInviteToken } from "@/lib/invite-token";
 import { suggestTripName } from "@/lib/trip-name";
 import { hasValidCoordinates } from "@/lib/location/types";
+import { getAppBaseUrl } from "@/lib/site-url";
+import { emailProvider } from "@/lib/email/resend-provider";
+import { tripInviteEmail } from "@/lib/email/templates";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
 export type CreateTripInput = {
@@ -116,6 +119,24 @@ export async function createTrip(input: CreateTripInput) {
         status: "PENDING",
       },
     });
+
+    // `contact` is free text (email or phone, per the Invite model
+    // comment) — only send when it looks like an email. A phone-only
+    // contact still gets a real Invite row and a shareable link via
+    // CopyInviteLink; it just doesn't get an automatic email. Failure
+    // never blocks trip creation or removes the invite — same "never
+    // undo a real row over an email failure" rule as the waitlist flow.
+    if (traveller.contact.includes("@")) {
+      const invite = tripInviteEmail({
+        inviterName: creator.name,
+        tripName,
+        inviteUrl: `${getAppBaseUrl()}/invite/${token}`,
+      });
+      const sent = await emailProvider.send({ to: traveller.contact, subject: invite.subject, html: invite.html });
+      if (!sent.sent) {
+        console.warn(`Invite email not sent to ${traveller.contact}: ${sent.reason}`);
+      }
+    }
   }
 
   const clockwiseUserId = await getClockwiseUserId();

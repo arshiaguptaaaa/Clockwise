@@ -6,8 +6,7 @@ import { getStoredAttribution } from "@/lib/attribution";
 import { ensureVisitorId } from "@/lib/visitor";
 import { emailProvider } from "@/lib/email/resend-provider";
 import { waitlistConfirmationEmail, waitlistNotificationEmail } from "@/lib/email/templates";
-
-const NOTIFY_EMAIL = "arshia.gupta2027@mastersunion.org";
+import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
 
 export type JoinWaitlistResult =
   | { status: "joined" }
@@ -76,7 +75,7 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
     totalCount,
   });
   const notificationResult = await emailProvider.send({
-    to: NOTIFY_EMAIL,
+    to: ADMIN_NOTIFY_EMAIL,
     subject: notification.subject,
     html: notification.html,
   });
