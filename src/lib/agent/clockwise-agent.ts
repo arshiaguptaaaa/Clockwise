@@ -21,7 +21,10 @@ export type AgentTurnResult = {
   toolCalls: { name: string; input: unknown }[];
 };
 
-function toolsForMode(mode: AgentContext["mode"]): AgentToolSchema[] {
+// Exported for direct testing against the real model (see verification
+// scripts) without needing a full AgentContext/DB round trip — these are
+// pure functions with no side effects, safe to call in isolation.
+export function toolsForMode(mode: AgentContext["mode"]): AgentToolSchema[] {
   return AGENT_TOOLS.filter((t) => {
     if (t.name === "stay_silent") return mode === "GROUP"; // private room: every message deserves a reply
     if (t.name === "update_participation_window") return mode === "PRIVATE";
@@ -29,7 +32,7 @@ function toolsForMode(mode: AgentContext["mode"]): AgentToolSchema[] {
   });
 }
 
-function buildSystemPrompt(ctx: AgentContext): string {
+export function buildSystemPrompt(ctx: AgentContext): string {
   const shared = [
     `You are Clockwise, the coordination, execution and recovery agent for a group trip called "${ctx.trip.name}".`,
     "Core rules:",
@@ -40,6 +43,7 @@ function buildSystemPrompt(ctx: AgentContext): string {
     "- For anything time/status related (readiness, ETA), always call the relevant tool rather than judging it yourself — you narrate the deterministic result, you don't invent it.",
     "- You have two kinds of knowledge. TRIP KNOWLEDGE (travellers, dates, bookings, commitments, decisions — already in the structured state below) you can answer directly. LIVE WORLD KNOWLEDGE (hotels, places, addresses, distances, travel time, weather) you do NOT know yourself — you MUST call search_places/search_hotels/search_nearby/get_route/get_weather and answer only from what the tool actually returned. Never guess a hotel name, address, distance, or fare — if a live tool isn't configured or fails, say so honestly and still answer whatever part of the question trip state alone can cover.",
     "- Reply in 1-3 short, conversational sentences. No headings, no bullet lists, no markdown formatting — the tool result is already shown to the user as a card, so don't repeat it verbatim, just add the reasoning/recommendation on top of it.",
+    "- propose_itinerary_change and propose_uber_ride post a card EVERY member of the group will see, from either room. Only call one when the idea genuinely needs the group's agreement — never for something that only affects the speaker personally (a dietary restriction, a budget limit, wanting their own room — those stay in this conversation, never become a group proposal). The `summary`/`title` you write become the ENTIRE group-visible content — write them fresh, describing only the proposal itself (what, who it affects, when, cost if relevant). Never quote, paraphrase, or hint at anything else from this conversation, and never include a private reason behind a public ask (e.g. propose \"look at a cheaper hotel option\" — never \"...because Priya said she's on a tight budget\").",
   ].join("\n");
 
   const modeBlock =
@@ -54,6 +58,7 @@ function buildSystemPrompt(ctx: AgentContext): string {
           `You are in ${ctx.actingUserName}'s private "My Clockwise" room. Only ${ctx.actingUserName} and you see this conversation.`,
           `You may discuss ${ctx.actingUserName}'s own data freely. You must still never reveal another traveller's private data here.`,
           `${ctx.actingUserName}'s private profile:\n${ctx.privateProfileSummary ?? "(nothing on file yet)"}`,
+          `This conversation itself is never copied anywhere. If ${ctx.actingUserName} raises something that genuinely needs the whole group's agreement, use propose_itinerary_change/propose_uber_ride to post ONLY the minimum structured proposal the group needs to decide — not what ${ctx.actingUserName} told you or why. If it's personal and doesn't need group agreement (their own preference, constraint, or situation), just handle it here and don't propose anything.`,
         ].join("\n");
 
   return [shared, modeBlock, `Structured trip state:\n${ctx.stateSummary}`].join("\n\n");
