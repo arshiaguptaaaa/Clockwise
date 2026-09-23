@@ -13,6 +13,9 @@ export type ProposalPayload = {
   provider?: string;
   peopleAffected?: string[];
   timing?: string;
+  // UBER_RIDE only: where the ride starts. `destination` (below) doubles
+  // as the ride's dropoff for this type.
+  pickup?: string;
   // For ITINERARY_CHANGE: the place name/text to resolve into a canonical
   // Destination on confirm (src/lib/proposal-execution.ts) — resolved the
   // same way chat's location tools already do (stored destination first,

@@ -9,6 +9,8 @@ import { prisma } from "./prisma";
 import { decodeProposalPayload } from "./proposals";
 import { resolveTripLocationText, isResolveFailure } from "./travel/resolve";
 import { hasValidCoordinates } from "./location/types";
+import { getOrganiserAuth, resolveRoute, isFailure } from "./transport";
+import { mobilityProvider } from "./providers/mobility";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -126,6 +128,81 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   return { ok: true, summary: `Created booking "${proposal.title}" on the Plan.` };
 }
 
+// R6 — the Uber-specific execution bridge. Reuses the exact same
+// getOrganiserAuth/resolveRoute/mobilityProvider plumbing transport-actions.ts's
+// confirmRideRequest already uses for the human-button-pressed flow — this
+// is a second caller of that same real infrastructure, not a parallel
+// reimplementation. Picks the first real option Uber actually returns
+// (never a guessed/fabricated one); there is no human in this path
+// choosing a specific vehicle, so "first available, real party size" is
+// the deliberate default — a future pass could let the proposal specify a
+// preferred product.
+//
+// IMPORTANT: this function performs a REAL Uber Sandbox ride request on
+// success. It is reachable ONLY through organiserHardConfirm
+// (src/lib/proposals.ts), which requires trip.createdBy specifically —
+// the same hard-confirm gate every other proposal type goes through. No
+// LLM output and no member vote can reach this code path by itself.
+async function executeUberRide(proposal: Proposal): Promise<ExecutionResult> {
+  const payload = decodeProposalPayload(proposal.payload);
+  const pickupText = payload.pickup?.trim();
+  const destinationText = payload.destination?.trim();
+  if (!pickupText || !destinationText) {
+    return { ok: false, error: "This proposal is missing a pickup or destination — can't request a ride." };
+  }
+
+  const auth = await getOrganiserAuth(proposal.tripId);
+  if (isFailure(auth)) return { ok: false, error: auth.error };
+
+  const route = await resolveRoute({ pickup: pickupText, destination: destinationText });
+  if (isFailure(route)) return { ok: false, error: route.error };
+
+  const partySize = payload.peopleAffected && payload.peopleAffected.length > 0 ? payload.peopleAffected.length : 1;
+
+  let options;
+  try {
+    options = await mobilityProvider.getEstimate(auth, route, partySize);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Uber didn't return any ride options." };
+  }
+  const option = options[0];
+  if (!option) return { ok: false, error: "Uber has no ride options available for this route right now." };
+
+  let prepared;
+  try {
+    prepared = await mobilityProvider.prepareRide(auth, route, option.productId);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Couldn't get a fare quote from Uber." };
+  }
+
+  const existing = await findSupersededBooking(proposal);
+  const bookingData = {
+    tripId: proposal.tripId,
+    type: "TRANSPORT",
+    status: "PENDING",
+    participantIds: JSON.stringify([]),
+    provider: "uber",
+    currency: prepared.currency,
+    amount: Math.round((prepared.lowEstimate + prepared.highEstimate) / 2),
+    sourceProposalId: proposal.id,
+  };
+  const booking = existing
+    ? await prisma.booking.update({ where: { id: existing.id }, data: bookingData })
+    : await prisma.booking.create({ data: bookingData });
+
+  try {
+    const result = await mobilityProvider.requestRide(auth, route, prepared);
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: "CONFIRMED", confirmationId: result.providerRideId },
+    });
+    return { ok: true, summary: `Uber ${option.displayName} requested — status: ${result.status}.` };
+  } catch (err) {
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: "FAILED" } });
+    return { ok: false, error: err instanceof Error ? err.message : "Uber couldn't process this ride request." };
+  }
+}
+
 export async function executeConfirmedProposal(proposal: Proposal): Promise<ExecutionResult> {
   switch (proposal.type) {
     case "ITINERARY_CHANGE":
@@ -133,12 +210,7 @@ export async function executeConfirmedProposal(proposal: Proposal): Promise<Exec
     case "BOOKING":
       return executeBooking(proposal);
     case "UBER_RIDE":
-      // Deliberately not implemented yet (R6 — the Uber-specific bridge
-      // deserves its own isolated, carefully-tested pass, not a rushed
-      // addition here). Confirming must not silently no-op as if a ride
-      // had actually been requested — this is an explicit, honest
-      // failure, not a fake success.
-      return { ok: false, error: "Uber ride execution isn't wired to the proposal flow yet." };
+      return executeUberRide(proposal);
     case "DOCUMENT_UPDATE":
     case "OTHER":
       return { ok: false, error: `Execution for proposal type ${proposal.type} isn't implemented yet.` };

@@ -143,6 +143,26 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "propose_uber_ride",
+    description:
+      "Propose requesting a real Uber ride for the group, from either GROUP or PRIVATE conversation. This does NOT request a ride — it posts a group-visible proposal; only the organiser's explicit hard-confirmation actually requests a real (sandbox) Uber ride. Only call this when pickup, destination and who's going are all reasonably clear from the conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        pickup: { type: "string", description: "Where the ride starts, as specific as the conversation gave you" },
+        destination: { type: "string", description: "Where the ride is going" },
+        timing: { type: "string", description: "When, if mentioned" },
+        peopleAffected: {
+          type: "array",
+          items: { type: "string" },
+          description: "Traveller names taking this ride; omit if unclear",
+        },
+        summary: { type: "string", description: "One plain sentence explaining the proposal to the group" },
+      },
+      required: ["pickup", "destination", "summary"],
+    },
+  },
+  {
     name: "check_readiness",
     description:
       "Deterministically check whether a logged commitment is ON_TRACK, AT_RISK, or MISSED by comparing its target time to now. Read-only — never guess this yourself, always call this tool.",
@@ -275,6 +295,8 @@ export async function executeTool(
       return updateTripDecision(input, ctx);
     case "propose_itinerary_change":
       return proposeItineraryChange(input, ctx);
+    case "propose_uber_ride":
+      return proposeUberRide(input, ctx);
     case "check_readiness":
       return checkReadiness(input, ctx);
     case "update_participation_window":
@@ -535,6 +557,35 @@ async function updateTripDecision(input: Record<string, unknown>, ctx: AgentCont
 // approvals and the organiser's hard-confirm (src/app/proposal-actions.ts,
 // rendered by ProposalCard.tsx) are what can eventually make it real Plan
 // state, never this tool call by itself.
+// Shared by every propose_* tool: creates the Proposal, posts the
+// announcing GROUP message, and links them via groupMessageId. The only
+// place a group-visible proposal gets created from conversation.
+async function postProposal(
+  ctx: AgentContext,
+  params: { type: "ITINERARY_CHANGE" | "UBER_RIDE"; title: string; summary: string; payload: Parameters<typeof createProposal>[0]["payload"] }
+) {
+  const proposal = await createProposal({
+    tripId: ctx.trip.id,
+    type: params.type,
+    title: params.title,
+    summary: params.summary,
+    payload: params.payload,
+    createdBy: ctx.clockwiseUserId,
+  });
+
+  const message = await prisma.message.create({
+    data: {
+      tripId: ctx.trip.id,
+      senderId: ctx.clockwiseUserId,
+      channel: "GROUP",
+      content: `Proposal: ${proposal.title} — ${params.summary}`,
+    },
+  });
+  await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
+
+  return proposal;
+}
+
 async function proposeItineraryChange(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   const destination = (input.destination as string | undefined)?.trim();
   const summary = (input.summary as string | undefined)?.trim();
@@ -544,27 +595,39 @@ async function proposeItineraryChange(input: Record<string, unknown>, ctx: Agent
     return { output: "Need both a destination and a one-sentence summary to post this as a group proposal." };
   }
 
-  const proposal = await createProposal({
-    tripId: ctx.trip.id,
+  await postProposal(ctx, {
     type: "ITINERARY_CHANGE",
     title: `Add ${destination}?`,
     summary,
     payload: { destination, timing },
-    createdBy: ctx.clockwiseUserId,
   });
-
-  const message = await prisma.message.create({
-    data: {
-      tripId: ctx.trip.id,
-      senderId: ctx.clockwiseUserId,
-      channel: "GROUP",
-      content: `Proposal: ${proposal.title} — ${summary}`,
-    },
-  });
-  await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
 
   return {
     output: `Posted a group proposal to add ${destination}${timing ? ` (${timing})` : ""} — travellers can vote in Trip Room, and the organiser can give final confirmation once ready.`,
+    posted: true,
+  };
+}
+
+async function proposeUberRide(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const pickup = (input.pickup as string | undefined)?.trim();
+  const destination = (input.destination as string | undefined)?.trim();
+  const summary = (input.summary as string | undefined)?.trim();
+  const timing = (input.timing as string | undefined)?.trim();
+  const peopleAffected = (input.peopleAffected as string[] | undefined)?.filter((n) => n?.trim());
+
+  if (!pickup || !destination || !summary) {
+    return { output: "Need a pickup, destination, and one-sentence summary to post this as a group proposal." };
+  }
+
+  await postProposal(ctx, {
+    type: "UBER_RIDE",
+    title: `Uber: ${pickup} → ${destination}?`,
+    summary,
+    payload: { pickup, destination, timing, peopleAffected },
+  });
+
+  return {
+    output: `Posted a group proposal for an Uber from ${pickup} to ${destination} — travellers can vote, and only the organiser's final confirmation actually requests the (sandbox) ride.`,
     posted: true,
   };
 }

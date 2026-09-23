@@ -7,6 +7,7 @@ import { avatarColor } from "@/lib/avatar";
 import { castApprovalVoteAction, organiserHardConfirmAction, cancelProposalAction } from "@/app/proposal-actions";
 
 export type ProposalCardPayload = {
+  pickup?: string;
   destination?: string;
   timing?: string;
   price?: string;
@@ -115,8 +116,14 @@ export function ProposalCard({
           <p className="mt-1 text-sm font-medium leading-snug text-foreground">{proposal.title}</p>
           <p className="mt-0.5 text-sm leading-snug text-muted-foreground">{proposal.summary}</p>
 
-          {(proposal.payload.destination || proposal.payload.timing || proposal.payload.price) && (
+          {(proposal.payload.pickup || proposal.payload.destination || proposal.payload.timing || proposal.payload.price) && (
             <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
+              {proposal.payload.pickup && (
+                <div className="text-xs">
+                  <span className="text-muted-foreground">Pickup: </span>
+                  <span className="font-medium text-foreground">{proposal.payload.pickup}</span>
+                </div>
+              )}
               {proposal.payload.destination && (
                 <div className="text-xs">
                   <span className="text-muted-foreground">Destination: </span>
