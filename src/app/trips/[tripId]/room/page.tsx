@@ -19,7 +19,12 @@ export default async function TripRoomChatPage({
 
   const messages = await prisma.message.findMany({
     where: { tripId: trip.id, channel: "GROUP" },
-    include: { sender: true },
+    include: {
+      sender: true,
+      // select-only, never blobUrl/blobPathname — see the same reasoning
+      // in src/app/trips/[tripId]/room/files/page.tsx.
+      attachments: { select: { id: true, filename: true } },
+    },
     orderBy: { timestamp: "asc" },
   });
 
@@ -28,6 +33,7 @@ export default async function TripRoomChatPage({
   return (
     <ChatThread
       tripId={tripId}
+      channel="GROUP"
       messages={messages.map((m) => ({
         id: m.id,
         senderName: m.sender?.name ?? "Unknown",
@@ -38,6 +44,7 @@ export default async function TripRoomChatPage({
         cardType: m.cardType,
         cardData: m.cardData,
         cardStatus: m.cardStatus,
+        attachments: m.attachments,
       }))}
       roster={roster}
       currentUserId={currentUserId}

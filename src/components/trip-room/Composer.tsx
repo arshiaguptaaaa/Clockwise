@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Paperclip, ArrowUp, Mic, Square, Loader2 } from "lucide-react";
+import { Paperclip, ArrowUp, Mic, Square, Loader2, X } from "lucide-react";
+import { uploadAttachment, deleteAttachment } from "@/app/attachment-actions";
 
 function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
   const { pending } = useFormStatus();
@@ -27,11 +28,15 @@ function formatElapsed(seconds: number) {
 }
 
 export function Composer({
+  tripId,
+  channel,
   action,
   placeholder = "Message the group…",
   disabled = false,
   suggestions,
 }: {
+  tripId: string;
+  channel: "GROUP" | "PRIVATE";
   action: (formData: FormData) => void | Promise<void>;
   placeholder?: string;
   // Set while a Clockwise turn from a PREVIOUS submit is still in flight —
@@ -45,6 +50,17 @@ export function Composer({
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Uploads immediately on file pick (channel/tripId/recipient authorization
+  // is enforced server-side in uploadAttachment — see src/lib/attachments.ts)
+  // and holds only the resulting id/filename here, never blobUrl. Linked to
+  // the actual Message row only once Send is pressed (attachmentId is
+  // appended to the form below) — picking a file doesn't send anything by
+  // itself.
+  const [pendingAttachment, setPendingAttachment] = useState<{ id: string; filename: string } | null>(null);
+  const [isAttaching, setIsAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   // Voice is just an alternate way to produce the same `content` text the
   // typed composer sends — the transcript goes through the exact same
@@ -154,9 +170,39 @@ export function Composer({
     if (disabled) return;
     const body = new FormData();
     body.set("content", transcript);
+    if (pendingAttachment) body.set("attachmentId", pendingAttachment.id);
     setVoiceState("idle");
     setTranscript("");
+    setPendingAttachment(null);
     void action(body);
+  }
+
+  async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachError(null);
+    setIsAttaching(true);
+
+    const formData = new FormData();
+    formData.set("tripId", tripId);
+    formData.set("channel", channel);
+    formData.set("file", file);
+
+    const result = await uploadAttachment(formData);
+    setIsAttaching(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (!result.ok) {
+      setAttachError(result.error);
+      return;
+    }
+    setPendingAttachment({ id: result.attachmentId, filename: file.name });
+  }
+
+  function removePendingAttachment() {
+    if (!pendingAttachment) return;
+    void deleteAttachment(pendingAttachment.id);
+    setPendingAttachment(null);
   }
 
   return (
@@ -202,6 +248,25 @@ export function Composer({
         <p className="px-4 pt-3 text-xs text-danger">{voiceError}</p>
       )}
 
+      {attachError && (
+        <p className="px-4 pt-3 text-xs text-danger">{attachError}</p>
+      )}
+
+      {pendingAttachment && voiceState === "idle" && (
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-full border border-border bg-page px-3 py-1.5 text-xs">
+          <Paperclip className="size-3 shrink-0 text-muted-foreground" />
+          <span className="truncate text-foreground">{pendingAttachment.filename}</span>
+          <button
+            type="button"
+            onClick={removePendingAttachment}
+            aria-label="Remove attachment"
+            className="ml-auto shrink-0 cursor-pointer text-muted-foreground hover:text-danger"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {voiceState === "recording" ? (
         <div className="flex items-center gap-2 px-4 py-3">
           <span className="flex size-9 shrink-0 items-center justify-center">
@@ -229,6 +294,8 @@ export function Composer({
           data-form="composer"
           action={async (formData) => {
             if (disabled) return;
+            if (pendingAttachment) formData.set("attachmentId", pendingAttachment.id);
+            setPendingAttachment(null);
             await action(formData);
             formRef.current?.reset();
           }}
@@ -237,11 +304,19 @@ export function Composer({
           <button
             type="button"
             aria-label="Attach"
-            disabled={disabled}
+            disabled={disabled || isAttaching}
+            onClick={() => fileInputRef.current?.click()}
             className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Paperclip className="size-4" />
+            {isAttaching ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif"
+            className="hidden"
+            onChange={handleFilePicked}
+          />
           <input
             ref={inputRef}
             name="content"

@@ -31,18 +31,35 @@ export async function switchTraveller() {
 // runGroupAgentTurn without a second getCurrentUserId() round trip.
 export async function postGroupMessage(tripId: string, formData: FormData): Promise<{ senderId: string } | void> {
   const content = String(formData.get("content") ?? "").trim();
-  if (!content) return;
+  const attachmentId = String(formData.get("attachmentId") ?? "").trim() || null;
 
   const senderId = await getCurrentUserId();
   if (!senderId) {
     redirect("/");
   }
 
-  await prisma.message.create({
-    data: { tripId, senderId, channel: "GROUP", content },
+  // Re-verified here, not just trusted from the form: the attachment must
+  // genuinely be this sender's own unlinked GROUP upload to this trip —
+  // uploadAttachment already enforced this at upload time, but a formData
+  // value is still client-controlled, so it's checked again before linking.
+  const attachment = attachmentId
+    ? await prisma.attachment.findFirst({
+        where: { id: attachmentId, tripId, channel: "GROUP", uploaderId: senderId, messageId: null },
+      })
+    : null;
+
+  if (!content && !attachment) return;
+
+  const message = await prisma.message.create({
+    data: { tripId, senderId, channel: "GROUP", content: content || `📎 ${attachment!.filename}` },
   });
 
+  if (attachment) {
+    await prisma.attachment.update({ where: { id: attachment.id }, data: { messageId: message.id } });
+  }
+
   revalidatePath(`/trips/${tripId}/room`);
+  revalidatePath(`/trips/${tripId}/room/files`);
   return { senderId };
 }
 
@@ -64,18 +81,34 @@ export async function runGroupAgentTurn(tripId: string, actingUserId: string): P
 
 export async function postPrivateMessage(tripId: string, formData: FormData): Promise<{ senderId: string } | void> {
   const content = String(formData.get("content") ?? "").trim();
-  if (!content) return;
+  const attachmentId = String(formData.get("attachmentId") ?? "").trim() || null;
 
   const senderId = await getCurrentUserId();
   if (!senderId) {
     redirect("/");
   }
 
-  await prisma.message.create({
-    data: { tripId, senderId, channel: "PRIVATE", recipientId: senderId, content },
+  // Re-verified here too — must be this user's own PRIVATE upload
+  // (uploaderId AND recipientId both equal senderId, matching the same
+  // isolation rule PRIVATE messages already enforce), not already linked.
+  const attachment = attachmentId
+    ? await prisma.attachment.findFirst({
+        where: { id: attachmentId, tripId, channel: "PRIVATE", uploaderId: senderId, recipientId: senderId, messageId: null },
+      })
+    : null;
+
+  if (!content && !attachment) return;
+
+  const message = await prisma.message.create({
+    data: { tripId, senderId, channel: "PRIVATE", recipientId: senderId, content: content || `📎 ${attachment!.filename}` },
   });
 
+  if (attachment) {
+    await prisma.attachment.update({ where: { id: attachment.id }, data: { messageId: message.id } });
+  }
+
   revalidatePath(`/trips/${tripId}/agent`);
+  revalidatePath(`/trips/${tripId}/room/files`);
   return { senderId };
 }
 

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import type { CardStatus, CardType } from "@prisma/client";
-import { MessageRow } from "./MessageRow";
+import { MessageRow, type MessageAttachment } from "./MessageRow";
 import { FailedClockwiseMessage } from "./FailedClockwiseMessage";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { Composer } from "./Composer";
@@ -19,10 +19,12 @@ export type ChatThreadMessage = {
   cardType: CardType | null;
   cardData: string | null;
   cardStatus: CardStatus | null;
+  attachments: MessageAttachment[];
 };
 
 export function ChatThread({
   tripId,
+  channel,
   messages,
   roster,
   currentUserId,
@@ -33,6 +35,7 @@ export function ChatThread({
   suggestions,
 }: {
   tripId: string;
+  channel: "GROUP" | "PRIVATE";
   messages: ChatThreadMessage[];
   roster: CardPerson[];
   currentUserId: string | null;
@@ -93,6 +96,7 @@ export function ChatThread({
               content={message.content}
               timestamp={message.timestamp}
               isClockwise={message.isClockwise}
+              attachments={message.attachments}
             />
           )
         )}
@@ -103,6 +107,8 @@ export function ChatThread({
       </div>
 
       <Composer
+        tripId={tripId}
+        channel={channel}
         action={handleSend}
         placeholder={placeholder}
         disabled={isSending}

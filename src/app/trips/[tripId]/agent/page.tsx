@@ -32,7 +32,10 @@ export default async function MyClockwisePage({
 
   const messages = await prisma.message.findMany({
     where: { tripId: trip.id, channel: "PRIVATE", recipientId: currentUserId },
-    include: { sender: true },
+    include: {
+      sender: true,
+      attachments: { select: { id: true, filename: true } },
+    },
     orderBy: { timestamp: "asc" },
   });
 
@@ -77,6 +80,7 @@ export default async function MyClockwisePage({
 
       <ChatThread
         tripId={tripId}
+        channel="PRIVATE"
         messages={messages.map((m) => ({
           id: m.id,
           senderName: m.sender?.name ?? "Unknown",
@@ -87,6 +91,7 @@ export default async function MyClockwisePage({
           cardType: m.cardType,
           cardData: m.cardData,
           cardStatus: m.cardStatus,
+          attachments: m.attachments,
         }))}
         roster={roster}
         currentUserId={currentUserId}
