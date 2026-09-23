@@ -25,7 +25,10 @@ export type JoinWaitlistResult =
 
 export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResult> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  console.log(`WAITLIST_SUBMISSION_RECEIVED email=${email || "(empty)"}`);
+
   if (!email || !email.includes("@") || email.length > 254) {
+    console.log(`WAITLIST_INVALID_EMAIL email=${email || "(empty)"}`);
     return { status: "invalid_email" };
   }
 
@@ -42,13 +45,21 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
         referrer: attribution.referrer,
       },
     });
+    console.log(`WAITLIST_DB_SAVED id=${signup.id} email=${signup.email}`);
   } catch (err) {
     // Unique constraint on email — a friendly response, never revealing
     // anything else about the existing record, and never incrementing
-    // anything for a repeat submission.
+    // anything for a repeat submission. IMPORTANT, and easy to miss when
+    // testing: this returns BEFORE any email code below ever runs — a
+    // second submission of the SAME email will never trigger a send, by
+    // design. Testing email delivery requires either a fresh address
+    // each time, or a deliberate resend action (not built — out of
+    // scope here), never a repeat submission of the same address.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      console.log(`WAITLIST_DUPLICATE_SHORT_CIRCUIT email=${email} — returning early, no email will be sent for this submission.`);
       return { status: "already_on_list" };
     }
+    console.error(`WAITLIST_DB_SAVE_FAILED email=${email} error=${err instanceof Error ? err.message : "unknown"}`);
     throw err;
   }
 
@@ -66,16 +77,26 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
 
   const totalCount = await prisma.waitlistSignup.count();
 
+  if (testRecipient) {
+    console.log(`WAITLIST_TEST_RECIPIENT_ACTIVE target=${testRecipient} — both emails below are redirected here.`);
+  }
+
   // Email failures never undo the signup or surface as an error to the
-  // user — the row is already saved regardless of delivery outcome.
+  // user — the row is already saved regardless of delivery outcome. Both
+  // sends ARE awaited (not fire-and-forget) — the function does not
+  // return until both have resolved, success or failure.
   const confirmation = waitlistConfirmationEmail();
+  const confirmationTo = testRecipient ?? signup.email;
+  console.log(`WAITLIST_CONFIRMATION_EMAIL_ATTEMPTED to=${confirmationTo}`);
   const confirmationResult = await emailProvider.send({
-    to: testRecipient ?? signup.email,
+    to: confirmationTo,
     subject: testRecipient ? `[TEST → ${signup.email}] ${confirmation.subject}` : confirmation.subject,
     html: testRecipient ? withTestRecipientNotice(confirmation.html, signup.email) : confirmation.html,
   });
-  if (!confirmationResult.sent) {
-    console.warn(`Waitlist confirmation email not sent to ${testRecipient ?? signup.email}: ${confirmationResult.reason}`);
+  if (confirmationResult.sent) {
+    console.log(`WAITLIST_CONFIRMATION_EMAIL_SENT to=${confirmationTo} resendId=${confirmationResult.id}`);
+  } else {
+    console.error(`WAITLIST_CONFIRMATION_EMAIL_FAILED to=${confirmationTo} reason=${confirmationResult.reason}`);
   }
 
   const notification = waitlistNotificationEmail({
@@ -84,13 +105,17 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
     source: signup.source,
     totalCount,
   });
+  const notificationTo = testRecipient ?? ADMIN_NOTIFY_EMAIL;
+  console.log(`WAITLIST_ADMIN_EMAIL_ATTEMPTED to=${notificationTo}`);
   const notificationResult = await emailProvider.send({
-    to: testRecipient ?? ADMIN_NOTIFY_EMAIL,
+    to: notificationTo,
     subject: testRecipient ? `[TEST → ${ADMIN_NOTIFY_EMAIL}] ${notification.subject}` : notification.subject,
     html: testRecipient ? withTestRecipientNotice(notification.html, ADMIN_NOTIFY_EMAIL) : notification.html,
   });
-  if (!notificationResult.sent) {
-    console.warn(`Waitlist notification email not sent: ${notificationResult.reason}`);
+  if (notificationResult.sent) {
+    console.log(`WAITLIST_ADMIN_EMAIL_SENT to=${notificationTo} resendId=${notificationResult.id}`);
+  } else {
+    console.error(`WAITLIST_ADMIN_EMAIL_FAILED to=${notificationTo} reason=${notificationResult.reason}`);
   }
 
   return { status: "joined" };

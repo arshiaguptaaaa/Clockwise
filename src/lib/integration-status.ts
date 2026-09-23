@@ -69,18 +69,28 @@ async function checkGeoapify(): Promise<IntegrationStatus> {
   }
 }
 
+function testRecipientSuffix(): string {
+  // WAITLIST_EMAIL_TEST_RECIPIENT is a plain redirect-target email
+  // address, not a credential — safe to show the actual value (unlike
+  // RESEND_API_KEY, which this function never prints).
+  const testRecipient = process.env.WAITLIST_EMAIL_TEST_RECIPIENT?.trim();
+  return testRecipient
+    ? ` WAITLIST_EMAIL_TEST_RECIPIENT is configured (${testRecipient}) — both waitlist emails currently redirect there instead of the visitor/admin address.`
+    : " WAITLIST_EMAIL_TEST_RECIPIENT is not configured — waitlist emails go to their normal recipients.";
+}
+
 async function checkResend(): Promise<IntegrationStatus> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return result("Resend", "NOT_CONFIGURED", "RESEND_API_KEY is missing.");
+  if (!apiKey) return result("Resend", "NOT_CONFIGURED", `RESEND_API_KEY is missing.${testRecipientSuffix()}`);
   try {
     // Read-only — lists domains, never sends an email just to check status.
     const res = await fetch("https://api.resend.com/domains", {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    if (res.ok) return result("Resend", "LIVE", "API key authenticated via GET /domains (no email sent).");
-    return result("Resend", "ERROR", `Resend returned ${res.status}.`);
+    if (res.ok) return result("Resend", "LIVE", `API key authenticated via GET /domains (no email sent).${testRecipientSuffix()}`);
+    return result("Resend", "ERROR", `Resend returned ${res.status}.${testRecipientSuffix()}`);
   } catch (err) {
-    return result("Resend", "ERROR", err instanceof Error ? err.message : "Unknown error.");
+    return result("Resend", "ERROR", `${err instanceof Error ? err.message : "Unknown error."}${testRecipientSuffix()}`);
   }
 }
 
