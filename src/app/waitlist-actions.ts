@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getStoredAttribution } from "@/lib/attribution";
 import { ensureVisitorId } from "@/lib/visitor";
 import { emailProvider } from "@/lib/email/resend-provider";
-import { waitlistConfirmationEmail, waitlistNotificationEmail, withTestRecipientNotice } from "@/lib/email/templates";
+import { waitlistConfirmationEmail, waitlistNotificationEmail } from "@/lib/email/templates";
 import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
 
 export type JoinWaitlistResult =
@@ -97,13 +97,20 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
   // user — the row is already saved regardless of delivery outcome. Both
   // sends ARE awaited (not fire-and-forget) — the function does not
   // return until both have resolved, success or failure.
+  //
+  // The recipient (`to`) is redirected while WAITLIST_EMAIL_TEST_RECIPIENT
+  // is set (see the log line above and WAITLIST_SUBMISSION_RECEIVED /
+  // WAITLIST_DB_SAVED for the real intended recipient, if you need to
+  // correlate) — but subject and html are always the real, unmodified
+  // production content. No visible test/redirect language reaches the
+  // inbox; this is purely a backend routing decision.
   const confirmation = waitlistConfirmationEmail();
   const confirmationTo = testRecipient ?? signup.email;
   console.log(`WAITLIST_CONFIRMATION_EMAIL_ATTEMPTED to=${confirmationTo} provider=resend`);
   const confirmationResult = await emailProvider.send({
     to: confirmationTo,
-    subject: testRecipient ? `[TEST → ${signup.email}] ${confirmation.subject}` : confirmation.subject,
-    html: testRecipient ? withTestRecipientNotice(confirmation.html, signup.email) : confirmation.html,
+    subject: confirmation.subject,
+    html: confirmation.html,
   });
   if (confirmationResult.sent) {
     console.log(`WAITLIST_CONFIRMATION_EMAIL_SENT to=${confirmationTo} resendId=${confirmationResult.id}`);
@@ -121,8 +128,8 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
   console.log(`WAITLIST_ADMIN_EMAIL_ATTEMPTED to=${notificationTo} provider=resend`);
   const notificationResult = await emailProvider.send({
     to: notificationTo,
-    subject: testRecipient ? `[TEST → ${ADMIN_NOTIFY_EMAIL}] ${notification.subject}` : notification.subject,
-    html: testRecipient ? withTestRecipientNotice(notification.html, ADMIN_NOTIFY_EMAIL) : notification.html,
+    subject: notification.subject,
+    html: notification.html,
   });
   if (notificationResult.sent) {
     console.log(`WAITLIST_ADMIN_EMAIL_SENT to=${notificationTo} resendId=${notificationResult.id}`);
