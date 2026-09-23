@@ -6,6 +6,7 @@ import { joinWaitlist, type JoinWaitlistResult } from "@/app/waitlist-actions";
 
 export function WaitlistForm() {
   const [result, setResult] = useState<JoinWaitlistResult | null>(null);
+  const [unexpectedError, setUnexpectedError] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // Captures UTM/source attribution for people who land here directly
@@ -25,9 +26,20 @@ export function WaitlistForm() {
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    setUnexpectedError(false);
     startTransition(async () => {
-      const res = await joinWaitlist(formData);
-      setResult(res);
+      // Previously uncaught: if joinWaitlist() threw for any reason
+      // (e.g. a failure in code that runs after the DB write but before
+      // the email sends), the rejection was unhandled inside this
+      // transition — no visible error, the button just silently stops
+      // "loading" with no state change. Now surfaced explicitly so a
+      // real failure is never mistaken for a form that did nothing.
+      try {
+        const res = await joinWaitlist(formData);
+        setResult(res);
+      } catch {
+        setUnexpectedError(true);
+      }
     });
   }
 
@@ -74,6 +86,9 @@ export function WaitlistForm() {
             </form>
             {result?.status === "invalid_email" && (
               <p className="mt-2 text-sm text-danger">Enter a valid email address.</p>
+            )}
+            {unexpectedError && (
+              <p className="mt-2 text-sm text-danger">Something went wrong — please try again.</p>
             )}
           </>
         )}

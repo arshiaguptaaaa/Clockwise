@@ -8,16 +8,6 @@ import { emailProvider } from "@/lib/email/resend-provider";
 import { waitlistConfirmationEmail, waitlistNotificationEmail, withTestRecipientNotice } from "@/lib/email/templates";
 import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
 
-// Temporary: the current Resend account is in test mode and can only
-// deliver to its own registered address (confirmed live — see commit
-// history). Setting this env var redirects BOTH waitlist emails there,
-// with a visible in-email notice of the real intended recipient, without
-// ever touching what's stored in the database (WaitlistSignup.email is
-// always the visitor's real submitted address, unconditionally). Unset
-// this once a sending domain is verified in Resend to restore normal
-// behavior — no code change needed, this is purely env-driven.
-const testRecipient = process.env.WAITLIST_EMAIL_TEST_RECIPIENT?.trim() || null;
-
 export type JoinWaitlistResult =
   | { status: "joined" }
   | { status: "already_on_list" }
@@ -63,23 +53,45 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
     throw err;
   }
 
-  const visitorId = await ensureVisitorId();
-  await prisma.pageView.create({
-    data: {
-      page: "waitlist_submitted",
-      visitorId,
-      source: attribution.source,
-      medium: attribution.medium,
-      campaign: attribution.campaign,
-      referrer: attribution.referrer,
-    },
-  });
-
-  const totalCount = await prisma.waitlistSignup.count();
-
-  if (testRecipient) {
-    console.log(`WAITLIST_TEST_RECIPIENT_ACTIVE target=${testRecipient} — both emails below are redirected here.`);
+  // Analytics/housekeeping — NEVER allowed to prevent the emails below.
+  // This was previously unguarded: a throw here (either call is a
+  // separate, non-transactional write from the signup row already
+  // committed above) would propagate out of joinWaitlist() uncaught,
+  // meaning the DB row exists but the function never reaches the email
+  // code at all — a plausible exact match for "DB write succeeds, zero
+  // Resend activity, no error visibly reported" (WaitlistForm.tsx calls
+  // this inside startTransition with no catch of its own; an unhandled
+  // rejection there surfaces only as a browser console warning, easy to
+  // miss). totalCount falls back to 0 if this section fails, rather than
+  // blocking the notification email over a display number.
+  let totalCount = 0;
+  try {
+    const visitorId = await ensureVisitorId();
+    await prisma.pageView.create({
+      data: {
+        page: "waitlist_submitted",
+        visitorId,
+        source: attribution.source,
+        medium: attribution.medium,
+        campaign: attribution.campaign,
+        referrer: attribution.referrer,
+      },
+    });
+    totalCount = await prisma.waitlistSignup.count();
+  } catch (err) {
+    console.error(
+      `WAITLIST_POST_SAVE_HOUSEKEEPING_FAILED id=${signup.id} error=${err instanceof Error ? err.message : "unknown"} — continuing to email sends regardless.`
+    );
   }
+
+  // Read fresh on every invocation, not cached at module scope, so a
+  // Vercel env var change always takes effect on the very next request
+  // without depending on how long this serverless instance has been warm.
+  const testRecipient = process.env.WAITLIST_EMAIL_TEST_RECIPIENT?.trim() || null;
+  const resendConfigured = Boolean(process.env.RESEND_API_KEY);
+  console.log(
+    `WAITLIST_EMAIL_CONFIG resendApiKeyConfigured=${resendConfigured} testRecipientConfigured=${Boolean(testRecipient)}${testRecipient ? ` testRecipientTarget=${testRecipient}` : ""}`
+  );
 
   // Email failures never undo the signup or surface as an error to the
   // user — the row is already saved regardless of delivery outcome. Both
@@ -87,7 +99,7 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
   // return until both have resolved, success or failure.
   const confirmation = waitlistConfirmationEmail();
   const confirmationTo = testRecipient ?? signup.email;
-  console.log(`WAITLIST_CONFIRMATION_EMAIL_ATTEMPTED to=${confirmationTo}`);
+  console.log(`WAITLIST_CONFIRMATION_EMAIL_ATTEMPTED to=${confirmationTo} provider=resend`);
   const confirmationResult = await emailProvider.send({
     to: confirmationTo,
     subject: testRecipient ? `[TEST → ${signup.email}] ${confirmation.subject}` : confirmation.subject,
@@ -106,7 +118,7 @@ export async function joinWaitlist(formData: FormData): Promise<JoinWaitlistResu
     totalCount,
   });
   const notificationTo = testRecipient ?? ADMIN_NOTIFY_EMAIL;
-  console.log(`WAITLIST_ADMIN_EMAIL_ATTEMPTED to=${notificationTo}`);
+  console.log(`WAITLIST_ADMIN_EMAIL_ATTEMPTED to=${notificationTo} provider=resend`);
   const notificationResult = await emailProvider.send({
     to: notificationTo,
     subject: testRecipient ? `[TEST → ${ADMIN_NOTIFY_EMAIL}] ${notification.subject}` : notification.subject,
