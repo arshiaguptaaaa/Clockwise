@@ -13,6 +13,18 @@ const WRAPPER_START = `<div style="font-family: -apple-system, BlinkMacSystemFon
 const WRAPPER_END = `</div>`;
 const WORDMARK = `<p style="font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: #6b716c; margin: 0 0 24px;">CLOCKWISE</p>`;
 
+// Temporary test-mode wrapper — see WAITLIST_EMAIL_TEST_RECIPIENT in
+// src/app/waitlist-actions.ts. Prepends a visible banner naming who the
+// email was actually meant for, so a redirected test send is never
+// mistaken for a real delivery to that person. Purely presentational;
+// never changes what's stored in the database.
+export function withTestRecipientNotice(html: string, intendedFor: string): string {
+  const notice = `<div style="background: #fff3cd; border: 1px solid #ffe69c; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; color: #664d03; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;">
+    <strong>Test-mode redirect</strong> — this email was actually generated for <strong>${escapeHtml(intendedFor)}</strong>. It's being sent here instead because the Resend account is currently restricted to this address only.
+  </div>`;
+  return notice + html;
+}
+
 export function waitlistConfirmationEmail(): { subject: string; html: string } {
   return {
     subject: "You're on the Clockwise list",
