@@ -87,9 +87,11 @@ export function tripInviteEmail(params: {
   inviterName: string;
   tripName: string;
   inviteUrl: string;
+  destinations?: string[];
 }): { subject: string; html: string } {
   const inviterName = escapeHtml(params.inviterName);
   const tripName = escapeHtml(params.tripName);
+  const destinations = (params.destinations ?? []).filter(Boolean);
   // inviteUrl is server-constructed (getAppBaseUrl() + a random token, see
   // src/lib/invite-token.ts) — never raw user input, safe to embed as an
   // href without separate escaping.
@@ -98,7 +100,8 @@ export function tripInviteEmail(params: {
     html: `${WRAPPER_START}${WORDMARK}
       <p style="margin: 0 0 4px;">Hi,</p>
       <p style="margin: 0 0 18px; font-size: 18px; font-weight: 600; color: ${ACCENT_STRONG};"><strong>${inviterName}</strong> invited you to join <strong>${tripName}</strong>.</p>
-      <p>Clockwise helps a group coordinate a trip together without turning one friend into the full-time operations manager.</p>
+      ${destinations.length > 0 ? fieldRow("Destination", destinations.map(escapeHtml).join(" → ")) : ""}
+      <p style="margin-top: ${destinations.length > 0 ? "16px" : "0"};">Clockwise helps a group coordinate a trip together without turning one friend into the full-time operations manager.</p>
       ${button("Join the trip", params.inviteUrl)}
       <p style="color: ${MUTED}; font-size: 12px; margin-top: 16px; word-break: break-all;">Or paste this link into your browser:<br/>${params.inviteUrl}</p>
     ${WRAPPER_END}`,

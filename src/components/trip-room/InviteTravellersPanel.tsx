@@ -1,15 +1,26 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { X, Link2, Check, Share2, Loader2 } from "lucide-react";
-import { createInvite } from "@/app/invite-actions";
+import { useEffect, useState, useTransition } from "react";
+import { X, Link2, Check, Mail, MessageSquareOff, Loader2 } from "lucide-react";
+import {
+  createInvite,
+  sendInviteEmailAction,
+  getPendingInvites,
+  type PendingInviteView,
+} from "@/app/invite-actions";
 
-type CreatedInvite = { token: string; label: string };
+type Row = PendingInviteView & { looksLikeEmail: boolean; looksLikePhone: boolean };
 
-// Copy Link must work even when Resend/email is unavailable — email is an
-// optional delivery rail on top of the same Invite row, never a
-// requirement to obtain a shareable URL (see createAndEmailInvite:
-// email failure never removes the invite).
+function classifyContact(contact: string | null): { looksLikeEmail: boolean; looksLikePhone: boolean } {
+  if (!contact) return { looksLikeEmail: false, looksLikePhone: false };
+  if (contact.includes("@")) return { looksLikeEmail: true, looksLikePhone: false };
+  return { looksLikeEmail: false, looksLikePhone: /^[+\d][\d\s().-]{5,}$/.test(contact) };
+}
+
+// Generating a link must always work independent of Resend/SMS/any
+// delivery rail — see createInviteOnly (src/lib/invite.ts), which never
+// sends anything itself. Email/SMS are optional delivery channels layered
+// on top of an invite that already exists.
 export function InviteTravellersPanel({
   tripId,
   isOrganiser,
@@ -19,70 +30,76 @@ export function InviteTravellersPanel({
   isOrganiser: boolean;
   onClose: () => void;
 }) {
-  const [email, setEmail] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loadingList, setLoadingList] = useState(isOrganiser);
+  const [isCreating, startCreating] = useTransition();
+  const [emailState, setEmailState] = useState<Record<string, "sending" | "sent" | "failed">>({});
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<CreatedInvite[]>([]);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOrganiser) return;
+    getPendingInvites(tripId)
+      .then((list) => setRows(list.map((i) => ({ ...i, ...classifyContact(i.contact) }))))
+      .finally(() => setLoadingList(false));
+  }, [tripId, isOrganiser]);
 
   function inviteUrl(token: string) {
     return `${window.location.origin}/invite/${token}`;
   }
 
-  function submitEmail(e: React.FormEvent) {
+  function generate(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed) return;
     setError(null);
-    startTransition(async () => {
-      const result = await createInvite(tripId, trimmed, trimmed);
+    startCreating(async () => {
+      const result = await createInvite(tripId, name, contact);
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      setCreated((c) => [{ token: result.token, label: trimmed }, ...c]);
-      setEmail("");
+      setRows((r) => [
+        {
+          id: result.inviteId,
+          token: result.token,
+          inviteeName: name.trim() || "Traveller",
+          contact: contact.trim() || null,
+          emailSent: false,
+          looksLikeEmail: result.looksLikeEmail,
+          looksLikePhone: result.looksLikePhone,
+        },
+        ...r,
+      ]);
+      setName("");
+      setContact("");
     });
   }
 
-  function generateLink() {
-    setError(null);
-    startTransition(async () => {
-      const result = await createInvite(tripId, "Traveller", "");
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      setCreated((c) => [{ token: result.token, label: "Shareable link" }, ...c]);
-    });
-  }
-
-  async function copyLink(token: string) {
+  async function copyLink(token: string, id: string) {
     await navigator.clipboard.writeText(inviteUrl(token));
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 2000);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2000);
   }
 
-  async function shareLink(token: string) {
-    const url = inviteUrl(token);
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({ url, title: "Join our trip on Clockwise" });
-      } catch {
-        // User cancelled the native share sheet — not an error.
+  function sendEmail(id: string) {
+    setEmailState((s) => ({ ...s, [id]: "sending" }));
+    startCreating(async () => {
+      const result = await sendInviteEmailAction(tripId, id);
+      if (result.ok) {
+        setEmailState((s) => ({ ...s, [id]: "sent" }));
+        setRows((r) => r.map((row) => (row.id === id ? { ...row, emailSent: true } : row)));
+      } else {
+        setEmailState((s) => ({ ...s, [id]: "failed" }));
+        setError(result.error);
       }
-    } else {
-      await copyLink(token);
-    }
+    });
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-t-2xl bg-surface p-5 sm:rounded-2xl"
+        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-t-2xl bg-surface p-5 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -103,71 +120,108 @@ export function InviteTravellersPanel({
           </p>
         ) : (
           <>
-            <form onSubmit={submitEmail} className="mt-4">
-              <p className="text-xs font-medium text-muted-foreground">Email</p>
-              <div className="mt-1.5 flex gap-2">
+            <form onSubmit={generate} className="mt-4 flex flex-col gap-2.5">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Name (optional)</p>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="friend@email.com"
-                  disabled={isPending}
-                  className="flex-1 rounded-xl border border-border bg-page px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:opacity-60"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Riya"
+                  disabled={isCreating}
+                  className="mt-1 w-full rounded-xl border border-border bg-page px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:opacity-60"
                 />
-                <button
-                  type="submit"
-                  disabled={isPending || !email.trim()}
-                  className="flex shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isPending ? <Loader2 className="size-4 animate-spin" /> : "Send invite"}
-                </button>
               </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Email or phone number</p>
+                <input
+                  value={contact}
+                  onChange={(e) => setContact(e.target.value)}
+                  placeholder="friend@email.com or +91 98765 43210"
+                  disabled={isCreating}
+                  className="mt-1 w-full rounded-xl border border-border bg-page px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:opacity-60"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isCreating}
+                className="mt-1 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isCreating ? <Loader2 className="size-4 animate-spin" /> : "Generate invite"}
+              </button>
             </form>
-
-            <div className="mt-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-border" />
-              <p className="text-xs text-muted-foreground">or share a link</p>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
-            <button
-              type="button"
-              onClick={generateLink}
-              disabled={isPending}
-              className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Link2 className="size-4" /> Generate invite link
-            </button>
 
             {error && <p className="mt-2 text-xs text-danger">{error}</p>}
 
-            {created.length > 0 && (
-              <div className="mt-4 flex flex-col gap-2">
-                {created.map((invite) => (
-                  <div key={invite.token} className="rounded-xl border border-border px-3.5 py-2.5">
-                    <p className="text-xs text-muted-foreground">{invite.label}</p>
-                    <p className="mt-0.5 truncate text-xs text-foreground">{inviteUrl(invite.token)}</p>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => copyLink(invite.token)}
-                        className="flex cursor-pointer items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent"
-                      >
-                        {copiedToken === invite.token ? <Check className="size-3" /> : <Link2 className="size-3" />}
-                        {copiedToken === invite.token ? "Copied" : "Copy link"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => shareLink(invite.token)}
-                        className="flex cursor-pointer items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent"
-                      >
-                        <Share2 className="size-3" /> Share
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="mt-5">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Pending invites
+              </p>
+
+              {loadingList ? (
+                <p className="mt-2 text-xs text-muted-foreground">Loading…</p>
+              ) : rows.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">No invites yet — generate one above.</p>
+              ) : (
+                <div className="mt-2 flex flex-col gap-2">
+                  {rows.map((row) => {
+                    const status =
+                      emailState[row.id] === "failed"
+                        ? "Email couldn't be sent — copy the link instead."
+                        : row.emailSent
+                          ? "Invite sent"
+                          : "Link created";
+                    return (
+                      <div key={row.id} className="rounded-xl border border-border px-3.5 py-2.5">
+                        <p className="text-sm font-medium text-foreground">{row.inviteeName}</p>
+                        {row.contact && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">{row.contact}</p>
+                        )}
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{inviteUrl(row.token)}</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{status}</p>
+
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => copyLink(row.token, row.id)}
+                            className="flex cursor-pointer items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                          >
+                            {copiedId === row.id ? <Check className="size-3" /> : <Link2 className="size-3" />}
+                            {copiedId === row.id ? "Copied" : "Copy link"}
+                          </button>
+
+                          {row.looksLikeEmail && (
+                            <button
+                              type="button"
+                              onClick={() => sendEmail(row.id)}
+                              disabled={emailState[row.id] === "sending"}
+                              className="flex cursor-pointer items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {emailState[row.id] === "sending" ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <Mail className="size-3" />
+                              )}
+                              {emailState[row.id] === "sending" ? "Sending…" : row.emailSent ? "Resend" : "Send by email"}
+                            </button>
+                          )}
+
+                          {row.looksLikePhone && (
+                            <button
+                              type="button"
+                              disabled
+                              title="SMS isn't configured for this deployment yet"
+                              className="flex cursor-not-allowed items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground opacity-50"
+                            >
+                              <MessageSquareOff className="size-3" /> Send by SMS
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>

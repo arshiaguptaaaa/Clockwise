@@ -9,8 +9,15 @@ export default async function InvitePage({
 }: {
   params: Promise<{ token: string }>;
 }) {
-  const { token } = await params;
-  const invite = await prisma.invite.findUnique({ where: { token } });
+  const { token: rawToken } = await params;
+  // Tokens are always generated uppercase-alphanumeric (see
+  // generateUniqueInviteToken) — normalizing an incoming token the same
+  // way before lookup means a link that's been lowercased or had stray
+  // characters appended (both real things email clients/link scanners and
+  // copy-paste can do) still resolves, instead of failing exact-match
+  // against a token that's actually fine.
+  const token = rawToken.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const invite = token ? await prisma.invite.findUnique({ where: { token } }) : null;
 
   if (!invite) {
     return (

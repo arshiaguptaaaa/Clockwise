@@ -112,6 +112,7 @@ export async function createTrip(input: CreateTripInput) {
       invitedBy: creator.id,
       inviteeName: traveller.name,
       contact: traveller.contact || null,
+      destinations: destinations.map((d) => d.name),
     });
   }
 

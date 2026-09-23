@@ -251,6 +251,11 @@ model Invite {
   acceptedByUserId String?
   createdAt        DateTime  @default(now())
   acceptedAt       DateTime?
+  // Set only when an actual Resend send for this invite succeeded — lets
+  // the Pending Invites list distinguish "Invite sent" from "Link created"
+  // (no email attempted, or attempted and failed) rather than assuming
+  // every invite with a contact was actually delivered.
+  emailSentAt      DateTime?
 }
 
 model PrivateProfile {

@@ -11,7 +11,10 @@ function extractToken(input: string): string | null {
   const marker = "/invite/";
   const idx = trimmed.indexOf(marker);
   const token = idx >= 0 ? trimmed.slice(idx + marker.length) : trimmed;
-  return token.replace(/[^a-zA-Z0-9]/g, "") || null;
+  // Tokens are always uppercase-alphanumeric — normalize here too (not
+  // just at the destination page) so a pasted lowercase link/code works
+  // immediately rather than depending on the next page to fix it.
+  return token.toUpperCase().replace(/[^A-Z0-9]/g, "") || null;
 }
 
 export default function JoinByCodePage() {
