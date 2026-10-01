@@ -1,16 +1,19 @@
 "use server";
 
-// The deterministic escalation flow — human-triggered only, never
-// Gemini-callable. A call only ever happens when: the traveller opted in,
-// a real Commitment/hardThreshold exists, and a human explicitly presses
-// the trigger (this pass doesn't yet have an automatic readiness-engine
-// cron — see architecture note; that's future work, not faked here).
+// The human-pressed escalation path (Travellers tab "Escalate" button).
+// Gemini has its own separate path to the same real call (see
+// escalate_via_voice_call in src/lib/agent/tools.ts) — both share the one
+// real implementation (performEscalation) so there's never two slightly-
+// different versions of "what happens when a call is placed." Either way,
+// a call only ever happens when: the traveller opted in, a real
+// Commitment/hardThreshold exists, and (for the agent path specifically)
+// an unacknowledged reminder is genuinely on record — see
+// checkEscalationReadiness in readiness.ts.
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-import { gnaniVoiceProvider, isGnaniConfigured } from "@/lib/voice-escalation/gnani-provider";
-import { demoVoiceEscalationProvider } from "@/lib/voice-escalation/demo-provider";
 import { recalculateCommitmentReadiness } from "@/lib/readiness";
+import { performEscalation, type PerformEscalationResult } from "@/lib/voice-escalation/perform-escalation";
 import { SIMULATED_RESPONSES, type SimulatedResponseKey } from "@/lib/voice-escalation/simulated-responses";
 
 export async function setVoiceEscalationOptIn(optIn: boolean, phone?: string) {
@@ -22,81 +25,22 @@ export async function setVoiceEscalationOptIn(optIn: boolean, phone?: string) {
   });
 }
 
-function splitPhone(phone: string): [string, string] {
-  const match = phone.match(/^(\+\d{1,3})(\d+)$/);
-  if (match) return [match[1], match[2]];
-  return ["+91", phone.replace(/\D/g, "")];
-}
-
+// Human-pressed "Escalate" button in the Travellers tab — thin wrapper
+// around the shared performEscalation (src/lib/voice-escalation/
+// perform-escalation.ts), which also backs the agent-triggered path.
 export async function triggerEscalation(
   commitmentId: string,
   travellerId: string
-): Promise<{ ok: true; mode: string } | { ok: false; error: string }> {
+): Promise<PerformEscalationResult> {
   const actorId = await getCurrentUserId();
-  const commitment = await prisma.commitment.findUniqueOrThrow({ where: { id: commitmentId } });
-  const traveller = await prisma.user.findUniqueOrThrow({ where: { id: travellerId } });
-
-  if (!traveller.voiceEscalationOptIn) {
-    return { ok: false, error: `${traveller.name} hasn't opted into voice escalation.` };
-  }
-  if (!traveller.phone) {
-    return { ok: false, error: `${traveller.name} has no phone number on file.` };
-  }
-
-  const mode = isGnaniConfigured() ? "REAL" : "DEMO";
-
-  const event = await prisma.escalationEvent.create({
-    data: {
-      tripId: commitment.tripId,
-      commitmentId,
-      travellerId,
-      expectedActionAt: commitment.targetTime,
-      hardThresholdAt: commitment.hardThreshold,
-      status: "ESCALATING",
-      mode,
-      triggeredAt: new Date(),
-    },
+  const result = await performEscalation(commitmentId, travellerId, {
+    actorId: actorId ?? "unknown",
+    source: "HUMAN",
   });
 
-  const provider = mode === "REAL" ? gnaniVoiceProvider : demoVoiceEscalationProvider;
-  const [countryCode, phone] = splitPhone(traveller.phone);
-
-  const result = await provider.initiateCall({
-    travellerName: traveller.name,
-    phone,
-    countryCode,
-    clientReferenceId: event.id,
-  });
-
-  if (!result.placed) {
-    await prisma.escalationEvent.update({
-      where: { id: event.id },
-      data: { status: "FAILED", failureReason: result.reason },
-    });
-    revalidatePath(`/trips/${commitment.tripId}/plan/travellers`);
-    return { ok: false, error: result.reason };
-  }
-
-  await prisma.escalationEvent.update({
-    where: { id: event.id },
-    data: {
-      status: "CALLED",
-      providerConversationId: result.providerConversationId,
-      provider: mode === "REAL" ? "gnani" : "demo",
-    },
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      tripId: commitment.tripId,
-      actorId: actorId ?? "unknown",
-      actionType: "VOICE_ESCALATION_TRIGGERED",
-      payloadSummary: `${mode} escalation call to ${traveller.name} for commitment "${commitment.name}".`,
-    },
-  });
-
-  revalidatePath(`/trips/${commitment.tripId}/plan/travellers`);
-  return { ok: true, mode };
+  const commitment = await prisma.commitment.findUnique({ where: { id: commitmentId } });
+  if (commitment) revalidatePath(`/trips/${commitment.tripId}/plan/travellers`);
+  return result;
 }
 
 // DEMO mode only — real Gnani outcomes arrive via the webhook, never via

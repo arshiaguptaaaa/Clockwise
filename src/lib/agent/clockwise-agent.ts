@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { buildGroupContext, buildPrivateContext, type AgentContext } from "./context";
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
+import { acknowledgeOpenReminders } from "@/lib/readiness";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -44,6 +45,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     "- Call record_trip_understanding whenever the conversation reveals a preference, constraint, emerging/confirmed decision, conflict, participation change, or booking intent worth remembering past this conversation — this is how facts persist for future turns, not a reply to the user. Classify honestly: do not mark something CONFIRMED_DECISION unless the group has actually, explicitly agreed.",
     "- Consequential actions (transport, payment) are only ever PREPARED via tools, producing a pending card a human must confirm — never claim something is booked or charged unless a tool result says so.",
     "- For anything time/status related (readiness, ETA), always call the relevant tool rather than judging it yourself — you narrate the deterministic result, you don't invent it.",
+    "- Readiness escalation is YOUR decision, never a human's instruction to wait for. If check_readiness shows a commitment is AT_RISK/MISSED and a specific traveller hasn't checked in, first call send_readiness_reminder and nudge them yourself in-chat (low-friction, short, in character — e.g. 'Arjun, alive? 👀 We leave in 30'). Only call escalate_via_voice_call later, once there has genuinely been no response from them since — never as your first move, and never because a human told you to call someone. escalate_via_voice_call will refuse itself if the preconditions (an unacknowledged reminder, opt-in, a phone on file) aren't actually met, so attempt it honestly rather than second-guessing whether it'll work.",
     "- You have two kinds of knowledge. TRIP KNOWLEDGE (travellers, dates, bookings, commitments, decisions — already in the structured state below) you can answer directly. LIVE WORLD KNOWLEDGE (hotels, places, addresses, distances, travel time, weather) you do NOT know yourself — you MUST call search_places/search_hotels/search_nearby/get_route/get_weather and answer only from what the tool actually returned. Never guess a hotel name, address, distance, or fare — if a live tool isn't configured or fails, say so honestly and still answer whatever part of the question trip state alone can cover.",
     "- Reply in 1-3 short, conversational sentences. No headings, no bullet lists, no markdown formatting — the tool result is already shown to the user as a card, so don't repeat it verbatim, just add the reasoning/recommendation on top of it.",
     "- propose_itinerary_change and propose_uber_ride post a card EVERY member of the group will see, from either room. Only call one when the idea genuinely needs the group's agreement — never for something that only affects the speaker personally (a dietary restriction, a budget limit, wanting their own room — those stay in this conversation, never become a group proposal). The `summary`/`title` you write become the ENTIRE group-visible content — write them fresh, describing only the proposal itself (what, who it affects, when, cost if relevant). Never quote, paraphrase, or hint at anything else from this conversation, and never include a private reason behind a public ask (e.g. propose \"look at a cheaper hotel option\" — never \"...because Priya said she's on a tight budget\").",
@@ -152,6 +154,13 @@ export async function respondToGroupMessage(
   tripId: string,
   actingUserId: string
 ): Promise<AgentTurnResult> {
+  // Deterministic, not Gemini's call: the sender just speaking in the
+  // group room acknowledges any reminder outstanding for them — this is
+  // what lets escalate_via_voice_call's gate (checkEscalationReadiness)
+  // tell "reminded and genuinely unresponsive" apart from "reminded, but
+  // then said something else in chat".
+  await acknowledgeOpenReminders(tripId, actingUserId);
+
   const ctx = await buildGroupContext(tripId, actingUserId);
   const result = await runAgentTurn(ctx);
 

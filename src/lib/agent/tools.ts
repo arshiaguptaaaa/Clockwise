@@ -17,7 +17,8 @@ import {
   resolveWeatherLocation,
   isResolveFailure,
 } from "@/lib/travel/resolve";
-import { computeReadinessStatus } from "@/lib/readiness";
+import { computeReadinessStatus, recordReadinessReminder, checkEscalationReadiness } from "@/lib/readiness";
+import { performEscalation } from "@/lib/voice-escalation/perform-escalation";
 import { createProposal } from "@/lib/proposals";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
@@ -197,6 +198,33 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "send_readiness_reminder",
+    description:
+      "Record that you're sending a low-friction nudge to a SPECIFIC traveller who hasn't checked in for a shared commitment (e.g. they haven't confirmed they're ready for departure, and it's getting close). Call this, then write the actual nudge yourself in your reply in the same friendly tone as the rest of this conversation (e.g. 'Arjun, alive? 👀 We leave in 30.') — this tool only logs that the reminder moment happened, it is not what the traveller sees. Use check_readiness first if you haven't already, to confirm this commitment is actually AT_RISK or MISSED — never nudge someone over nothing.",
+    parameters: {
+      type: "object",
+      properties: {
+        travellerName: { type: "string", description: "Exact trip-roster name of the traveller who hasn't checked in" },
+        commitmentName: { type: "string", description: "Name of the commitment they haven't checked in for" },
+      },
+      required: ["travellerName", "commitmentName"],
+    },
+  },
+  {
+    name: "escalate_via_voice_call",
+    description:
+      "Independently decide to place a real outbound voice call (via Gnani) to a traveller who was already reminded (send_readiness_reminder) and has NOT responded or checked in since, when a shared commitment's hard deadline is genuinely at risk. This is YOUR decision to make from the evidence — never wait for a human to say 'call them'. It will be refused if no unacknowledged reminder is on record for this traveller, if they haven't opted into voice escalation, or if a call is already in progress. Only call this when escalation is genuinely warranted — not as a first response to silence.",
+    parameters: {
+      type: "object",
+      properties: {
+        travellerName: { type: "string", description: "Exact trip-roster name of the traveller to call" },
+        commitmentName: { type: "string", description: "Name of the commitment this escalation is about" },
+        reason: { type: "string", description: "One short phrase for the audit trail, e.g. 'no response 12 min after reminder, departure in 15'" },
+      },
+      required: ["travellerName", "commitmentName", "reason"],
+    },
+  },
+  {
     name: "update_participation_window",
     description:
       "Change the current traveller's own participation start/end dates. Only usable in that traveller's own private room, never on behalf of someone else.",
@@ -322,6 +350,10 @@ export async function executeTool(
       return proposeUberRide(input, ctx);
     case "check_readiness":
       return checkReadiness(input, ctx);
+    case "send_readiness_reminder":
+      return sendReadinessReminder(input, ctx);
+    case "escalate_via_voice_call":
+      return escalateViaVoiceCall(input, ctx);
     case "update_participation_window":
       return updateParticipationWindow(input, ctx);
     case "find_next_checkpoint":
@@ -726,6 +758,82 @@ async function checkReadiness(input: Record<string, unknown>, ctx: AgentContext)
 
   return {
     output: `Commitment "${commitment.name}" at ${commitment.location}, target ${commitment.targetTime.toISOString()}. Status: ${status} (${minutesUntil} minutes from now).`,
+  };
+}
+
+function resolveTravellerByName(name: string, ctx: AgentContext) {
+  return ctx.trip.members.find((m) => m.user.name.toLowerCase() === name.toLowerCase());
+}
+
+async function resolveCommitmentByName(name: string, tripId: string) {
+  return prisma.commitment.findFirst({ where: { tripId, name: { contains: name } } });
+}
+
+// Deliberately does NOT write the reminder text itself — Gemini writes
+// that in its own reply in the same conversational voice as everything
+// else; this only creates the real, checkable record that a reminder
+// moment occurred (see recordReadinessReminder / the REMINDED status
+// EscalationEvent was always meant to have).
+async function sendReadinessReminder(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const travellerName = (input.travellerName as string | undefined)?.trim();
+  const commitmentName = (input.commitmentName as string | undefined)?.trim();
+  if (!travellerName || !commitmentName) {
+    return { output: "Need both a traveller name and a commitment name to record a reminder." };
+  }
+
+  const traveller = resolveTravellerByName(travellerName, ctx);
+  if (!traveller) {
+    return { output: `"${travellerName}" doesn't match anyone on this trip — not recording a reminder.` };
+  }
+  const commitment = await resolveCommitmentByName(commitmentName, ctx.trip.id);
+  if (!commitment) {
+    return { output: `No commitment matching "${commitmentName}" was found — not recording a reminder.` };
+  }
+
+  await recordReadinessReminder(ctx.trip.id, commitment.id, traveller.userId);
+  return { output: `Recorded a reminder to ${traveller.user.name} for "${commitment.name}". Write the actual nudge in your reply.` };
+}
+
+// The real gate against an arbitrary "Gemini decides to call someone":
+// checkEscalationReadiness (readiness.ts) must find a genuine,
+// unacknowledged reminder already on record, opted-in consent, and a
+// phone number — all real rows, nothing taken on the model's word.
+async function escalateViaVoiceCall(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const travellerName = (input.travellerName as string | undefined)?.trim();
+  const commitmentName = (input.commitmentName as string | undefined)?.trim();
+  const reason = (input.reason as string | undefined)?.trim();
+  if (!travellerName || !commitmentName || !reason) {
+    return { output: "Need a traveller name, commitment name, and a reason to consider escalating." };
+  }
+
+  const traveller = resolveTravellerByName(travellerName, ctx);
+  if (!traveller) {
+    return { output: `"${travellerName}" doesn't match anyone on this trip — refusing to escalate.` };
+  }
+  const commitment = await resolveCommitmentByName(commitmentName, ctx.trip.id);
+  if (!commitment) {
+    return { output: `No commitment matching "${commitmentName}" was found — refusing to escalate.` };
+  }
+
+  const readiness = await checkEscalationReadiness(ctx.trip.id, commitment.id, traveller.userId);
+  if (!readiness.ok) {
+    return { output: `Not escalating: ${readiness.reason}` };
+  }
+
+  const result = await performEscalation(commitment.id, traveller.userId, {
+    actorId: ctx.clockwiseUserId,
+    source: "AGENT",
+    reason,
+  });
+
+  if (!result.ok) {
+    return { output: `Tried to call ${traveller.user.name} but it failed: ${result.error}` };
+  }
+  return {
+    output:
+      result.mode === "REAL"
+        ? `Placed a real call to ${traveller.user.name} via Gnani.`
+        : `Gnani isn't configured in this environment — simulated a demo escalation call to ${traveller.user.name} instead of a real one.`,
   };
 }
 

@@ -1,9 +1,13 @@
 // VoiceEscalationProvider — the CLOCKWISE → TRAVELLER outbound-call
 // direction, completely separate from microphone input (TRAVELLER →
-// CLOCKWISE). Only ever invoked by the deterministic escalation flow
-// (src/app/escalation-actions.ts), never by Gemini deciding to call
-// someone. GnaniVoiceProvider is the real implementation; a demo
-// simulation stands in until real credentials are confirmed working.
+// CLOCKWISE). Only ever invoked through performEscalation
+// (src/lib/voice-escalation/perform-escalation.ts), which both the
+// human-pressed button (src/app/escalation-actions.ts) and Gemini's own
+// escalate_via_voice_call tool (src/lib/agent/tools.ts) call into — never
+// directly, and never any other path that could place a call without
+// going through performEscalation's checks. GnaniVoiceProvider is the
+// real implementation; a demo simulation stands in until real
+// credentials are confirmed working.
 
 export type EscalationCallInput = {
   travellerName: string;
