@@ -31,10 +31,22 @@ async function findSupersededBooking(proposal: Proposal) {
   return prisma.booking.findUnique({ where: { sourceProposalId: proposal.supersedesId } });
 }
 
+// Re-validated here rather than trusted from the stored payload — the
+// same rule as everywhere else an LLM-originated value reaches a typed
+// column: a malformed string is dropped (startDate/endDate end up null),
+// never written as-is and never blocks the rest of the execution.
+function parseIsoDatetime(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 async function executeItineraryChange(proposal: Proposal): Promise<ExecutionResult> {
   const payload = decodeProposalPayload(proposal.payload);
   const text = payload.destination?.trim();
   if (!text) return { ok: false, error: "This proposal has no destination text to resolve." };
+  const startDate = parseIsoDatetime(payload.startTime);
+  const endDate = parseIsoDatetime(payload.endTime);
 
   const resolved = await resolveTripLocationText(text, proposal.tripId);
   if (isResolveFailure(resolved)) {
@@ -62,11 +74,26 @@ async function executeItineraryChange(proposal: Proposal): Promise<ExecutionResu
   const target = exactMatch ?? (await findSupersededDestination(proposal));
 
   if (target) {
+    // The actual "make it 10 instead" fix: previously only displayName/
+    // sourceProposalId were updated here, so a revised time never
+    // actually reached Plan state even though the place-level dedup
+    // (exactMatch, above) was already correctly avoiding a duplicate row.
+    // Only overwrite a date when THIS proposal actually carried one —
+    // never null out an existing confirmed time just because a later,
+    // unrelated proposal about the same place happened to omit timing.
     await prisma.destination.update({
       where: { id: target.id },
-      data: { displayName: resolved.label, sourceProposalId: proposal.id },
+      data: {
+        displayName: resolved.label,
+        sourceProposalId: proposal.id,
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
     });
-    return { ok: true, summary: `Updated destination "${resolved.label}" on the Plan.` };
+    return {
+      ok: true,
+      summary: `Updated destination "${resolved.label}"${startDate ? ` to ${startDate.toISOString()}` : ""} on the Plan.`,
+    };
   }
 
   const nextOrder = trip.destinations.length > 0 ? Math.max(...trip.destinations.map((d) => d.order)) + 1 : 0;
@@ -84,9 +111,11 @@ async function executeItineraryChange(proposal: Proposal): Promise<ExecutionResu
       provider: "geoapify",
       order: nextOrder,
       sourceProposalId: proposal.id,
+      startDate,
+      endDate,
     },
   });
-  return { ok: true, summary: `Added "${resolved.label}" to the Plan.` };
+  return { ok: true, summary: `Added "${resolved.label}"${startDate ? ` at ${startDate.toISOString()}` : ""} to the Plan.` };
 }
 
 async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {

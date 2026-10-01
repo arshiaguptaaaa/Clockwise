@@ -152,12 +152,14 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   {
     name: "propose_itinerary_change",
     description:
-      "Propose adding or changing a destination/stop for the WHOLE GROUP to vote on, in either GROUP or PRIVATE conversation — a private hint ('might be nice to see Salzburg') can still produce a group proposal. This does NOT change the Plan directly: it posts a group-visible proposal that travellers vote on and the organiser must explicitly hard-confirm before anything is added. Only call this for a genuinely concrete, specific idea the conversation is ready to consider — never for vague brainstorming ('somewhere fun?', 'maybe a beach?') and never twice for the same idea in one turn.",
+      "Propose adding or changing a destination/stop for the WHOLE GROUP to vote on, in either GROUP or PRIVATE conversation — a private hint ('might be nice to see Salzburg') can still produce a group proposal. This does NOT change the Plan directly: it posts a group-visible proposal that travellers vote on and the organiser must explicitly hard-confirm before anything is added. Only call this for a genuinely concrete, specific idea the conversation is ready to consider — never for vague brainstorming ('somewhere fun?', 'maybe a beach?') and never twice for the same idea in one turn. If a specific time is mentioned or agreed (e.g. '9:30', 'morning', 'the 14th'), resolve it yourself into real ISO 8601 datetimes using the trip's actual core dates from the structured state above, and pass startTime/endTime — this is what lets a later correction ('actually make it 10 instead') update the SAME plan item instead of creating a duplicate, because execution matches on the place, not on wording.",
     parameters: {
       type: "object",
       properties: {
         destination: { type: "string", description: "The place name to add, e.g. 'Salzburg, Austria' — as specific as the conversation gave you" },
-        timing: { type: "string", description: "When, if mentioned, e.g. 'as a day trip on the 14th'" },
+        timing: { type: "string", description: "Free-text display version of when, if mentioned, e.g. 'as a day trip on the 14th'" },
+        startTime: { type: "string", description: "ISO 8601 datetime you resolved from timing + the trip's real core dates, e.g. '2026-12-14T09:30:00.000Z'. Omit if genuinely unknown — never guess a date the conversation didn't support." },
+        endTime: { type: "string", description: "ISO 8601 datetime for when this ends, if known. Omit if unknown." },
         summary: { type: "string", description: "One plain sentence explaining the proposal to the group" },
       },
       required: ["destination", "summary"],
@@ -639,10 +641,22 @@ async function postProposal(
   return proposal;
 }
 
+// A malformed/un-parseable datetime string from the model is dropped
+// silently rather than failing the whole proposal — destination+summary
+// are the actual required content; timing is a nice-to-have that's
+// still useful as free text even when the ISO value didn't parse.
+function parseIsoDatetime(value: unknown): Date | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 async function proposeItineraryChange(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   const destination = (input.destination as string | undefined)?.trim();
   const summary = (input.summary as string | undefined)?.trim();
   const timing = (input.timing as string | undefined)?.trim();
+  const startTime = parseIsoDatetime(input.startTime);
+  const endTime = parseIsoDatetime(input.endTime);
 
   if (!destination || !summary) {
     return { output: "Need both a destination and a one-sentence summary to post this as a group proposal." };
@@ -652,7 +666,12 @@ async function proposeItineraryChange(input: Record<string, unknown>, ctx: Agent
     type: "ITINERARY_CHANGE",
     title: `Add ${destination}?`,
     summary,
-    payload: { destination, timing },
+    payload: {
+      destination,
+      timing,
+      startTime: startTime?.toISOString(),
+      endTime: endTime?.toISOString(),
+    },
   });
 
   return {

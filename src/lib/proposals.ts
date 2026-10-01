@@ -21,6 +21,14 @@ export type ProposalPayload = {
   // same way chat's location tools already do (stored destination first,
   // then live geocode), never fabricated.
   destination?: string;
+  // ISO 8601 datetime strings, resolved by the caller against real trip
+  // dates BEFORE this payload is built (Gemini has the trip's actual ISO
+  // core dates in its system prompt and resolves "tomorrow morning"
+  // itself) — never raw free text. proposal-execution.ts re-validates
+  // both as real dates before writing Destination.startDate/endDate;
+  // never trusted un-parsed. Omitted when timing is genuinely unknown.
+  startTime?: string;
+  endTime?: string;
   price?: string;
   // Structured amount/currency for BOOKING proposals — kept separate from
   // the free-text `price` display string so proposal-execution.ts can

@@ -4,7 +4,7 @@ import { PlaneTakeoff, PlaneLanding, MapPin, ArrowRight } from "lucide-react";
 import { getTripById } from "@/lib/trip";
 import { DESTINATION_PHOTOS } from "@/lib/photos";
 import { fetchWikipediaPhoto, type WikipediaPhoto } from "@/lib/travel/wikipedia-photo";
-import { formatDateRange } from "@/lib/format";
+import { formatDateRange, hasTimeOfDay, formatTimeOfDay } from "@/lib/format";
 import { avatarColor } from "@/lib/avatar";
 import { TripMapLoader } from "@/components/map/TripMapLoader";
 import { buildDestinationMarkers, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
@@ -157,7 +157,9 @@ export default async function PlanOverviewPage({
                             stop.startDate,
                             "short"
                           )} · ${i === 0 ? "Depart" : "Return"}`
-                        : formatDateRange(stop.startDate, stop.endDate, "short")
+                        : `${formatDateRange(stop.startDate, stop.endDate, "short")}${
+                            hasTimeOfDay(stop.startDate) ? ` · ${formatTimeOfDay(stop.startDate)}` : ""
+                          }`
                       : "Dates not set yet"}
                   </p>
                 </li>
