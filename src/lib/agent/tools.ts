@@ -19,6 +19,7 @@ import {
 } from "@/lib/travel/resolve";
 import { computeReadinessStatus } from "@/lib/readiness";
 import { createProposal } from "@/lib/proposals";
+import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
 import type { AgentContext } from "./context";
 import type { AgentToolSchema } from "./provider";
@@ -116,16 +117,36 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
-    name: "update_trip_decision",
-    description: "Record a decision the group has reached (e.g. route order, hotel choice) into structured trip state.",
+    name: "record_trip_understanding",
+    description:
+      "Record ONE piece of structured understanding from the conversation into persistent trip memory — this is how facts survive beyond the recent-message window, not a decision-making action itself. Call this whenever the conversation reveals something worth remembering, but classify it honestly by claimType: PREFERENCE (soft, flexible — 'anything under 30k works'), SOFT_CONSTRAINT (a real but negotiable limit), HARD_CONSTRAINT (a genuine blocker — 'I cannot leave before the 12th'), DECISION_CANDIDATE (multiple people appear to be converging, but nobody has explicitly confirmed — do NOT invent agreement that wasn't said), CONFIRMED_DECISION (the group has explicitly and unambiguously agreed), CONFLICT (two claims are in tension — record the tension, do not pick a winner), PARTICIPATION_CHANGE (someone's dates/availability changed after being established), BOOKING_INTENT (someone wants to book something, before it's group-ready). Never mark something CONFIRMED_DECISION from silence or from only one person speaking — silence is not consent, and the organiser does not automatically speak for the group.",
     parameters: {
       type: "object",
       properties: {
-        type: { type: "string", description: "What kind of decision, e.g. 'route', 'hotel'" },
-        value: { type: "string", description: "The decided value" },
+        claimType: {
+          type: "string",
+          enum: [
+            "PREFERENCE",
+            "SOFT_CONSTRAINT",
+            "HARD_CONSTRAINT",
+            "DECISION_CANDIDATE",
+            "CONFIRMED_DECISION",
+            "CONFLICT",
+            "PARTICIPATION_CHANGE",
+            "BOOKING_INTENT",
+          ],
+        },
+        category: { type: "string", description: "What this is about, e.g. 'flight', 'hotel', 'dates', 'budget'" },
+        value: { type: "string", description: "The actual content in plain language, e.g. 'Delhi to Bali, 10 Dec morning, ~₹28k/person'" },
         confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
+        affectedTravellerNames: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Exact trip-roster names of EVERY traveller this specifically concerns. Be narrow, not generous: 'I can't leave before 5' concerns only the speaker — omit this field entirely rather than listing everyone. 'Vasudha and I will take a separate cab' concerns exactly those two. Only leave this empty for a DECISION_CANDIDATE/CONFIRMED_DECISION/CONFLICT that genuinely affects the whole group (e.g. the trip's core dates) — those default to everyone when omitted, every other claimType defaults to the speaker alone.",
+        },
       },
-      required: ["type", "value", "confidence"],
+      required: ["claimType", "category", "value", "confidence"],
     },
   },
   {
@@ -291,8 +312,8 @@ export async function executeTool(
       return preparePayment(input, ctx);
     case "create_commitment":
       return createCommitment(input, ctx);
-    case "update_trip_decision":
-      return updateTripDecision(input, ctx);
+    case "record_trip_understanding":
+      return recordTripUnderstanding(input, ctx);
     case "propose_itinerary_change":
       return proposeItineraryChange(input, ctx);
     case "propose_uber_ride":
@@ -530,24 +551,56 @@ async function createCommitment(input: Record<string, unknown>, ctx: AgentContex
   return { output: `Logged commitment "${name}" at ${location}, target time ${targetTime.toISOString()}.` };
 }
 
-async function updateTripDecision(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
-  const type = input.type as string;
-  const value = input.value as string;
-  const confidence = (input.confidence as string) ?? "MEDIUM";
+// Real Zod validation, not just a JSON-schema hint the model might
+// ignore — malformed args are rejected here, never partially applied.
+// sourceMessageIds is derived from ctx.history's own real message ids
+// (never asked of the model, so it can never hallucinate a source) —
+// the last few turns of whichever conversation this tool was called
+// from, which is genuinely what caused Clockwise to record this.
+//
+// CONFIRMED_DECISION previously used to be settable purely from the
+// model's own self-reported "confidence: HIGH" — a real bug (fixed
+// here, not just refactored): that let the LLM mark something
+// consequential as approved with no actual group-agreement check
+// behind it. CONFIRMED here still only means "this claim is on record
+// as settled" for MEMORY purposes — it is NOT the same as, and never
+// substitutes for, organiser hard-confirmation on a Proposal (Stage
+// 2A/2B's own separate gate, untouched by this).
+async function recordTripUnderstanding(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const parsed = TripUnderstandingSchema.safeParse(input);
+  if (!parsed.success) {
+    return { output: `Couldn't record that — malformed input: ${parsed.error.issues.map((i) => i.message).join("; ")}` };
+  }
+  const { claimType, category, value, confidence, affectedTravellerNames } = parsed.data;
+  const { type, status } = resolveDecisionFields(claimType);
+
+  const sourceMessageIds = ctx.history
+    .filter((h) => !h.isClockwise)
+    .slice(-3)
+    .map((h) => h.id);
+
+  const affectedUserIds = resolveAffectedUserIds(
+    claimType,
+    affectedTravellerNames,
+    ctx.actingUserId,
+    ctx.trip.members
+  );
 
   await prisma.decision.create({
     data: {
       tripId: ctx.trip.id,
-      type: "DECISION",
-      value: JSON.stringify({ type, value }),
+      type,
+      value: `${category}: ${value}`,
       confidence,
-      status: confidence === "HIGH" ? "CONFIRMED" : "CANDIDATE",
-      sourceMessageIds: "[]",
-      confirmedBy: confidence === "HIGH" ? ctx.actingUserId : null,
+      status,
+      sourceMessageIds: JSON.stringify(sourceMessageIds),
+      confirmedBy: status === "CONFIRMED" ? ctx.actingUserId : null,
+      actorUserId: ctx.actingUserId,
+      affectedUserIds: JSON.stringify(affectedUserIds),
     },
   });
 
-  return { output: `Recorded decision: ${type} = ${value} (confidence ${confidence}).` };
+  return { output: `Recorded [${claimType}] ${category}: ${value}.` };
 }
 
 // The one place chat conversation (either channel) turns into a real

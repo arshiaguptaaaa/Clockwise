@@ -6,6 +6,7 @@ import { formatDateRange } from "@/lib/format";
 import { decodeCard } from "@/lib/action-cards";
 
 export type ConversationTurn = {
+  id: string;
   senderName: string;
   isClockwise: boolean;
   content: string;
@@ -23,12 +24,21 @@ export type AgentContext = {
 };
 
 const HISTORY_LIMIT = 30;
+// Bounded, not "every decision ever" — recent + still-relevant is what
+// actually needs to survive between turns; older CONFIRMED facts that
+// never get revisited don't need to keep costing tokens forever. Decision
+// rows have no per-traveller visibility field (by design — a Decision is
+// a group-level convergence, distinct from PrivateProfile), so the same
+// set is safe to include in both GROUP and PRIVATE context.
+const RECENT_DECISIONS_LIMIT = 15;
 
 function buildSharedStateSummary(
   trip: Trip,
   pendingCardTitles: string[],
-  pendingDocCount: number
+  pendingDocCount: number,
+  decisions: { type: string; value: string; status: string; affectedUserIds: string }[]
 ) {
+  const nameByUserId = new Map(trip.members.map((m) => [m.userId, m.user.name]));
   const route = [...trip.destinations]
     .sort((a, b) => a.order - b.order)
     .map((d) => d.name)
@@ -65,7 +75,50 @@ function buildSharedStateSummary(
     );
   }
 
+  // The actual memory fix: previously recorded Decision/constraint rows
+  // were written by the agent's decision-recording tool but never read
+  // back anywhere —
+  // they only "existed" for as long as they stayed inside the last 30
+  // raw messages. This is what lets Clockwise remember a hard constraint
+  // or a confirmed decision on turn 50 that was established on turn 3.
+  // Rendering who a claim concerns lets Gemini resolve "who still needs
+  // to respond/approve" from state alone, instead of defaulting to
+  // asking the whole group — the actual people-scoping fix.
+  function formatAffected(affectedUserIdsJson: string): string {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(affectedUserIdsJson);
+    } catch {
+      return "";
+    }
+    const names = ids.map((id) => nameByUserId.get(id)).filter((n): n is string => Boolean(n));
+    if (names.length === 0 || names.length === trip.members.length) return "";
+    return ` (concerns: ${names.join(", ")})`;
+  }
+
+  const confirmed = decisions.filter((d) => d.status === "CONFIRMED");
+  const open = decisions.filter((d) => d.status !== "CONFIRMED");
+  if (confirmed.length > 0) {
+    lines.push(
+      `Confirmed decisions/constraints so far:\n${confirmed.map((d) => `- [${d.type}] ${d.value}${formatAffected(d.affectedUserIds)}`).join("\n")}`
+    );
+  }
+  if (open.length > 0) {
+    lines.push(
+      `Still open / unresolved (not yet confirmed — do not treat these as settled):\n${open.map((d) => `- [${d.type}] ${d.value} (${d.status})${formatAffected(d.affectedUserIds)}`).join("\n")}`
+    );
+  }
+
   return lines.join("\n");
+}
+
+async function fetchRecentDecisions(tripId: string) {
+  return prisma.decision.findMany({
+    where: { tripId },
+    orderBy: { createdAt: "desc" },
+    take: RECENT_DECISIONS_LIMIT,
+    select: { type: true, value: true, status: true, affectedUserIds: true },
+  });
 }
 
 async function fetchGroupHistory(tripId: string, clockwiseUserId: string): Promise<ConversationTurn[]> {
@@ -79,6 +132,7 @@ async function fetchGroupHistory(tripId: string, clockwiseUserId: string): Promi
     .reverse()
     .filter((m) => !m.cardType) // action cards are UI objects, not conversational turns
     .map((m) => ({
+      id: m.id,
       senderName: m.sender?.name ?? "Unknown",
       isClockwise: m.senderId === clockwiseUserId,
       content: m.content,
@@ -97,7 +151,7 @@ export async function buildGroupContext(
     getClockwiseUserId(),
   ]);
 
-  const [pendingCards, pendingDocTravellers, history] = await Promise.all([
+  const [pendingCards, pendingDocTravellers, history, decisions] = await Promise.all([
     prisma.message.findMany({
       where: { tripId, channel: "GROUP", cardStatus: "PENDING" },
       orderBy: { timestamp: "desc" },
@@ -105,6 +159,7 @@ export async function buildGroupContext(
     }),
     getPendingDocumentTravellers(tripId),
     fetchGroupHistory(tripId, clockwiseUserId),
+    fetchRecentDecisions(tripId),
   ]);
 
   const pendingCardTitles = pendingCards
@@ -119,7 +174,7 @@ export async function buildGroupContext(
     clockwiseUserId,
     actingUserId,
     actingUserName: actingUser?.user.name ?? "Unknown",
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length),
+    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions),
     history,
   };
 }
@@ -137,7 +192,7 @@ export async function buildPrivateContext(
     getClockwiseUserId(),
   ]);
 
-  const [pendingCards, pendingDocTravellers, privateProfile, permissions, privateMessages] =
+  const [pendingCards, pendingDocTravellers, privateProfile, permissions, privateMessages, decisions] =
     await Promise.all([
       prisma.message.findMany({
         where: { tripId, channel: "GROUP", cardStatus: "PENDING" },
@@ -152,6 +207,7 @@ export async function buildPrivateContext(
         orderBy: { timestamp: "desc" },
         take: HISTORY_LIMIT,
       }),
+      fetchRecentDecisions(tripId),
     ]);
 
   const pendingCardTitles = pendingCards
@@ -165,6 +221,7 @@ export async function buildPrivateContext(
     .reverse()
     .filter((m) => !m.cardType)
     .map((m) => ({
+      id: m.id,
       senderName: m.senderId === clockwiseUserId ? "Clockwise" : actingUserName,
       isClockwise: m.senderId === clockwiseUserId,
       content: m.content,
@@ -211,7 +268,7 @@ export async function buildPrivateContext(
     clockwiseUserId,
     actingUserId,
     actingUserName,
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length),
+    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions),
     history,
     privateProfileSummary: profileLines.join("\n"),
   };

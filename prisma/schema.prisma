@@ -39,6 +39,18 @@ enum ClaimType {
   PREFERENCE
   HARD_CONSTRAINT
   DECISION
+  // Stage 2 additions — same Decision model, richer taxonomy. A
+  // SOFT_CONSTRAINT is weaker than HARD_CONSTRAINT (a preference the
+  // group should weigh, not an absolute blocker); CONFLICT records that
+  // two claims are in tension (e.g. two travellers proposed different
+  // dates) rather than picking a winner; PARTICIPATION_CHANGE tracks a
+  // traveller's window changing after it was already established;
+  // BOOKING_INTENT is "someone wants to book X" before it's become a
+  // group-ready decision.
+  SOFT_CONSTRAINT
+  CONFLICT
+  PARTICIPATION_CHANGE
+  BOOKING_INTENT
 }
 
 enum DecisionStatus {
@@ -352,6 +364,13 @@ model Decision {
   sourceMessageIds String
   confirmedBy      String?
   createdAt        DateTime       @default(now())
+  // People-scoping (Stage 2 P0) — actorUserId is who said it; affectedUserIds
+  // is a JSON array of TripMember.userId this claim actually concerns.
+  // Defaults to [actor] alone (see recordTripUnderstanding) — never
+  // defaults to "everyone", since most personal statements ("I can't leave
+  // before 5") concern only the speaker, not the whole group.
+  actorUserId      String?
+  affectedUserIds  String         @default("[]")
 }
 
 model Commitment {
