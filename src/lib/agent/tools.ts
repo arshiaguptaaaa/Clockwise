@@ -651,6 +651,43 @@ async function recordTripUnderstanding(input: Record<string, unknown>, ctx: Agen
     },
   });
 
+  // The actual silent-understanding fix: previously, a claim could be
+  // recorded (visible only on Agent Trace) with zero trace in the chat
+  // the group actually reads. Only surfaces for GROUP-sourced claims
+  // (the triggering message was already said in the open, so there is no
+  // private cause being exposed — see PRIVATE's own handling below) and
+  // only for claim types that represent an actual shift worth a human
+  // noticing, never every minor preference, to avoid turning ordinary
+  // chat into a stream of system cards.
+  const GROUP_WORTH_SURFACING: typeof claimType[] = [
+    "CONFIRMED_DECISION",
+    "CONFLICT",
+    "PARTICIPATION_CHANGE",
+    "HARD_CONSTRAINT",
+  ];
+  if (ctx.mode === "GROUP" && GROUP_WORTH_SURFACING.includes(claimType)) {
+    await postActionCard({
+      tripId: ctx.trip.id,
+      channel: "GROUP",
+      type: "DECISION",
+      status: "CONFIRMED",
+      data: {
+        title: "Clockwise updated the trip",
+        context: value,
+        informational: true,
+      },
+    });
+  }
+  // Deliberately NOT mirrored for PRIVATE-mode claims: the brief requires
+  // the group to see EFFECT, not private CAUSE, and this tool only
+  // records an understanding — it doesn't yet know what downstream effect
+  // (if any) that understanding will have on the shared plan. Surfacing
+  // something here would risk exposing that an unnamed traveller has a
+  // private constraint without the actual plan-level consequence to show
+  // for it. A real "private insight -> safe group effect" announcement
+  // belongs on whatever deterministic step later acts on this decision
+  // (e.g. a future readiness recalculation), not on the raw recording.
+
   return { output: `Recorded [${claimType}] ${category}: ${value}.` };
 }
 
