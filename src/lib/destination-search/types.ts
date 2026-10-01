@@ -7,7 +7,11 @@
 // field set here anymore (Stage 3 consolidation).
 import type { CanonicalPlace, PlaceSelection } from "@/lib/location/types";
 
-export type DestinationSearchResult = CanonicalPlace;
+// photoUrl is search-UI-specific (a thumbnail for the results dropdown),
+// not part of the canonical location shape itself — kept as an addition
+// here rather than on CanonicalPlace, which is also used for stored
+// Destination/Booking locations that have nothing to do with search.
+export type DestinationSearchResult = CanonicalPlace & { photoUrl?: string | null };
 
 export interface DestinationSearchProvider {
   search(query: string): Promise<DestinationSearchResult[]>;

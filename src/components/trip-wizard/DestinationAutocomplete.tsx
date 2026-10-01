@@ -174,14 +174,31 @@ export function DestinationAutocomplete({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => commit(toSelected(r))}
                   onMouseEnter={() => setHighlighted(i)}
-                  className={`flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
+                  className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
                     i === highlighted ? "bg-accent-tint text-accent-strong" : "text-foreground hover:bg-surface-muted"
                   }`}
                 >
-                  <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
+                  {r.photoUrl ? (
+                    // Real destination photography, not a bubble/icon — a
+                    // plain <img> rather than next/image since these are
+                    // external, dynamically-resolved URLs for an
+                    // ephemeral dropdown, not a page asset worth the
+                    // optimizer's build-time config.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={r.photoUrl}
+                      alt=""
+                      aria-hidden="true"
+                      className="size-9 shrink-0 rounded-md object-cover"
+                    />
+                  ) : (
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-muted">
+                      <MapPin className="size-3.5 text-muted-foreground" />
+                    </span>
+                  )}
                   <span>
                     <span className="font-medium">{r.name}</span>
-                    {r.country && <span className="text-muted-foreground">, {r.country}</span>}
+                    {r.country && <span className="block text-xs text-muted-foreground">{r.country}</span>}
                   </span>
                 </button>
               ))}
