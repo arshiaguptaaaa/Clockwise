@@ -53,6 +53,7 @@ export function TripWizard() {
   const [month, setMonth] = useState("");
 
   const [creatorName, setCreatorName] = useState("");
+  const [creatorEmail, setCreatorEmail] = useState("");
   const [travellers, setTravellers] = useState<TravellerDraft[]>([]);
 
   const [tripName, setTripName] = useState<string | null>(null);
@@ -134,6 +135,7 @@ export function TripWizard() {
           coreStartDate,
           coreEndDate,
           creatorName,
+          creatorEmail: creatorEmail.trim() || null,
           travellers: travellers.filter((t) => t.name.trim()),
         });
       } catch (err) {
@@ -357,13 +359,22 @@ export function TripWizard() {
                 <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   You · Trip organiser
                 </p>
-                <input
-                  value={creatorName}
-                  onChange={(e) => setCreatorName(e.target.value)}
-                  placeholder="Your name"
-                  autoFocus
-                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
-                />
+                <div className="flex gap-2">
+                  <input
+                    value={creatorName}
+                    onChange={(e) => setCreatorName(e.target.value)}
+                    placeholder="Your name"
+                    autoFocus
+                    className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                  />
+                  <input
+                    value={creatorEmail}
+                    onChange={(e) => setCreatorEmail(e.target.value)}
+                    placeholder="Your email"
+                    type="email"
+                    className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                  />
+                </div>
               </div>
 
               {travellers.map((t, i) => (

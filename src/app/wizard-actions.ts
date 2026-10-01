@@ -15,6 +15,7 @@ export type CreateTripInput = {
   coreStartDate: string | null; // ISO date, or null if undecided
   coreEndDate: string | null;
   creatorName: string;
+  creatorEmail?: string | null;
   travellers: { name: string; contact: string }[];
 };
 
@@ -49,7 +50,8 @@ export async function createTrip(input: CreateTripInput) {
     throw new Error("End date can't be before the start date.");
   }
 
-  const creator = await prisma.user.create({ data: { name: creatorName } });
+  const creatorEmail = input.creatorEmail?.trim() || null;
+  const creator = await prisma.user.create({ data: { name: creatorName, email: creatorEmail } });
 
   const trip = await prisma.trip.create({
     data: {
