@@ -174,12 +174,20 @@ export default async function PlanOverviewPage({
           <p className="text-sm font-medium text-foreground">
             Travellers ({trip.members.length})
           </p>
-          <Link
-            href={`/trips/${tripId}/plan/travellers`}
-            className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-accent"
-          >
-            View all <ArrowRight className="size-3.5" />
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/trips/${tripId}/agent/trace`}
+              className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Agent trace
+            </Link>
+            <Link
+              href={`/trips/${tripId}/plan/travellers`}
+              className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-accent"
+            >
+              View all <ArrowRight className="size-3.5" />
+            </Link>
+          </div>
         </div>
         <div className="flex gap-4 overflow-x-auto pb-1">
           {trip.members.map((member) => {
