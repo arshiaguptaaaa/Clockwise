@@ -17,6 +17,8 @@ import { suggestTripName } from "@/lib/trip-name";
 import { formatDateRange } from "@/lib/format";
 import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
 import { DestinationAutocomplete } from "@/components/trip-wizard/DestinationAutocomplete";
+import { WizardStepHeader } from "@/components/trip-wizard/WizardStepHeader";
+import { DestinationReveal } from "@/components/trip-wizard/DestinationReveal";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
 type DateMode = "exact" | "approximate" | "unsure";
@@ -152,27 +154,33 @@ export function TripWizard() {
         ? new Date(`${month}-01`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })
         : "Not decided yet";
 
-  return (
-    <main className="flex min-h-screen flex-col bg-page px-6 py-10">
-      <div className="mx-auto flex w-full max-w-sm flex-1 flex-col">
-        <div className="mb-6 flex items-center justify-between">
-          {stepIndex > 0 ? (
-            <button
-              type="button"
-              onClick={goBack}
-              className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
-              aria-label="Back"
-            >
-              <ArrowLeft className="size-5" />
-            </button>
-          ) : (
-            <span />
-          )}
-          <ClockwiseWordmark className="scale-75" />
-          <span className="w-5" />
-        </div>
+  const lastDestination = destinations[destinations.length - 1] ?? null;
 
-        {step === "destinations" && (
+  return (
+    <main className="flex min-h-screen flex-col bg-page">
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col lg:flex-row lg:items-stretch">
+        <div className="flex w-full flex-1 flex-col px-6 py-10 lg:max-w-md">
+          <div className="mb-4 flex items-center justify-between">
+            {stepIndex > 0 ? (
+              <button
+                type="button"
+                onClick={goBack}
+                className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Back"
+              >
+                <ArrowLeft className="size-5" />
+              </button>
+            ) : (
+              <span />
+            )}
+            <ClockwiseWordmark className="scale-75" />
+            <span className="w-5" />
+          </div>
+          <div className="mb-6">
+            <WizardStepHeader currentStep={stepIndex} />
+          </div>
+
+          {step === "destinations" && (
           <div className="flex flex-1 flex-col">
             <h1 className="font-serif text-2xl font-medium text-foreground">
               Where are we going?
@@ -448,6 +456,11 @@ export function TripWizard() {
               {isPending ? "Creating…" : "Create Trip"}
             </button>
           </div>
+        )}
+        </div>
+
+        {step === "destinations" && (
+          <DestinationReveal destination={lastDestination} />
         )}
       </div>
     </main>
