@@ -150,14 +150,20 @@ export default async function PlanOverviewPage({
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {stop.startDate && stop.endDate
+                    {stop.startDate
                       ? isEndpoint
                         ? `${formatDateRange(
                             stop.startDate,
                             stop.startDate,
                             "short"
                           )} · ${i === 0 ? "Depart" : "Return"}`
-                        : `${formatDateRange(stop.startDate, stop.endDate, "short")}${
+                        : /* A valid startDate with no endDate (e.g. a single-point
+                             activity confirmed through chat, like "Amber Fort 10
+                             AM" with no stated end time) is real information —
+                             render it standalone rather than hiding it behind
+                             "Dates not set yet" just because one of two fields
+                             is null. */
+                          `${formatDateRange(stop.startDate, stop.endDate ?? stop.startDate, "short")}${
                             hasTimeOfDay(stop.startDate) ? ` · ${formatTimeOfDay(stop.startDate)}` : ""
                           }`
                       : "Dates not set yet"}

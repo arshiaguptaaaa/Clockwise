@@ -71,9 +71,11 @@ export async function postGroupMessage(tripId: string, formData: FormData): Prom
 // always reasons over the complete, up-to-date conversation.
 export async function runGroupAgentTurn(tripId: string, actingUserId: string): Promise<void> {
   await withAgentLock(conversationLockKey(tripId, "GROUP"), async () => {
-    // Every group message goes through the real agent — it decides for
-    // itself whether to reply (via the stay_silent tool) rather than being
-    // keyword-gated on "@Clockwise".
+    // Every group message reaches this call; respondToGroupMessage itself
+    // applies a narrow deterministic pre-filter (intervention-gate.ts) for
+    // obvious filler before the real agent ever runs — everything else
+    // still goes to Gemini, which decides for itself whether to reply via
+    // the stay_silent tool rather than being keyword-gated on "@Clockwise".
     await respondToGroupMessage(tripId, actingUserId);
   });
   revalidatePath(`/trips/${tripId}/room`);

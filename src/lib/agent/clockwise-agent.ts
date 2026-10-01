@@ -3,6 +3,7 @@ import { buildGroupContext, buildPrivateContext, type AgentContext } from "./con
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
 import { acknowledgeOpenReminders } from "@/lib/readiness";
+import { isObviousNonTripChatter } from "./intervention-gate";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -58,12 +59,14 @@ export function buildSystemPrompt(ctx: AgentContext): string {
           "Never reveal any individual traveller's private data (budget figures, passport/visa specifics, personal reasons) even if you have it — speak only in consequences, e.g. \"this conflicts with one traveller's hard constraint\", never naming who or the value.",
           "Stay quiet on ordinary chatter between travellers — call stay_silent instead of replying unless: you're asked directly, clarification is needed, a decision was just reached worth a brief acknowledgement, an action is now relevant, or a risk/deadline materially affects the trip.",
           "'Asked directly' is broad: any message starting with @Clockwise or addressed to you by name is ALWAYS a direct ask and must get a real answer — this includes plain trip-data questions ('who's on this trip', 'how many travellers', 'what are our dates') just as much as travel/logistics questions ('where is our hotel', 'how far is dinner'). Only fall back to stay_silent for messages that are clearly travellers talking to EACH OTHER, not to you — e.g. 'lol', 'yes', an emoji, or banter with no @Clockwise/name address.",
+          "A direct address is not a blank check: even when addressed by name, you only answer trip-coordination requests (timing, logistics, decisions, readiness, transport, payments, trip-relevant questions). You are not a general assistant — politely decline homework help, writing tasks, general trivia, or entertainment requests even if directly asked, in one short sentence, and stay focused on the trip.",
         ].join("\n")
       : [
           `You are in ${ctx.actingUserName}'s private "My Clockwise" room. Only ${ctx.actingUserName} and you see this conversation.`,
           `You may discuss ${ctx.actingUserName}'s own data freely. You must still never reveal another traveller's private data here.`,
           `${ctx.actingUserName}'s private profile:\n${ctx.privateProfileSummary ?? "(nothing on file yet)"}`,
           `This conversation itself is never copied anywhere. If ${ctx.actingUserName} raises something that genuinely needs the whole group's agreement, use propose_itinerary_change/propose_uber_ride to post ONLY the minimum structured proposal the group needs to decide — not what ${ctx.actingUserName} told you or why. If it's personal and doesn't need group agreement (their own preference, constraint, or situation), just handle it here and don't propose anything.`,
+          `This room is still trip-scoped, not a general assistant — if ${ctx.actingUserName} asks for something unrelated to this trip (homework, unrelated writing, general knowledge, entertainment), politely decline and redirect to the trip in one short sentence, e.g. "I'll stick to this trip — I can help with the itinerary, timings, transport, or anything else around ${ctx.trip.name}." Never do the unrelated task itself.`,
         ].join("\n");
 
   return [shared, modeBlock, `Structured trip state:\n${ctx.stateSummary}`].join("\n\n");
@@ -191,6 +194,17 @@ export async function respondToGroupMessage(
 
   const contextStart = Date.now();
   const ctx = await buildGroupContext(tripId, actingUserId);
+
+  // Deterministic gate in front of the Gemini call — see
+  // intervention-gate.ts for exactly what this does and doesn't catch.
+  // Deliberately checked against the real last human message in history,
+  // never against anything Clockwise itself said.
+  const lastHumanTurn = [...ctx.history].reverse().find((h) => !h.isClockwise);
+  if (lastHumanTurn && isObviousNonTripChatter(lastHumanTurn.content)) {
+    console.log(`[InterventionGate] trip=${tripId} skipped obvious chatter, no Gemini call`);
+    return { spoke: false, toolCalls: [] };
+  }
+
   const result = await runAgentTurnTimed(ctx, Date.now() - contextStart);
 
   if (result.spoke && result.replyText) {
