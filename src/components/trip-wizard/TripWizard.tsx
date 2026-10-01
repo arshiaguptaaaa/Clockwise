@@ -7,7 +7,6 @@ import {
   ArrowRight,
   X,
   Plus,
-  MapPin,
   Calendar,
   CalendarDays,
   CalendarOff,
@@ -18,7 +17,6 @@ import { formatDateRange } from "@/lib/format";
 import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
 import { DestinationAutocomplete } from "@/components/trip-wizard/DestinationAutocomplete";
 import { WizardStepHeader } from "@/components/trip-wizard/WizardStepHeader";
-import { DestinationReveal } from "@/components/trip-wizard/DestinationReveal";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
 type DateMode = "exact" | "approximate" | "unsure";
@@ -154,33 +152,30 @@ export function TripWizard() {
         ? new Date(`${month}-01`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })
         : "Not decided yet";
 
-  const lastDestination = destinations[destinations.length - 1] ?? null;
-
   return (
-    <main className="flex min-h-screen flex-col bg-page">
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col lg:flex-row lg:items-stretch">
-        <div className="flex w-full flex-1 flex-col px-6 py-10 lg:max-w-md">
-          <div className="mb-4 flex items-center justify-between">
-            {stepIndex > 0 ? (
-              <button
-                type="button"
-                onClick={goBack}
-                className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="Back"
-              >
-                <ArrowLeft className="size-5" />
-              </button>
-            ) : (
-              <span />
-            )}
-            <ClockwiseWordmark className="scale-75" />
-            <span className="w-5" />
-          </div>
-          <div className="mb-6">
-            <WizardStepHeader currentStep={stepIndex} />
-          </div>
+    <main className="flex min-h-screen flex-col bg-page px-6 py-10">
+      <div className="mx-auto flex w-full max-w-sm flex-1 flex-col">
+        <div className="mb-4 flex items-center justify-between">
+          {stepIndex > 0 ? (
+            <button
+              type="button"
+              onClick={goBack}
+              className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Back"
+            >
+              <ArrowLeft className="size-5" />
+            </button>
+          ) : (
+            <span />
+          )}
+          <ClockwiseWordmark className="scale-75" />
+          <span className="w-5" />
+        </div>
+        <div className="mb-6">
+          <WizardStepHeader currentStep={stepIndex} />
+        </div>
 
-          {step === "destinations" && (
+        {step === "destinations" && (
           <div className="flex flex-1 flex-col">
             <h1 className="font-serif text-2xl font-medium text-foreground">
               Where are we going?
@@ -194,23 +189,31 @@ export function TripWizard() {
             </div>
 
             {destinations.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-col gap-2">
                 {destinations.map((d, i) => (
-                  <span
+                  <div
                     key={`${d.freeText ? d.displayName : d.providerPlaceId}-${i}`}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-accent-tint px-3 py-1.5 text-sm text-accent-strong"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3"
                   >
-                    <MapPin className="size-3.5" />
-                    {d.displayName}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium uppercase tracking-wide text-foreground">
+                        {d.name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {!d.freeText
+                          ? [d.region, d.country].filter(Boolean).join(", ") || "Location not confirmed"
+                          : "Added as typed"}
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeDestination(i)}
                       aria-label={`Remove ${d.displayName}`}
-                      className="cursor-pointer text-accent-strong/60 hover:text-accent-strong"
+                      className="shrink-0 cursor-pointer text-muted-foreground hover:text-danger"
                     >
-                      <X className="size-3.5" />
+                      <X className="size-4" />
                     </button>
-                  </span>
+                  </div>
                 ))}
               </div>
             )}
@@ -411,37 +414,34 @@ export function TripWizard() {
 
         {step === "review" && (
           <div className="flex flex-1 flex-col">
-            <h1 className="font-serif text-2xl font-medium text-foreground">
-              Ready to go?
-            </h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              {destinations.map((d) => d.name).join(" · ") || "Your trip"}
+            </p>
+            <input
+              value={effectiveTripName}
+              onChange={(e) => setTripName(e.target.value)}
+              className="mt-1 w-full border-none bg-transparent p-0 font-serif text-2xl font-medium text-foreground focus:outline-none"
+            />
+            <p className="mt-1 text-sm text-muted-foreground">Your trip is taking shape.</p>
 
-            <div className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm">
-              <input
-                value={effectiveTripName}
-                onChange={(e) => setTripName(e.target.value)}
-                className="w-full border-none bg-transparent p-0 font-serif text-xl font-medium text-foreground focus:outline-none"
-              />
-              <p className="mt-2 text-sm text-muted-foreground">
-                {destinations.map((d) => d.displayName).join(" · ")}
-              </p>
-              <div className="mt-3 flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{dateSummary}</span>
-                <span className="text-border">•</span>
-                <span>{1 + travellers.filter((t) => t.name.trim()).length} travellers</span>
+            <div className="mt-6 flex flex-col divide-y divide-border">
+              <div className="flex items-center justify-between py-3">
+                <span className="text-sm font-medium text-foreground">{creatorName || "You"}</span>
+                <span className="text-xs font-medium uppercase tracking-wide text-accent-strong">Organiser</span>
               </div>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                <span className="rounded-full bg-surface-muted px-2.5 py-1 text-xs text-foreground">
-                  {creatorName || "You"}
-                </span>
-                {travellers
-                  .filter((t) => t.name.trim())
-                  .map((t, i) => (
-                    <span key={i} className="rounded-full bg-surface-muted px-2.5 py-1 text-xs text-foreground">
-                      {t.name}
+              {travellers
+                .filter((t) => t.name.trim())
+                .map((t, i) => (
+                  <div key={i} className="flex items-center justify-between py-3">
+                    <span className="text-sm font-medium text-foreground">{t.name}</span>
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {t.contact.trim() ? "Invite ready" : "No contact yet"}
                     </span>
-                  ))}
-              </div>
+                  </div>
+                ))}
             </div>
+
+            <p className="mt-5 text-sm text-muted-foreground">{dateSummary}</p>
 
             <div className="flex-1" />
             {createError && (
@@ -453,14 +453,9 @@ export function TripWizard() {
               disabled={isPending}
               className="mt-4 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3.5 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isPending ? "Creating…" : "Create Trip"}
+              {isPending ? "Creating…" : "Create our trip"} <ArrowRight className="size-4" />
             </button>
           </div>
-        )}
-        </div>
-
-        {step === "destinations" && (
-          <DestinationReveal destination={lastDestination} />
         )}
       </div>
     </main>
