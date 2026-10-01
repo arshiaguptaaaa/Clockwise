@@ -11,6 +11,7 @@ import { resolveTripLocationText, isResolveFailure } from "./travel/resolve";
 import { hasValidCoordinates } from "./location/types";
 import { getOrganiserAuth, resolveRoute, isFailure } from "./transport";
 import { mobilityProvider } from "./providers/mobility";
+import { createTripPaymentRequest } from "./trip-payments";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -121,6 +122,28 @@ async function executeItineraryChange(proposal: Proposal): Promise<ExecutionResu
 async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   const payload = decodeProposalPayload(proposal.payload);
 
+  // Real fix, not a refactor: this previously marked every booking
+  // "CONFIRMED" the instant the organiser approved the PROPOSAL, even one
+  // carrying a real amount/currency — conflating "the group/organiser
+  // agreed this should happen" with "money actually moved," with no
+  // payment ever processed anywhere. A proposal that names an amount is a
+  // payment request, not a settled booking; it only becomes CONFIRMED
+  // once Pine Labs reports PROCESSED (see the webhook,
+  // /api/integrations/pinelabs/webhook).
+  if (payload.amount != null && payload.amount > 0) {
+    const result = await createTripPaymentRequest({
+      tripId: proposal.tripId,
+      purpose: proposal.title,
+      amountMinorUnits: Math.round(payload.amount * 100),
+      currency: payload.currency ?? "INR",
+      sourceProposalId: proposal.id,
+    });
+    if (!result.ok) {
+      return { ok: false, error: `Couldn't create the payment request: ${result.reason}` };
+    }
+    return { ok: true, summary: `Payment request created for "${proposal.title}" — ${result.status}.` };
+  }
+
   let location: { label: string; point: { lat: number; lng: number } } | null = null;
   if (payload.destination?.trim()) {
     const resolved = await resolveTripLocationText(payload.destination.trim(), proposal.tripId);
@@ -134,14 +157,18 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
 
   const existing = await findSupersededBooking(proposal);
 
+  // No amount involved — this is a reservation/plan item with no payment
+  // rail behind it (e.g. "book the 7pm table"), so there's nothing a
+  // provider could confirm; CONFIRMED here means "the group/organiser
+  // settled on this," never "money moved."
   const data = {
     tripId: proposal.tripId,
     type: "BOOKING",
     status: "CONFIRMED",
     participantIds: JSON.stringify([]),
     provider: payload.provider ?? "clockwise",
-    amount: payload.amount ?? null,
-    currency: payload.currency ?? null,
+    amount: null,
+    currency: null,
     placeName: location?.label ?? null,
     latitude: location?.point.lat ?? null,
     longitude: location?.point.lng ?? null,

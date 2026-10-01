@@ -35,10 +35,14 @@ export function PaymentCard({
       primaryAction={
         status === "PENDING"
           ? {
-              label: `Confirm ${amountLabel}`,
-              pendingLabel: "Processing…",
+              label: `Pay securely ${amountLabel}`,
+              pendingLabel: "Creating payment link…",
               run: async () => {
-                await confirmPayment(messageId);
+                const result = await confirmPayment(messageId);
+                if (result.paymentLinkUrl) {
+                  window.open(result.paymentLinkUrl, "_blank", "noopener,noreferrer");
+                }
+                return result;
               },
             }
           : undefined

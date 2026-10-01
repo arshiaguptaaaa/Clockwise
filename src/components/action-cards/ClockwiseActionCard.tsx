@@ -11,7 +11,11 @@ export type CardPerson = { id: string; name: string };
 export type ActionButton = {
   label: string;
   pendingLabel?: string;
-  run: () => Promise<void>;
+  // A real failure (e.g. a provider that isn't configured) must be
+  // visible, never silently swallowed — returning { error } surfaces it
+  // inline instead of pretending the action succeeded. Existing
+  // Promise<void> callers remain valid (void is part of the union).
+  run: () => Promise<{ error?: string } | void>;
 };
 
 export type ClockwiseActionCardProps = {
@@ -61,6 +65,7 @@ export function ClockwiseActionCard({
   const countdown = useCountdown(deadline);
   const [pending, startTransition] = useTransition();
   const [pendingWhich, setPendingWhich] = useState<"primary" | "secondary" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const tintClasses =
     visual.tint === "accent"
@@ -71,8 +76,10 @@ export function ClockwiseActionCard({
 
   function runAction(action: ActionButton, which: "primary" | "secondary") {
     setPendingWhich(which);
+    setActionError(null);
     startTransition(async () => {
-      await action.run();
+      const result = await action.run();
+      setActionError(result?.error ?? null);
       setPendingWhich(null);
     });
   }
@@ -149,6 +156,8 @@ export function ClockwiseActionCard({
           )}
 
           {children}
+
+          {actionError && <p className="mt-2 text-xs text-danger">{actionError}</p>}
 
           {showActions && (primaryAction || secondaryAction) && (
             <div className="mt-3 flex flex-wrap gap-2">

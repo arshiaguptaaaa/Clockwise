@@ -187,6 +187,21 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "propose_payment_request",
+    description:
+      "Propose that a real payment is needed to secure something for the trip (e.g. an activity deposit), from either GROUP or PRIVATE conversation. This does NOT create or send a payment link — it posts a group-visible proposal; only the organiser's explicit hard-confirmation actually creates a real Pine Labs payment link. Only call this when a concrete amount and what it's for are both clear from the conversation — never guess an amount that wasn't stated.",
+    parameters: {
+      type: "object",
+      properties: {
+        purpose: { type: "string", description: "What the payment is for, e.g. 'Sunset boat ride deposit'" },
+        amount: { type: "number", description: "The amount in whole currency units (e.g. 6000 for ₹6,000) — exactly as stated in the conversation, never estimated" },
+        currency: { type: "string", description: "ISO currency code, e.g. 'INR'. Defaults to INR if the conversation is in rupees and doesn't say." },
+        summary: { type: "string", description: "One plain sentence explaining the proposal to the group" },
+      },
+      required: ["purpose", "amount", "summary"],
+    },
+  },
+  {
     name: "check_readiness",
     description:
       "Deterministically check whether a logged commitment is ON_TRACK, AT_RISK, or MISSED by comparing its target time to now. Read-only — never guess this yourself, always call this tool.",
@@ -344,6 +359,8 @@ export async function executeTool(
       return createCommitment(input, ctx);
     case "record_trip_understanding":
       return recordTripUnderstanding(input, ctx);
+    case "propose_payment_request":
+      return proposePaymentRequest(input, ctx);
     case "propose_itinerary_change":
       return proposeItineraryChange(input, ctx);
     case "propose_uber_ride":
@@ -649,7 +666,7 @@ async function recordTripUnderstanding(input: Record<string, unknown>, ctx: Agen
 // place a group-visible proposal gets created from conversation.
 async function postProposal(
   ctx: AgentContext,
-  params: { type: "ITINERARY_CHANGE" | "UBER_RIDE"; title: string; summary: string; payload: Parameters<typeof createProposal>[0]["payload"] }
+  params: { type: "ITINERARY_CHANGE" | "UBER_RIDE" | "BOOKING"; title: string; summary: string; payload: Parameters<typeof createProposal>[0]["payload"] }
 ) {
   const proposal = await createProposal({
     tripId: ctx.trip.id,
@@ -671,6 +688,36 @@ async function postProposal(
   await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
 
   return proposal;
+}
+
+// Posts a BOOKING-type proposal carrying a real amount — the proposal/vote/
+// organiser-hard-confirm pipeline it goes through is identical to every
+// other proposal type; the only thing specific to payments happens later,
+// in executeBooking (proposal-execution.ts), which routes an amount-
+// bearing BOOKING proposal to createTripPaymentRequest (Pine Labs) instead
+// of marking it confirmed outright. Gemini never creates or sees a
+// payment link itself — it only ever proposes that one is needed.
+async function proposePaymentRequest(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const purpose = (input.purpose as string | undefined)?.trim();
+  const summary = (input.summary as string | undefined)?.trim();
+  const amount = Number(input.amount);
+  const currency = (input.currency as string | undefined)?.trim() || "INR";
+
+  if (!purpose || !summary || !Number.isFinite(amount) || amount <= 0) {
+    return { output: "Need a purpose, a positive amount, and a one-sentence summary to post a payment proposal." };
+  }
+
+  await postProposal(ctx, {
+    type: "BOOKING",
+    title: `Payment needed: ${purpose}`,
+    summary,
+    payload: { amount, currency },
+  });
+
+  return {
+    output: `Posted a payment proposal for ${currency} ${amount} (${purpose}) — travellers can discuss, and only the organiser's final confirmation actually creates a real payment link.`,
+    posted: true,
+  };
 }
 
 // A malformed/un-parseable datetime string from the model is dropped
