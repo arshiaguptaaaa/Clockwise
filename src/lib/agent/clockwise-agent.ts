@@ -87,7 +87,31 @@ function toAgentMessages(history: AgentContext["history"]): AgentMessage[] {
   return merged.map((m) => ({ role: m.role, content: m.lines.join("\n") }));
 }
 
-async function runAgentTurn(ctx: AgentContext): Promise<AgentTurnResult> {
+// Safe to log unconditionally: tripId, mode, round counts and millisecond
+// durations only — never message content, tool arguments, or anything
+// that could carry a secret. This is the one place the whole turn's
+// latency is visible end to end; before this, nothing measured where
+// time in a Gemini turn actually went.
+function logAgentTiming(ctx: AgentContext, timing: { contextBuildMs?: number; geminiMs: number[]; toolMs: number[]; totalMs: number }) {
+  console.log(
+    `[AgentTiming] trip=${ctx.trip.id} mode=${ctx.mode} rounds=${timing.geminiMs.length} ` +
+      (timing.contextBuildMs !== undefined ? `contextBuildMs=${timing.contextBuildMs} ` : "") +
+      `geminiMs=[${timing.geminiMs.join(",")}] toolMs=[${timing.toolMs.join(",")}] totalMs=${timing.totalMs}`
+  );
+}
+
+async function runAgentTurnTimed(ctx: AgentContext, contextBuildMs?: number): Promise<AgentTurnResult> {
+  const geminiMs: number[] = [];
+  const toolMs: number[] = [];
+  const turnStart = Date.now();
+  try {
+    return await runAgentTurn(ctx, geminiMs, toolMs);
+  } finally {
+    logAgentTiming(ctx, { contextBuildMs, geminiMs, toolMs, totalMs: Date.now() - turnStart });
+  }
+}
+
+async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: number[]): Promise<AgentTurnResult> {
   const provider = getAgentProvider();
   const system = buildSystemPrompt(ctx);
   const tools = toolsForMode(ctx.mode);
@@ -95,7 +119,9 @@ async function runAgentTurn(ctx: AgentContext): Promise<AgentTurnResult> {
   const executedTools: { name: string; input: unknown }[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const genStart = Date.now();
     const result = await provider.generate({ system, tools, messages });
+    geminiMs.push(Date.now() - genStart);
 
     if (result.error) {
       // Provider call failed after exhausting its own retries (or wasn't
@@ -138,7 +164,9 @@ async function runAgentTurn(ctx: AgentContext): Promise<AgentTurnResult> {
 
     for (const call of result.toolCalls) {
       executedTools.push({ name: call.name, input: call.input });
+      const toolStart = Date.now();
       const toolResult = await executeTool(call.name, call.input, ctx);
+      toolMs.push(Date.now() - toolStart);
       messages = [
         ...messages,
         { role: "tool", toolCallId: call.id, name: call.name, output: toolResult.output },
@@ -161,8 +189,9 @@ export async function respondToGroupMessage(
   // then said something else in chat".
   await acknowledgeOpenReminders(tripId, actingUserId);
 
+  const contextStart = Date.now();
   const ctx = await buildGroupContext(tripId, actingUserId);
-  const result = await runAgentTurn(ctx);
+  const result = await runAgentTurnTimed(ctx, Date.now() - contextStart);
 
   if (result.spoke && result.replyText) {
     await prisma.message.create({
@@ -184,8 +213,9 @@ export async function respondToPrivateMessage(
   tripId: string,
   actingUserId: string
 ): Promise<AgentTurnResult> {
+  const contextStart = Date.now();
   const ctx = await buildPrivateContext(tripId, actingUserId);
-  const result = await runAgentTurn(ctx);
+  const result = await runAgentTurnTimed(ctx, Date.now() - contextStart);
 
   if (result.spoke && result.replyText) {
     await prisma.message.create({
