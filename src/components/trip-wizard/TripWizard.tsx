@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { unstable_rethrow } from "next/navigation";
 import {
   ArrowLeft,
@@ -15,7 +15,9 @@ import { createTrip } from "@/app/wizard-actions";
 import { suggestTripName } from "@/lib/trip-name";
 import { formatDateRange } from "@/lib/format";
 import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
-import { DestinationAutocomplete } from "@/components/trip-wizard/DestinationAutocomplete";
+import { DestinationAutocomplete, type DestinationPreview } from "@/components/trip-wizard/DestinationAutocomplete";
+import { DestinationPhotoStage, type StagePhoto } from "@/components/trip-wizard/DestinationPhotoStage";
+import { CURATED_PHOTOS, curatedPhotoFor } from "@/lib/destination-photos";
 import { WizardStepHeader } from "@/components/trip-wizard/WizardStepHeader";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
@@ -41,8 +43,19 @@ function computeDates(mode: DateMode, exactStart: string, exactEnd: string, mont
   return { coreStartDate: null, coreEndDate: null };
 }
 
+// Photo for a place: a curated, fully-credited photo when we have one, else the
+// Wikipedia photo the destination search already returned, else nothing.
+function stagePhotoFor(name: string | undefined, photoUrl: string | null | undefined): StagePhoto | null {
+  const curated = curatedPhotoFor(name);
+  if (curated) return { key: curated.key, src: curated.src, label: curated.label, credit: curated.credit, objectPosition: curated.objectPosition };
+  if (photoUrl && name) return { key: `wiki:${name}`, src: photoUrl, label: name, credit: "Wikipedia" };
+  return null;
+}
+
 export function TripWizard() {
   const [stepIndex, setStepIndex] = useState(0);
+  const [preview, setPreview] = useState<DestinationPreview>({ query: "", result: null });
+  const handlePreview = useCallback((p: DestinationPreview) => setPreview(p), []);
   const step: Step = STEPS[stepIndex];
 
   const [destinations, setDestinations] = useState<SelectedDestination[]>([]);
@@ -147,6 +160,25 @@ export function TripWizard() {
     });
   }
 
+  // While typing: the highlighted result's photo, or — before results arrive —
+  // a curated place the typed letters are clearly heading towards.
+  const previewPhoto = useMemo<StagePhoto | null>(() => {
+    if (preview.result) return stagePhotoFor(preview.result.name, preview.result.photoUrl);
+    const q = preview.query.toLowerCase();
+    if (q.length >= 3) {
+      const hit = CURATED_PHOTOS.find((p) => p.matches.some((m) => m.startsWith(q)));
+      if (hit) return stagePhotoFor(hit.label, null);
+    }
+    return null;
+  }, [preview]);
+  const selectedPhotos = useMemo(
+    () =>
+      destinations
+        .map((d) => stagePhotoFor(d.name, (d as { photoUrl?: string | null }).photoUrl))
+        .filter((p): p is StagePhoto => p !== null),
+    [destinations]
+  );
+
   const dateSummary =
     dateMode === "exact" && exactStart && exactEnd
       ? formatDateRange(new Date(`${exactStart}T00:00:00Z`), new Date(`${exactEnd}T00:00:00Z`))
@@ -155,7 +187,7 @@ export function TripWizard() {
         : "Not decided yet";
 
   return (
-    <main className="flex min-h-screen flex-col bg-page px-6 py-10">
+    <main className="flex min-h-screen flex-col bg-white px-6 py-10">
       <div className="mx-auto flex w-full max-w-sm flex-1 flex-col">
         <div className="mb-4 flex items-center justify-between">
           {stepIndex > 0 ? (
@@ -179,15 +211,22 @@ export function TripWizard() {
 
         {step === "destinations" && (
           <div className="flex flex-1 flex-col">
-            <h1 className="font-serif text-2xl font-medium text-foreground">
-              Where are we going?
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Add as many or as few as you know. Clockwise can refine things later.
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 pt-2">
+                <h1 className="font-display text-[2rem] font-medium leading-[1.05] tracking-tight text-foreground">
+                  Where are
+                  <br />
+                  we <span className="italic text-accent">going?</span>
+                </h1>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Add as many or as few as you know. Clockwise can refine things later.
+                </p>
+              </div>
+              <DestinationPhotoStage preview={previewPhoto} selected={selectedPhotos} />
+            </div>
 
             <div className="mt-6">
-              <DestinationAutocomplete onAdd={addDestination} isDuplicate={isDuplicateDestination} />
+              <DestinationAutocomplete onAdd={addDestination} isDuplicate={isDuplicateDestination} onPreview={handlePreview} />
             </div>
 
             {destinations.length > 0 && (
@@ -198,7 +237,7 @@ export function TripWizard() {
                     className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium uppercase tracking-wide text-foreground">
+                      <p className="truncate font-display text-lg font-medium leading-tight text-foreground">
                         {d.name}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">

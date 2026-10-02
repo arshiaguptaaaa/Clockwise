@@ -16,12 +16,17 @@ function freeTextFallback(raw: string): SelectedDestination {
   return { freeText: true, name: trimmed, displayName: trimmed };
 }
 
+export type DestinationPreview = { query: string; result: DestinationSearchResult | null };
+
 export function DestinationAutocomplete({
   onAdd,
   isDuplicate,
+  onPreview,
 }: {
   onAdd: (destination: SelectedDestination) => void;
   isDuplicate: (destination: SelectedDestination) => boolean;
+  // Lets the page show photography for what's being typed / highlighted.
+  onPreview?: (preview: DestinationPreview) => void;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DestinationSearchResult[]>([]);
@@ -120,6 +125,13 @@ export function DestinationAutocomplete({
   }
 
   const trimmedQuery = query.trim();
+  const highlightedResult = open && results.length > 0 ? results[highlighted] ?? null : null;
+  const highlightedKey = highlightedResult?.providerPlaceId ?? highlightedResult?.displayName ?? null;
+  useEffect(() => {
+    onPreview?.({ query: trimmedQuery, result: highlightedResult });
+    // highlightedKey identifies the result; the object itself changes identity every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmedQuery, highlightedKey, onPreview]);
   const showDropdown = open && trimmedQuery.length >= MIN_QUERY_LENGTH;
 
   return (
