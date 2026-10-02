@@ -881,3 +881,47 @@ model TravellerConstraint {
 
   @@index([tripId, userId, status])
 }
+
+// Explicit, per-trip live-location consent plus the traveller's latest fix.
+// Raw coordinates exist only for server-side deterministic travel-time maths
+// and are never rendered to anyone else — the group sees a derived readiness
+// status (TravellerReadiness), never a position. consent: SHARING | DECLINED
+// | STOPPED. Stopping or declining nulls the stored coordinates.
+model TravellerLocation {
+  id             String    @id @default(cuid())
+  tripId         String
+  userId         String
+  consent        String
+  latitude       Float?
+  longitude      Float?
+  accuracyMeters Float?
+  recordedAt     DateTime?
+  consentedAt    DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tripId, userId])
+}
+
+// Derived, deterministic "will this traveller make it" state for one
+// traveller and one Commitment. Recomputed from signals (live location,
+// stated delay, ...) by src/lib/readiness-engine.ts — never by the model and
+// never per GPS tick via an LLM. status: ON_TRACK | AT_RISK | DELAYED |
+// UNKNOWN. Holds no coordinates, so it is safe to show the whole group.
+model TravellerReadiness {
+  id                  String    @id @default(cuid())
+  tripId              String
+  userId              String
+  commitmentId        String
+  status              String
+  confidence          String
+  earliestReadyAt     DateTime?
+  latestCommitmentAt  DateTime?
+  travelMinutes       Int?
+  bufferMinutes       Int?
+  manualDelayMinutes  Int       @default(0)
+  signals             String    @default("[]")
+  computedAt          DateTime  @default(now())
+
+  @@unique([tripId, userId, commitmentId])
+  @@index([tripId])
+}

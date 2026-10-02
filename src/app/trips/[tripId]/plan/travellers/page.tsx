@@ -6,6 +6,7 @@ import { formatDateRange } from "@/lib/format";
 import { computeReadinessStatus } from "@/lib/readiness";
 import { CopyInviteLink } from "@/components/trip-room/CopyInviteLink";
 import { CommitmentEscalation, type CommitmentView } from "@/components/plan/CommitmentEscalation";
+import { readinessGroupLine, currentReadinessRows } from "@/lib/readiness-engine";
 import { MapPin, Mail } from "lucide-react";
 
 export default async function PlanTravellersPage({
@@ -14,14 +15,16 @@ export default async function PlanTravellersPage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
-  const [trip, pendingInvites, commitments, escalationEvents, currentUserId] = await Promise.all([
+  const [trip, pendingInvites, commitments, escalationEvents, readinessRows, currentUserId] = await Promise.all([
     getTripById(tripId),
     prisma.invite.findMany({ where: { tripId, status: "PENDING" }, orderBy: { createdAt: "asc" } }),
     prisma.commitment.findMany({ where: { tripId } }),
     prisma.escalationEvent.findMany({ where: { tripId } }),
+    currentReadinessRows(tripId),
     getCurrentUserId(),
   ]);
 
+  const commitmentNameById = new Map(commitments.map((c) => [c.id, c.name]));
   const userById = new Map(trip.members.map((m) => [m.userId, m.user]));
   const viewerIsOrganiser = currentUserId === trip.createdBy;
 
@@ -88,6 +91,16 @@ export default async function PlanTravellersPage({
                   </span>
                 )}
               </p>
+              {readinessRows
+                .filter((r) => r.userId === member.userId)
+                .map((r) => (
+                  <p
+                    key={r.id}
+                    className={`mt-0.5 text-xs font-medium ${r.status === "ON_TRACK" ? "text-success" : r.status === "AT_RISK" ? "text-warning" : "text-danger"}`}
+                  >
+                    {readinessGroupLine(member.user.name, commitmentNameById.get(r.commitmentId) ?? "a commitment", r)}
+                  </p>
+                ))}
               {member.departureCity && (
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                   <MapPin className="size-3" />

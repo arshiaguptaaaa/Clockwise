@@ -21,6 +21,7 @@ import { computeReadinessStatus, recordReadinessReminder, checkEscalationReadine
 import { performEscalation } from "@/lib/voice-escalation/perform-escalation";
 import { createProposal } from "@/lib/proposals";
 import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
+import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
@@ -117,6 +118,19 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         },
       },
       required: ["name", "targetTimeIso", "location"],
+    },
+  },
+  {
+    name: "report_delay",
+    description:
+      "Record that the CURRENT traveller says they will be late (or no longer late) for a logged commitment — e.g. \"I'll be 20 minutes late\", \"running behind, flight landed late\". Deterministically recomputes their readiness and shows the group only a status (on track / at risk / late by ~N min), never the reason. Pass minutesLate=0 if they say they're no longer delayed. Do not use for anyone but the speaker.",
+    parameters: {
+      type: "object",
+      properties: {
+        minutesLate: { type: "number", description: "Minutes late versus the commitment time (0 clears a delay)" },
+        commitmentName: { type: "string", description: "Which commitment; omit for the soonest upcoming one they are part of" },
+      },
+      required: ["minutesLate"],
     },
   },
   {
@@ -408,6 +422,8 @@ export async function executeTool(
       return preparePayment(input, ctx);
     case "create_commitment":
       return createCommitment(input, ctx);
+    case "report_delay":
+      return reportDelay(input, ctx);
     case "record_trip_understanding":
       return recordTripUnderstanding(input, ctx);
     case "update_trip_route":
@@ -628,6 +644,33 @@ async function preparePayment(input: Record<string, unknown>, ctx: AgentContext)
   return {
     output: `Prepared a payment card pair: ${payer.user.name} will see a private authorisation request for ${currency}${amount}. The group sees only that a booking is ready and who offered to pay — no amount details are exposed to non-payers beyond the total already stated.`,
     posted: true,
+  };
+}
+
+// A stated delay is just another readiness signal: it goes through the same
+// deterministic engine a GPS fix does. The reason (if any) is never stored or
+// passed on — the group-visible result is a status and a minute count.
+async function reportDelay(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const minutes = Number(input.minutesLate);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 24 * 60) {
+    return { output: "Need minutesLate as a number of minutes (0 to clear a delay) — ask how late they expect to be." };
+  }
+  const name = (input.commitmentName as string | undefined)?.trim().toLowerCase();
+  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const views = await recomputeTravellerReadiness(ctx.trip.id, ctx.actingUserId, {
+    statedLateMinutes: Math.round(minutes),
+    sourceChannel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP",
+    sourceMessageId,
+    actorUserId: ctx.actingUserId,
+  });
+  const picked = name ? views.filter((v) => v.commitmentName.toLowerCase().includes(name)) : views.slice(0, 1);
+  if (picked.length === 0) {
+    return { output: "No logged commitment includes this traveller, so there is nothing to attach the delay to — suggest logging the commitment first (create_commitment)." };
+  }
+  return {
+    output:
+      picked.map((v) => `${v.line} (${v.status}, confidence ${v.confidence}).`).join(" ") +
+      (ctx.mode === "PRIVATE" ? " Only this status is visible to the group — not the reason." : ""),
   };
 }
 

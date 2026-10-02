@@ -6,6 +6,8 @@ import { ChatThread } from "@/components/trip-room/ChatThread";
 import { postPrivateMessage, runPrivateAgentTurn } from "@/app/actions";
 import { ConnectedServices } from "@/components/my-clockwise/ConnectedServices";
 import { CriticalTripAlerts } from "@/components/my-clockwise/CriticalTripAlerts";
+import { liveLocationOffer } from "@/lib/readiness-engine";
+import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 
 const UBER_STATUS_MESSAGES: Record<string, string> = {
   connected: "Uber connected.",
@@ -38,6 +40,9 @@ export default async function MyClockwisePage({
     },
     orderBy: { timestamp: "asc" },
   });
+
+  // Contextual only: offered when this traveller has a commitment coming up.
+  const offer = currentUserId ? await liveLocationOffer(tripId, currentUserId) : null;
 
   const roster = trip.members.map((m) => ({ id: m.userId, name: m.user.name }));
 
@@ -77,6 +82,15 @@ export default async function MyClockwisePage({
             />
           );
         })()}
+
+      {offer?.commitment && (
+        <LiveLocationCard
+          tripId={tripId}
+          commitmentName={offer.commitment.name}
+          commitmentTimeLabel={offer.commitment.targetTime.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
+          initialConsent={offer.consent}
+        />
+      )}
 
       <ChatThread
         tripId={tripId}
