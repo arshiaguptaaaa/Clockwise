@@ -83,7 +83,7 @@ export default async function TripRoomChatPage({
             <p className="font-display text-xl italic leading-tight text-foreground">Start plotting.</p>
             <p className="mt-0.5 text-xs text-muted-foreground">Say where, when, or what you&apos;re dreaming of — Clockwise keeps it all in step.</p>
           </div>
-          <SpeechBubble className="absolute right-3 top-2" tail="bottom-right">
+          <SpeechBubble className="absolute right-3 top-2 hidden sm:block" tail="bottom-right">
             Prague? Jaipur?
           </SpeechBubble>
         </div>
