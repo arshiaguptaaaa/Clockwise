@@ -21,7 +21,12 @@ type DestinationLike = {
 // those separately as plain text so nothing is silently dropped.
 export function buildDestinationMarkers(destinations: DestinationLike[]): MapMarker[] {
   const sorted = [...destinations].sort((a, b) => a.order - b.order);
-  const originOrder = sorted[0]?.order;
+  // The first stop is only an "origin" (plane icon) when the route is a
+  // round trip that starts and ends at the same place — otherwise a trip
+  // like Jaipur -> Udaipur would mislabel Jaipur as where everyone flies
+  // from. Same structural rule RouteTimeline uses for depart/return.
+  const roundTrip = sorted.length > 1 && sorted[0].name === sorted[sorted.length - 1].name;
+  const originOrder = roundTrip ? sorted[0].order : undefined;
 
   return sorted
     .filter((d): d is DestinationLike & { latitude: number; longitude: number } => d.latitude != null && d.longitude != null)
