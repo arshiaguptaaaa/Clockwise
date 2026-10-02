@@ -41,3 +41,12 @@ export function isObviousNonTripChatter(content: string): boolean {
   if (trimmed.length > 40) return false; // anything substantial goes to Gemini
   return PURE_EMOJI_RE.test(trimmed) || isPureFillerWords(trimmed);
 }
+
+// A message addressed to Clockwise ("@Clockwise …", "Clockwise, …") is a direct
+// ask and must be answered. This is enforced in code — stay_silent is not even
+// offered to the model for such a message — because a prompt rule alone was
+// observed to be ignored ("I just answered this", when it had not).
+export function isDirectlyAddressed(content: string): boolean {
+  const t = content.trim();
+  return /^@?clockwise\b/i.test(t) || /(^|\s)@clockwise\b/i.test(t);
+}

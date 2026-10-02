@@ -3,7 +3,7 @@ import { buildGroupContext, buildPrivateContext, type AgentContext } from "./con
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
 import { acknowledgeOpenReminders } from "@/lib/readiness";
-import { isObviousNonTripChatter } from "./intervention-gate";
+import { isObviousNonTripChatter, isDirectlyAddressed } from "./intervention-gate";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -122,7 +122,9 @@ async function runAgentTurnTimed(ctx: AgentContext, contextBuildMs?: number): Pr
 async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: number[]): Promise<AgentTurnResult> {
   const provider = getAgentProvider();
   const system = buildSystemPrompt(ctx);
-  const tools = toolsForMode(ctx.mode);
+  const lastHuman = [...ctx.history].reverse().find((h) => !h.isClockwise);
+  // Directly addressed => a reply is mandatory, so silence isn't an option.
+  const tools = toolsForMode(ctx.mode).filter((t) => !(t.name === "stay_silent" && lastHuman && isDirectlyAddressed(lastHuman.content)));
   let messages = toAgentMessages(ctx.history);
   const executedTools: { name: string; input: unknown }[] = [];
 
