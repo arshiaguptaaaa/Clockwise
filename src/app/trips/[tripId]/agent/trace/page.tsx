@@ -70,7 +70,18 @@ export default async function AgentTracePage({
                 <span className="text-[11px] text-muted-foreground">{formatTimestamp(entry.timestamp)}</span>
               </div>
               <p className="mt-1.5 text-sm font-medium text-foreground">{entry.title}</p>
-              <p className="mt-0.5 whitespace-pre-line break-words text-xs text-muted-foreground">{entry.detail}</p>
+              {entry.steps ? (
+                <ol className="mt-2 flex flex-col gap-1.5">
+                  {entry.steps.map((step, j) => (
+                    <li key={j} className="flex items-start gap-2 text-xs">
+                      <span className="w-24 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-accent">{step.label}</span>
+                      <span className="min-w-0 break-words text-muted-foreground">{step.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="mt-0.5 whitespace-pre-line break-words text-xs text-muted-foreground">{entry.detail}</p>
+              )}
             </li>
           ))}
         </ol>
