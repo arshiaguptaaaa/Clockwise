@@ -1,57 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import { transcribeSpeech } from "@/lib/speech";
 
-// Reuses the same GEMINI_API_KEY already powering the Clockwise agent —
-// no separate speech-to-text vendor/credential. Gemini's own multimodal
-// audio input does the transcription; the resulting text then goes
-// through the exact same send action (and therefore the exact same
-// agent) as typed input. Never returns a fabricated transcript — a
-// missing key or a failed call is reported honestly.
-const DEFAULT_MODEL = "gemini-flash-lite-latest";
-
+// Voice note -> raw transcript. The provider (Gnani when configured and the
+// format is supported, otherwise Gemini) is chosen in src/lib/speech; this
+// route reports which one actually produced the text. The transcript then
+// goes through the normal send path, same as typed input. Never returns a
+// fabricated transcript.
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Voice transcription isn't configured yet — GEMINI_API_KEY is missing." },
-      { status: 503 }
-    );
-  }
-
   const formData = await request.formData();
   const audio = formData.get("audio");
   if (!(audio instanceof Blob) || audio.size === 0) {
     return NextResponse.json({ error: "No audio was received." }, { status: 400 });
   }
+  const language = String(formData.get("language") ?? "") || process.env.SPEECH_LANGUAGE || "en-IN";
 
-  const arrayBuffer = await audio.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  const mimeType = audio.type || "audio/webm";
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: "Transcribe this audio verbatim, in the language it was spoken. Return ONLY the transcribed words — no commentary, no quotation marks, no translation.",
-            },
-            { inlineData: { mimeType, data: base64 } },
-          ],
-        },
-      ],
-    });
-
-    const transcript = response.text?.trim();
-    if (!transcript) {
-      return NextResponse.json({ error: "Couldn't make out any speech in that — try again." }, { status: 422 });
-    }
-    return NextResponse.json({ transcript });
-  } catch (err) {
-    console.error("Transcription failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Transcription failed — try again." }, { status: 502 });
+  const result = await transcribeSpeech({ audio, mimeType: audio.type || "audio/webm", languageCode: language });
+  if (result.ok) {
+    return NextResponse.json({ transcript: result.transcript, provider: result.provider, fellBackFrom: result.fellBackFrom ?? null });
   }
+  const status = result.reason === "NOT_CONFIGURED" ? 503 : result.reason === "NO_SPEECH" ? 422 : 502;
+  const message =
+    result.reason === "NOT_CONFIGURED"
+      ? "Voice transcription isn't configured yet."
+      : result.reason === "NO_SPEECH"
+        ? "Couldn't make out any speech in that — try again."
+        : "Transcription failed — try again.";
+  return NextResponse.json({ error: message, provider: result.provider }, { status });
 }
