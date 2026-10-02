@@ -9,6 +9,7 @@
 // answer is UNKNOWN rather than a guess.
 import { prisma } from "./prisma";
 import { revalidatePath } from "next/cache";
+import { notify, otherMemberIds, type Severity } from "./notifications";
 
 export type ReadinessStatus = "ON_TRACK" | "AT_RISK" | "DELAYED" | "UNKNOWN";
 export type ReadinessConfidence = "LOW" | "MEDIUM";
@@ -108,7 +109,8 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
 export function readinessGroupLine(name: string, commitmentName: string, r: { status: string; bufferMinutes: number | null }): string {
   if (r.status === "DELAYED") {
     const late = r.bufferMinutes != null ? Math.abs(r.bufferMinutes) : null;
-    return `${name} is likely to be ${late ? `~${late} min ` : ""}late for ${commitmentName}`;
+    const amount = !late ? "" : late >= 120 ? `~${Math.round(late / 60)} hours ` : `~${late} min `;
+    return `${name} is likely to be ${amount}late for ${commitmentName}`;
   }
   if (r.status === "AT_RISK") return `${name} is at risk of being late for ${commitmentName}`;
   if (r.status === "ON_TRACK") return `${name} is on track for ${commitmentName}`;
@@ -219,7 +221,7 @@ export async function recomputeTravellerReadiness(
 
     const line = readinessGroupLine(name, c.name, result);
     if (result.status !== (before?.status ?? "UNKNOWN")) {
-      await prisma.tripEvent.create({
+      const event = await prisma.tripEvent.create({
         data: {
           tripId,
           kind: "READINESS_CHANGED",
@@ -239,9 +241,27 @@ export async function recomputeTravellerReadiness(
             signals: result.signals,
             line,
           }),
-          propagation: JSON.stringify(["travellers", "readiness"]),
+          propagation: JSON.stringify(["travellers", "readiness", "notifications"]),
         },
       });
+      // A transition into trouble (or back out of it) is what the others
+      // need to hear about; UNKNOWN->ON_TRACK is not news. The body is the
+      // same group-safe line shown on the Travellers page.
+      const worsened = result.status === "AT_RISK" || result.status === "DELAYED";
+      const recovered = result.status === "ON_TRACK" && (before?.status === "AT_RISK" || before?.status === "DELAYED");
+      if (worsened || recovered) {
+        const severity: Severity = result.status === "DELAYED" ? "HIGH" : result.status === "AT_RISK" ? "IMPORTANT" : "INFO";
+        await notify({
+          tripId,
+          recipientIds: await otherMemberIds(tripId, userId),
+          severity,
+          kind: "READINESS_CHANGED",
+          title: recovered ? `${name} is back on track` : result.status === "DELAYED" ? `${name} is running late` : `${name} may be late`,
+          body: line,
+          href: `/trips/${tripId}/plan/travellers`,
+          eventId: event.id,
+        });
+      }
     }
     views.push({
       commitmentId: c.id,

@@ -16,6 +16,7 @@
   "dependencies": {
     "@google/genai": "^2.23.0",
     "@prisma/client": "^6.19.3",
+    "@types/web-push": "^3.6.4",
     "@vercel/blob": "^2.8.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.47.0",
@@ -25,6 +26,7 @@
     "react-dom": "19.2.8",
     "react-leaflet": "^5.0.0",
     "resend": "^6.28.1",
+    "web-push": "^3.6.7",
     "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },

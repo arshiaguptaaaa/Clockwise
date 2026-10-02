@@ -15,7 +15,7 @@ export function BottomNav({ tripId }: { tripId: string }) {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky bottom-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-stretch border-t border-border bg-surface/95 backdrop-blur lg:max-w-2xl lg:border-x">
+    <nav className="sticky bottom-0 pb-[env(safe-area-inset-bottom)] z-20 mx-auto flex w-full shrink-0 max-w-lg items-stretch border-t border-border bg-surface/95 backdrop-blur lg:max-w-2xl lg:border-x">
       <div className="flex w-full items-stretch">
         {TABS.map((tab) => {
           const href = `/trips/${tripId}/${tab.segment}`;

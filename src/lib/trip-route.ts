@@ -4,6 +4,7 @@
 // Every mutation also writes a TripEvent (provenance + what was
 // re-derived), which is what Agent Trace renders.
 import { revalidatePath } from "next/cache";
+import { notify, otherMemberIds } from "@/lib/notifications";
 import { prisma } from "./prisma";
 import { destinationSearchProvider } from "./destination-search/open-meteo-provider";
 import type { DestinationSearchResult } from "./destination-search/types";
@@ -129,6 +130,23 @@ async function recordRouteEvent(
       payload: JSON.stringify(payload),
       propagation: JSON.stringify(ROUTE_SURFACES),
     },
+  });
+  // Tell the others what changed — the same saved route every surface reads,
+  // in plain words. Best-effort: notify() never throws into the mutation.
+  const [actor, others] = await Promise.all([
+    ctx.actorUserId ? prisma.user.findUnique({ where: { id: ctx.actorUserId }, select: { name: true } }) : null,
+    otherMemberIds(ctx.tripId, ctx.actorUserId),
+  ]);
+  const routeAfter = Array.isArray(payload.routeAfter) ? (payload.routeAfter as string[]).join(" → ") : "";
+  await notify({
+    tripId: ctx.tripId,
+    recipientIds: others,
+    severity: "IMPORTANT",
+    kind,
+    title: "The route changed",
+    body: `${actor?.name ?? "Someone"} ${kind === "DESTINATION_ADDED" ? "added" : kind === "DESTINATION_REMOVED" ? "removed" : "moved"} ${payload.destination ?? "a stop"}. Route: ${routeAfter}.`,
+    href: `/trips/${ctx.tripId}/plan`,
+    eventId: event.id,
   });
   return event.id;
 }

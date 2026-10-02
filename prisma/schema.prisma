@@ -925,3 +925,43 @@ model TravellerReadiness {
   @@unique([tripId, userId, commitmentId])
   @@index([tripId])
 }
+
+// One in-app notification for one recipient — the persisted source of truth
+// for the bell. Push and email are delivery rails layered on top by the
+// central policy in src/lib/notifications.ts; `deliveries` records honestly
+// what each rail did (SENT / SKIPPED:<why> / FAILED:<why>), so "was this
+// person actually told?" is answerable from the row. `eventId` links back to
+// the TripEvent that caused it (the Agent Trace chain). Bodies are built only
+// from group-safe projections, never from a private source.
+model Notification {
+  id         String    @id @default(cuid())
+  tripId     String
+  userId     String
+  // INFO | IMPORTANT | HIGH | CRITICAL — drives which rails fire.
+  severity   String
+  kind       String
+  title      String
+  body       String
+  href       String?
+  eventId    String?
+  deliveries String    @default("[]")
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([tripId, createdAt])
+}
+
+// A browser's Web Push subscription for one user. endpoint is the unique
+// identity; dead ones (410/404 from the push service) are deleted on send.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

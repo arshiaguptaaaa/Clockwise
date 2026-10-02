@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { MoreVertical, UserPlus } from "lucide-react";
 import { switchTraveller } from "@/app/actions";
+import { NotificationBell } from "@/components/NotificationBell";
 import { InviteTravellersPanel } from "@/components/trip-room/InviteTravellersPanel";
 
 export function TopBar({
@@ -23,7 +24,7 @@ export function TopBar({
   const containerRef = useRef<HTMLDivElement>(null);
 
   return (
-    <header className="sticky top-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-start justify-between border-b border-border bg-surface/95 px-4 py-3 backdrop-blur lg:max-w-2xl lg:border-x">
+    <header className="sticky top-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-start justify-between border-b border-border bg-surface/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur lg:max-w-2xl lg:border-x">
       <div className="flex w-full items-start justify-between">
         <div>
           <p className="text-base font-semibold leading-tight text-foreground">
@@ -49,6 +50,8 @@ export function TopBar({
               onClose={() => setInviteOpen(false)}
             />
           )}
+
+        <NotificationBell tripId={tripId} />
 
         <div ref={containerRef} className="relative">
           <button
