@@ -1,14 +1,18 @@
-// Real calls against Gnani's Agent Builder Platform (docs.gnani.ai,
-// api.inya.ai/platform) — researched live 2026-09-21. This is Gnani's
-// outbound-call product with custom prompts + post-call webhooks, NOT
-// their separate raw ASR/TTS "Speech APIs" product.
+// Outbound calls via Gnani's Agent Builder Platform API (docs.gnani.ai/Platform/
+// Trigger_Call.md): POST https://api.inya.ai/platform/v1/agents/{botId}/trigger_call
+// with header `x-api-key` — a DIFFERENT product and key from the Speech APIs
+// (STT/TTS use `X-API-Key-ID` on api.vachana.ai). The platform key comes from
+// Agent Builder -> Settings -> API Keys (scoped `agents` / `conversations`),
+// and botId is the agent created in Agent Builder / via Create Agent.
+// Documented limits: test calls only to WHITELISTED numbers (else HTTP 400);
+// developer-role keys need ?environment=development (else 403); HTTP 200
+// means "call being placed", not completed.
 //
-// Honesty note: the trigger_call response's exact field name for the
-// conversation id was not confirmed against a live response during
-// research (no working credential to test against) — this defensively
-// checks the documented-plausible variants and fails loudly rather than
-// guessing if none are present. Verify against a real response once
-// GNANI_API_KEY/GNANI_BOT_ID are set, and tighten this if needed.
+// The documented 200 body is { status, message, response: { clientReferenceId }
+// | null, requestId } — there is NO conversation id in it. Our own
+// clientReferenceId (the EscalationEvent id) is what the post-call webhook
+// echoes back, so that is the correlation key; requestId is stored as the
+// provider reference.
 import type { EscalationCallInput, EscalationCallResult, EscalationOutcome, VoiceEscalationProvider } from "./types";
 
 const BASE_URL = "https://api.inya.ai/platform";
@@ -55,11 +59,14 @@ class GnaniVoiceProvider implements VoiceEscalationProvider {
       }
 
       const data: TriggerCallResponse = await res.json();
-      const conversationId = extractConversationId(data);
-      if (!conversationId) {
-        return { placed: false, reason: "Gnani accepted the call but returned no conversation id — cannot track its outcome." };
+      if (data.status !== undefined && data.status !== "success") {
+        return { placed: false, reason: `Gnani did not confirm the call (status ${String(data.status)}).` };
       }
-      return { placed: true, providerConversationId: conversationId };
+      // Documented reference is requestId; fall back to any id-like field, then
+      // to our own correlation id (the webhook matches on it).
+      const reference =
+        (typeof data.requestId === "string" && data.requestId) || extractConversationId(data) || input.clientReferenceId;
+      return { placed: true, providerConversationId: reference };
     } catch (err) {
       return { placed: false, reason: err instanceof Error ? err.message : "Unknown Gnani error." };
     }
