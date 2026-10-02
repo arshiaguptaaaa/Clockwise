@@ -102,7 +102,7 @@ export function HeroPhotoStage({ children }: { children?: React.ReactNode }) {
             );
           })}
         </div>
-        <SpeechBubble key={`b-${current.key}`} className="absolute -left-14 -top-9 z-10 w-max sm:-left-20" tail="bottom-right">
+        <SpeechBubble key={`b-${current.key}`} className="absolute -top-[3.25rem] right-1 z-10 w-max" tail="bottom-right">
           {moment.bubble}
         </SpeechBubble>
       </div>
