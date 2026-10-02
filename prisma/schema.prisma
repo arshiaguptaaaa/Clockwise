@@ -814,6 +814,13 @@ model Attachment {
   blobUrl      String
   blobPathname String
 
+  // Where the bytes live: "BLOB" (Vercel Blob, when BLOB_READ_WRITE_TOKEN is
+  // set) or "DATABASE" (`content` below, used when no Blob store exists).
+  // Either way the only read path is the authorised /api/attachments/[id]
+  // route — database-held bytes have no URL at all.
+  storage String @default("BLOB")
+  content Bytes?
+
   createdAt DateTime @default(now())
 }
 

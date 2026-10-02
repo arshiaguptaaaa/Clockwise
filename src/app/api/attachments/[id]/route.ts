@@ -23,9 +23,18 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const blobRes = await fetch(attachment.blobUrl);
-  if (!blobRes.ok || !blobRes.body) {
-    return NextResponse.json({ error: "File unavailable" }, { status: 502 });
+  // Bytes come from the database when no Blob store is configured, else
+  // from Blob — either way only after the authorization check above.
+  let payload: BodyInit;
+  if (attachment.storage === "DATABASE") {
+    if (!attachment.content) return NextResponse.json({ error: "File unavailable" }, { status: 502 });
+    payload = new Uint8Array(attachment.content);
+  } else {
+    const blobRes = await fetch(attachment.blobUrl);
+    if (!blobRes.ok || !blobRes.body) {
+      return NextResponse.json({ error: "File unavailable" }, { status: 502 });
+    }
+    payload = blobRes.body;
   }
 
   // Escape quotes/backslashes — filename is sanitized on upload (no
@@ -34,7 +43,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   // the quoted string.
   const safeFilename = attachment.filename.replace(/["\\]/g, "\\$&");
 
-  return new NextResponse(blobRes.body, {
+  return new NextResponse(payload, {
     headers: {
       "Content-Type": attachment.mimeType,
       "Content-Disposition": `inline; filename="${safeFilename}"`,

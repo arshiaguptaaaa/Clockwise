@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-import { isBlobConfigured } from "@/lib/attachments";
 import { AttachmentUploadForm } from "@/components/attachments/AttachmentUploadForm";
 import { FileCard } from "@/components/attachments/FileCard";
 
@@ -16,8 +15,6 @@ export default async function RoomFilesPage({
     return <p className="p-6 text-center text-sm text-muted-foreground">Sign in to see this trip&apos;s files.</p>;
   }
 
-  const blobConfigured = isBlobConfigured();
-
   // Same authorization rule as the download route (src/lib/attachments.ts
   // canReadAttachment) applied at query time: GROUP files are visible to
   // any trip member, PRIVATE files only to their recipient/uploader.
@@ -29,8 +26,7 @@ export default async function RoomFilesPage({
   // blobUrl/blobPathname in the first place is what actually prevents
   // them from ever reaching FileCard's props, not the FileCardAttachment
   // type alone.
-  const attachments = blobConfigured
-    ? await prisma.attachment.findMany({
+  const attachments = await prisma.attachment.findMany({
         where: {
           tripId,
           OR: [
@@ -49,8 +45,7 @@ export default async function RoomFilesPage({
           uploader: { select: { name: true } },
         },
         orderBy: { createdAt: "desc" },
-      })
-    : [];
+      });
 
   const groupFiles = attachments.filter((a) => a.channel === "GROUP");
   const privateFiles = attachments.filter((a) => a.channel === "PRIVATE");
@@ -59,17 +54,7 @@ export default async function RoomFilesPage({
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Files</p>
 
-      {!blobConfigured ? (
-        <div className="mt-3 rounded-lg border border-warning-tint bg-warning-tint px-3 py-3 text-xs">
-          <p className="font-medium text-warning">File storage needs setup.</p>
-          <p className="mt-1 text-muted-foreground">
-            File uploads aren&apos;t available on this deployment yet — the storage connection hasn&apos;t been
-            configured.
-          </p>
-        </div>
-      ) : (
-        <AttachmentUploadForm tripId={tripId} />
-      )}
+      <AttachmentUploadForm tripId={tripId} />
 
       <div className="mt-5">
         <p className="text-xs font-medium text-foreground">Shared with the group ({groupFiles.length})</p>

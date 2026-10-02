@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
+import { extractFromAttachment } from "@/lib/document-extraction";
 import { isBlobConfigured, validateUpload, buildBlobPathname, canUploadAttachment } from "@/lib/attachments";
 
 export type UploadAttachmentResult = { ok: true; attachmentId: string } | { ok: false; error: string };
@@ -12,10 +14,6 @@ export type UploadAttachmentResult = { ok: true; attachmentId: string } | { ok: 
 // trip membership and (for PRIVATE) recipient-is-self are both checked
 // ahead of any Blob write, not after.
 export async function uploadAttachment(formData: FormData): Promise<UploadAttachmentResult> {
-  if (!isBlobConfigured()) {
-    return { ok: false, error: "File storage isn't set up for this deployment yet." };
-  }
-
   const actorId = await getCurrentUserId();
   if (!actorId) return { ok: false, error: "Sign in to upload files." };
 
@@ -54,12 +52,17 @@ export async function uploadAttachment(formData: FormData): Promise<UploadAttach
   });
   if (!validation.ok) return { ok: false, error: validation.error };
 
+  // Vercel Blob when a store is configured; otherwise the bytes are kept
+  // in the database (private by construction — no URL exists for them).
+  const useBlob = isBlobConfigured();
   const pathname = buildBlobPathname(tripId, validation.detectedType);
-  const blob = await put(pathname, Buffer.from(bytes), {
-    access: "public",
-    addRandomSuffix: false, // pathname already contains a random id
-    contentType: file.type,
-  });
+  const blob = useBlob
+    ? await put(pathname, Buffer.from(bytes), {
+        access: "public",
+        addRandomSuffix: false, // pathname already contains a random id
+        contentType: file.type,
+      })
+    : null;
 
   try {
     const attachment = await prisma.attachment.create({
@@ -72,18 +75,27 @@ export async function uploadAttachment(formData: FormData): Promise<UploadAttach
         filename: validation.sanitizedFilename,
         mimeType: file.type,
         sizeBytes: file.size,
-        blobUrl: blob.url,
-        blobPathname: blob.pathname,
+        blobUrl: blob?.url ?? "database://attachment",
+        blobPathname: blob?.pathname ?? pathname,
+        storage: useBlob ? "BLOB" : "DATABASE",
+        content: useBlob ? null : Buffer.from(bytes),
       },
     });
 
     revalidatePath(`/trips/${tripId}/room/files`);
+
+    // A PRIVATE document is read for itinerary facts after the response goes
+    // out, so the upload itself stays fast. See document-extraction.ts for
+    // exactly what is (and is never) extracted.
+    if (channel === "PRIVATE") {
+      after(() => extractFromAttachment(attachment.id).catch((err) => console.error("[doc-extract]", err instanceof Error ? err.message : err)));
+    }
     return { ok: true, attachmentId: attachment.id };
   } catch {
     // The DB row is the source of truth for what attachments "exist" — a
     // blob with no corresponding row is an orphan. Clean it up rather
     // than leaving it to accumulate silently on every failed create.
-    await del(blob.url).catch(() => {});
+    if (blob) await del(blob.url).catch(() => {});
     return { ok: false, error: "Upload failed while saving — please try again." };
   }
 }
@@ -101,7 +113,7 @@ export async function deleteAttachment(attachmentId: string): Promise<{ ok: true
   }
 
   await prisma.attachment.delete({ where: { id: attachmentId } });
-  await del(attachment.blobUrl).catch(() => {});
+  if (attachment.storage === "BLOB") await del(attachment.blobUrl).catch(() => {});
 
   revalidatePath(`/trips/${attachment.tripId}/room/files`);
   return { ok: true };
