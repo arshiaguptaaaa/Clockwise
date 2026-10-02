@@ -14,6 +14,7 @@
 // status "PROCESSED".
 import { prisma } from "./prisma";
 import { getAppBaseUrl } from "./site-url";
+import { applyVerifiedPaymentStatus } from "./payment-lifecycle";
 import {
   createPaymentLink,
   getPaymentLinkStatus,
@@ -64,8 +65,10 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
     currency: input.currency,
     purpose: input.purpose,
     customerName: input.payerName,
-    customerContact: input.payerContact,
-    callbackUrl: `${getAppBaseUrl()}/api/integrations/pinelabs/webhook`,
+    ...(input.payerContact?.includes("@") ? { customerEmail: input.payerContact } : { customerMobile: input.payerContact }),
+    // Where the payer is sent after the hosted page: our own landing route,
+    // which re-fetches the real status. Not the webhook endpoint.
+    callbackUrl: `${getAppBaseUrl()}/api/payments/return?booking=${booking.id}`,
   });
 
   if (!result.ok) {
@@ -76,6 +79,18 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
   await prisma.booking.update({
     where: { id: booking.id },
     data: { status: result.status, confirmationId: result.paymentLinkId },
+  });
+  // Creating the link is recorded as exactly that — a link, not a payment.
+  await prisma.tripEvent.create({
+    data: {
+      tripId: input.tripId,
+      kind: "PAYMENT_LINK_CREATED",
+      scope: "GROUP",
+      sourceChannel: "PINELABS",
+      confidence: "HIGH",
+      payload: JSON.stringify({ bookingId: booking.id, amountMinor: input.amountMinorUnits, currency: input.currency, status: result.status, paid: false }),
+      propagation: JSON.stringify(["payments", "chat"]),
+    },
   });
 
   return { ok: true, bookingId: booking.id, paymentLinkUrl: result.paymentLinkUrl, status: result.status };
@@ -105,7 +120,7 @@ export async function refreshTripPaymentStatus(bookingId: string): Promise<TripP
   const live = await getPaymentLinkStatus(booking.confirmationId);
   if (!live.ok) return { ok: false, reason: live.reason };
 
-  await prisma.booking.update({ where: { id: booking.id }, data: { status: live.status } });
+  await applyVerifiedPaymentStatus(booking.id, live.status, "RETURN_PAGE");
   return { ok: true, status: live.status, amount: booking.amount, currency: booking.currency };
 }
 
@@ -114,9 +129,13 @@ export async function cancelTripPaymentRequest(bookingId: string): Promise<{ ok:
   if (!booking) return { ok: false, reason: "No payment request found for that id." };
   if (!booking.confirmationId) return { ok: false, reason: "This payment request has no Pine Labs reference yet." };
 
+  // Pine Labs only allows cancelling CREATED or CLICKED links.
+  if (booking.status !== "CREATED" && booking.status !== "CLICKED") {
+    return { ok: false, reason: `A payment request that is ${booking.status} can't be cancelled.` };
+  }
   const result = await cancelPaymentLink(booking.confirmationId);
   if (!result.ok) return result;
 
-  await prisma.booking.update({ where: { id: booking.id }, data: { status: "CANCELLED" } });
+  await applyVerifiedPaymentStatus(booking.id, "CANCELLED", "CANCEL");
   return { ok: true };
 }
