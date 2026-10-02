@@ -89,11 +89,22 @@ export function HeroPhotoStage({ children }: { children?: React.ReactNode }) {
       </div>
 
       {/* The human layer: a small illustrated moment that changes with the place */}
-      <div key={`m-${current.key}`} className="annotation-in absolute -bottom-5 right-[-6%] z-10 w-[34%] max-w-[150px] lg:-right-8">
-        <SpeechBubble className="absolute -left-14 -top-9 z-10 w-max sm:-left-20" tail="bottom-right">
+      <div className="absolute -bottom-5 right-[-6%] z-10 w-[34%] max-w-[150px] lg:-right-8">
+        {/* All eight prints are stacked and crossfaded, so none ever pops in blank */}
+        <div className="grid">
+          {SEQUENCE.map((p) => {
+            const m = MOMENT[p.key];
+            const active = p.key === current.key;
+            return (
+              <div key={p.key} className={`col-start-1 row-start-1 transition-opacity duration-700 ${active ? "opacity-100" : "opacity-0"}`}>
+                <CharacterScene scene={m.scene} tilt={m.tilt} sizes="150px" eager />
+              </div>
+            );
+          })}
+        </div>
+        <SpeechBubble key={`b-${current.key}`} className="absolute -left-14 -top-9 z-10 w-max sm:-left-20" tail="bottom-right">
           {moment.bubble}
         </SpeechBubble>
-        <CharacterScene scene={moment.scene} tilt={moment.tilt} sizes="150px" />
       </div>
 
       {children}

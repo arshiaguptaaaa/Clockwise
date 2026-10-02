@@ -10,18 +10,21 @@ export function CharacterScene({
   tilt = 3,
   sizes = "160px",
   priority = false,
+  eager = false,
 }: {
   scene: SceneKey;
   className?: string;
   tilt?: number;
   sizes?: string;
   priority?: boolean;
+  // Load immediately even when off-screen/hidden — for crossfaded stacks.
+  eager?: boolean;
 }) {
   const asset = SCENES[scene];
   return (
     <div className={`character-float ${className}`} style={{ rotate: `${tilt}deg` }} aria-hidden>
       <div className="overflow-hidden rounded-[22px] border-[3px] border-white bg-white shadow-[0_14px_30px_-12px_rgba(20,24,26,0.45)]">
-        <Image src={asset.src} alt="" width={asset.width} height={asset.height} sizes={sizes} priority={priority} className="block h-auto w-full" />
+        <Image src={asset.src} alt="" width={asset.width} height={asset.height} sizes={sizes} priority={priority} loading={eager || priority ? "eager" : "lazy"} className="block h-auto w-full" />
       </div>
     </div>
   );
