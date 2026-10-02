@@ -25,7 +25,7 @@ export default async function TripShellLayout({
   const subtitle = `${trip.members.length} ${trip.members.length === 1 ? "traveller" : "travellers"} · ${dateRange}`;
 
   return (
-    <div className="flex h-screen flex-col bg-page">
+    <div className="flex h-screen flex-col bg-trip-canvas">
       <TopBar
         title={trip.name}
         subtitle={subtitle}

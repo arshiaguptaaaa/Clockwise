@@ -27,7 +27,7 @@ export function TopBar({
     <header className="sticky top-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-start justify-between border-b border-border bg-surface/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur lg:max-w-2xl lg:border-x">
       <div className="flex w-full items-start justify-between">
         <div>
-          <p className="text-base font-semibold leading-tight text-foreground">
+          <p className="font-display text-xl font-medium leading-tight tracking-tight text-foreground">
             {title}
           </p>
           <p className="text-xs text-muted-foreground">{subtitle}</p>

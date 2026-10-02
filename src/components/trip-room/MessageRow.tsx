@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { Clock, Volume2, Square, Paperclip } from "lucide-react";
-import { avatarColor } from "@/lib/avatar";
+import { Face } from "@/components/art/CharacterScene";
+import { faceIndexForId, popTintForId } from "@/lib/characters";
 
 export type MessageAttachment = { id: string; filename: string };
 
 type Props = {
+  senderId?: string;
   senderName: string;
   content: string;
   timestamp: Date;
@@ -77,11 +79,11 @@ function PlayResponseButton({ text }: { text: string }) {
   );
 }
 
-export function MessageRow({ senderName, content, timestamp, isClockwise, attachments = [] }: Props) {
+export function MessageRow({ senderId, senderName, content, timestamp, isClockwise, attachments = [] }: Props) {
   if (isClockwise) {
     return (
       <div className="flex items-start gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground ring-2 ring-pop-pink">
           <Clock className="size-4" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
@@ -89,7 +91,7 @@ export function MessageRow({ senderName, content, timestamp, isClockwise, attach
             <span className="text-sm font-medium text-accent-strong">Clockwise</span>
             <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
           </div>
-          <div className="mt-1 rounded-xl bg-accent-tint px-3 py-2 text-sm leading-relaxed text-foreground">
+          <div className="mt-1 rounded-2xl rounded-tl-md border border-accent/15 bg-accent-tint px-3.5 py-2.5 text-sm leading-relaxed text-foreground shadow-[0_6px_16px_-10px_rgba(30,75,58,0.5)]">
             {content}
           </div>
           <AttachmentChips attachments={attachments} />
@@ -99,22 +101,22 @@ export function MessageRow({ senderName, content, timestamp, isClockwise, attach
     );
   }
 
-  const color = avatarColor(senderName);
+  const key = senderId ?? senderName;
 
   return (
     <div className="flex items-start gap-3">
-      <span
-        className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-medium"
-        style={{ backgroundColor: color.bg, color: color.text }}
-      >
-        {senderName.slice(0, 1)}
-      </span>
+      <Face index={faceIndexForId(key)} className="mt-0.5 size-9" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-foreground">{senderName}</span>
+          <span className="font-display text-[15px] font-medium text-foreground">{senderName}</span>
           <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
         </div>
-        <p className="mt-0.5 text-sm leading-relaxed text-foreground">{content}</p>
+        <p
+          className="mt-1 inline-block max-w-full rounded-2xl rounded-tl-md px-3.5 py-2 text-sm leading-relaxed text-foreground"
+          style={{ backgroundColor: popTintForId(key) }}
+        >
+          {content}
+        </p>
         <AttachmentChips attachments={attachments} />
       </div>
     </div>

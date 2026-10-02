@@ -37,3 +37,17 @@ export type SceneKey = keyof typeof SCENES;
 
 export const FACE_COUNT = 12;
 export const faceSrc = (index: number) => `/characters/face-${String(((index % FACE_COUNT) + FACE_COUNT) % FACE_COUNT + 1).padStart(2, "0")}.webp`;
+
+// A stable face for a person, derived from their user id — arbitrary but fixed,
+// and never from their name or anything about them.
+export function faceIndexForId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % FACE_COUNT;
+}
+
+// Tints for chat bubbles / chips, picked the same way (by id, not by person).
+export const POP_TINTS = ["#fde6ef", "#fff3c8", "#e1e9ff", "#dff3e4", "#ffe6cf"] as const;
+export function popTintForId(id: string): string {
+  return POP_TINTS[faceIndexForId(id) % POP_TINTS.length];
+}

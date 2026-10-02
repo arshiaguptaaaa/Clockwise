@@ -110,6 +110,7 @@ export default async function MyClockwisePage({
         channel="PRIVATE"
         messages={messages.map((m) => ({
           id: m.id,
+          senderId: m.senderId ?? undefined,
           senderName: m.sender?.name ?? "Unknown",
           content: m.content,
           timestamp: m.timestamp,

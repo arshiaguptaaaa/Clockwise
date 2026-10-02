@@ -12,6 +12,7 @@ import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
 
 export type ChatThreadMessage = {
   id: string;
+  senderId?: string;
   senderName: string;
   content: string;
   timestamp: Date;
@@ -103,6 +104,7 @@ export function ChatThread({
           ) : (
             <MessageRow
               key={message.id}
+              senderId={message.senderId}
               senderName={message.senderName}
               content={message.content}
               timestamp={message.timestamp}

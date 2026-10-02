@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { getTripById } from "@/lib/trip";
 import { getCurrentUserId } from "@/lib/session";
-import { avatarColor } from "@/lib/avatar";
+import { Face } from "@/components/art/CharacterScene";
+import { faceIndexForId } from "@/lib/characters";
 import { formatDateRange } from "@/lib/format";
 import { computeReadinessStatus } from "@/lib/readiness";
 import { CopyInviteLink } from "@/components/trip-room/CopyInviteLink";
@@ -79,15 +80,7 @@ export default async function PlanTravellersPage({
             key={member.userId}
             className="flex items-center gap-3 rounded-xl border border-border px-3.5 py-3"
           >
-            <span
-              className="flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-medium"
-              style={{
-                backgroundColor: avatarColor(member.user.name).bg,
-                color: avatarColor(member.user.name).text,
-              }}
-            >
-              {member.user.name.slice(0, 1)}
-            </span>
+            <Face index={faceIndexForId(member.userId)} className="size-11" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-foreground">
                 {member.user.name}
@@ -134,8 +127,8 @@ export default async function PlanTravellersPage({
                 key={invite.id}
                 className="flex items-center gap-3 rounded-xl border border-dashed border-border px-3.5 py-3"
               >
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-medium text-muted-foreground">
-                  {invite.inviteeName.slice(0, 1)}
+                <span className="opacity-70 grayscale">
+                  <Face index={faceIndexForId(invite.id)} className="size-11" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">{invite.inviteeName}</p>

@@ -14,6 +14,16 @@
   --accent-foreground: #f5f7f3;
   --accent-tint: #e8f0ea;
 
+  --pop-pink: #f08cb8;
+  --pop-pink-tint: #fde6ef;
+  --pop-yellow: #f4c430;
+  --pop-yellow-tint: #fff3c8;
+  --pop-blue: #2f5fe0;
+  --pop-blue-tint: #e1e9ff;
+  --pop-orange: #f28a2e;
+  --pop-orange-tint: #ffe6cf;
+  --trip-canvas: #fff5ea;
+
   --success: #1d8a4f;
   --success-tint: #e6f4ea;
   --warning: #b5432e;
@@ -36,6 +46,15 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-tint: var(--accent-tint);
 
+  --color-pop-pink: var(--pop-pink);
+  --color-pop-pink-tint: var(--pop-pink-tint);
+  --color-pop-yellow: var(--pop-yellow);
+  --color-pop-yellow-tint: var(--pop-yellow-tint);
+  --color-pop-blue: var(--pop-blue);
+  --color-pop-blue-tint: var(--pop-blue-tint);
+  --color-pop-orange: var(--pop-orange);
+  --color-pop-orange-tint: var(--pop-orange-tint);
+  --color-trip-canvas: var(--trip-canvas);
   --color-success: var(--success);
   --color-success-tint: var(--success-tint);
   --color-warning: var(--warning);

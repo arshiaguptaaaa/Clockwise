@@ -3,6 +3,7 @@ import { getTripById } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { getCurrentUserId } from "@/lib/session";
 import { ChatThread } from "@/components/trip-room/ChatThread";
+import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
@@ -70,12 +71,29 @@ export default async function TripRoomChatPage({
     };
   }
 
+  // A brand-new room (only Clockwise's welcome so far) gets an illustrated nudge.
+  const isFresh = messages.length <= 1;
+
   return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {isFresh && (
+        <div className="relative mx-4 mt-3 flex shrink-0 items-center gap-4 overflow-hidden rounded-3xl bg-pop-yellow-tint px-4 py-3">
+          <CharacterScene scene="map" tilt={-4} sizes="96px" className="w-20 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-display text-xl italic leading-tight text-foreground">Start plotting.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Say where, when, or what you&apos;re dreaming of — Clockwise keeps it all in step.</p>
+          </div>
+          <SpeechBubble className="absolute right-3 top-2" tail="bottom-right">
+            Prague? Jaipur?
+          </SpeechBubble>
+        </div>
+      )}
     <ChatThread
       tripId={tripId}
       channel="GROUP"
       messages={messages.map((m) => ({
         id: m.id,
+        senderId: m.senderId ?? undefined,
         senderName: m.sender?.name ?? "Unknown",
         content: m.content,
         timestamp: m.timestamp,
@@ -95,5 +113,6 @@ export default async function TripRoomChatPage({
       placeholder="Message the group…"
       emptyText="No messages yet. Say hello to the group."
     />
+    </div>
   );
 }

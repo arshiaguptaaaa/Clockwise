@@ -31,7 +31,9 @@ export function BottomNav({ tripId }: { tripId: string }) {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="size-5" strokeWidth={active ? 2.25 : 1.75} />
+              <span className={`flex h-7 w-12 items-center justify-center rounded-full transition-colors ${active ? "bg-pop-pink-tint" : ""}`}>
+                <Icon className="size-5" strokeWidth={active ? 2.25 : 1.75} />
+              </span>
               <span className="text-[11px] font-medium">{tab.label}</span>
             </Link>
           );

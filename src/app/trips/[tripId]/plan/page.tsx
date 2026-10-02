@@ -6,7 +6,8 @@ import { DESTINATION_PHOTOS } from "@/lib/photos";
 import { curatedPhotoFor } from "@/lib/destination-photos";
 import { fetchWikipediaPhoto, type WikipediaPhoto } from "@/lib/travel/wikipedia-photo";
 import { formatDateRange } from "@/lib/format";
-import { avatarColor } from "@/lib/avatar";
+import { Face } from "@/components/art/CharacterScene";
+import { faceIndexForId } from "@/lib/characters";
 import { TripMapLoader } from "@/components/map/TripMapLoader";
 import { buildDestinationMarkers, buildJourneyLine, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
 import { RouteTimeline } from "@/components/plan/RouteTimeline";
@@ -144,7 +145,7 @@ export default async function PlanOverviewPage({
 
       <div className="mt-6 border-t border-border pt-5">
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">
+          <p className="font-display text-lg font-medium text-foreground">
             Travellers ({trip.members.length})
           </p>
           <div className="flex items-center gap-3">
@@ -164,15 +165,9 @@ export default async function PlanOverviewPage({
         </div>
         <div className="flex gap-4 overflow-x-auto pb-1">
           {trip.members.map((member) => {
-            const color = avatarColor(member.user.name);
             return (
               <div key={member.userId} className="flex shrink-0 flex-col items-center gap-1.5">
-                <span
-                  className="flex size-11 items-center justify-center rounded-full text-sm font-medium"
-                  style={{ backgroundColor: color.bg, color: color.text }}
-                >
-                  {member.user.name.slice(0, 1)}
-                </span>
+                <Face index={faceIndexForId(member.userId)} className="size-12" />
                 <span className="text-xs font-medium text-foreground">
                   {member.user.name}
                 </span>
