@@ -29,6 +29,8 @@ export type ReadinessInput = {
   target: LatLng | null;
   // Minutes the traveller said they'll be late vs the commitment time.
   manualLateMinutes: number;
+  // A ready-time the traveller reported (e.g. on a voice call).
+  reportedReadyAt?: Date | null;
 };
 
 export type ReadinessResult = {
@@ -54,7 +56,7 @@ export function estimateTravelMinutes(from: LatLng, to: LatLng): number {
 }
 
 export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
-  const { now, latestCommitmentAt, position, target, manualLateMinutes } = input;
+  const { now, latestCommitmentAt, position, target, manualLateMinutes, reportedReadyAt } = input;
   const signals: string[] = [];
 
   let travelMinutes: number | null = null;
@@ -65,6 +67,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
     signals.push("LIVE_LOCATION");
   }
   if (manualLateMinutes > 0) signals.push("STATED_DELAY");
+  if (reportedReadyAt) signals.push("REPORTED_READY_TIME");
 
   if (!latestCommitmentAt || signals.length === 0) {
     return {
@@ -79,6 +82,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
   }
 
   let earliestMs = now.getTime() + (travelMinutes ?? 0) * 60_000;
+  if (reportedReadyAt) earliestMs = Math.max(earliestMs, reportedReadyAt.getTime() + (travelMinutes ?? 0) * 60_000);
   if (manualLateMinutes > 0) {
     earliestMs = Math.max(earliestMs, latestCommitmentAt.getTime() + manualLateMinutes * 60_000);
   }
@@ -109,6 +113,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
 export function readinessGroupLine(name: string, commitmentName: string, r: { status: string; bufferMinutes: number | null }): string {
   if (r.status === "DELAYED") {
     const late = r.bufferMinutes != null ? Math.abs(r.bufferMinutes) : null;
+    if (late != null && late >= 360) return `${name} is unlikely to make ${commitmentName}`;
     const amount = !late ? "" : late >= 120 ? `~${Math.round(late / 60)} hours ` : `~${late} min `;
     return `${name} is likely to be ${amount}late for ${commitmentName}`;
   }
@@ -156,7 +161,11 @@ async function resolveCommitmentTarget(tripId: string, location: string): Promis
 export type RecomputeOptions = {
   // Set when the traveller just said they'll be late (0 clears a prior delay).
   statedLateMinutes?: number;
-  sourceChannel: "GROUP" | "PRIVATE" | "LOCATION" | "SYSTEM";
+  // Set when a call/other source reported when they'll be ready; with
+  // onlyCommitmentId it applies to that one commitment only.
+  reportedReadyAt?: Date | null;
+  onlyCommitmentId?: string;
+  sourceChannel: "GROUP" | "PRIVATE" | "LOCATION" | "GNANI_CALL" | "SYSTEM";
   sourceMessageId?: string | null;
   actorUserId?: string | null;
 };
@@ -198,11 +207,14 @@ export async function recomputeTravellerReadiness(
 
   for (const c of mine) {
     const before = prior.get(c.id);
-    const manualLate = opts.statedLateMinutes ?? before?.manualDelayMinutes ?? 0;
+    const applies = !opts.onlyCommitmentId || opts.onlyCommitmentId === c.id;
+    const manualLate = (applies ? opts.statedLateMinutes : undefined) ?? before?.manualDelayMinutes ?? 0;
+    const reportedReady = (applies ? opts.reportedReadyAt : undefined) ?? before?.reportedReadyAt ?? null;
     const target = position ? await resolveCommitmentTarget(tripId, c.location) : null;
-    const result = evaluateReadiness({ now, latestCommitmentAt: c.targetTime, position, target, manualLateMinutes: manualLate });
+    const result = evaluateReadiness({ now, latestCommitmentAt: c.targetTime, position, target, manualLateMinutes: manualLate, reportedReadyAt: reportedReady });
 
     const data = {
+      reportedReadyAt: reportedReady,
       status: result.status,
       confidence: result.confidence,
       earliestReadyAt: result.earliestReadyAt,

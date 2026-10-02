@@ -12,7 +12,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-import { recalculateCommitmentReadiness } from "@/lib/readiness";
+import { applyCallOutcome } from "@/lib/voice-escalation/apply-call-outcome";
 import { performEscalation, type PerformEscalationResult } from "@/lib/voice-escalation/perform-escalation";
 import { SIMULATED_RESPONSES, type SimulatedResponseKey } from "@/lib/voice-escalation/simulated-responses";
 
@@ -52,18 +52,13 @@ export async function simulateEscalationResponse(eventId: string, key: Simulated
   }
 
   const sim = SIMULATED_RESPONSES[key];
-  await prisma.escalationEvent.update({
-    where: { id: eventId },
-    data: {
-      status: "RESOLVED",
-      callStatus: "COMPLETED",
-      callDisposition: sim.disposition,
-      callTranscript: sim.transcript,
-      estimatedDelayMinutes: sim.estimatedDelayMinutes,
-      resolvedAt: new Date(),
-    },
+  await applyCallOutcome({
+    eventId,
+    callStatus: "COMPLETED",
+    disposition: sim.disposition,
+    estimatedDelayMinutes: sim.estimatedDelayMinutes,
+    transcript: sim.transcript,
+    source: "DEMO_SIMULATION",
   });
-
-  await recalculateCommitmentReadiness(event.commitmentId, sim.estimatedDelayMinutes);
   revalidatePath(`/trips/${event.tripId}/plan/travellers`);
 }

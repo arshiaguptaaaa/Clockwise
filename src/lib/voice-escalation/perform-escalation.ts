@@ -81,6 +81,21 @@ export async function performEscalation(
     },
   });
 
+  await prisma.tripEvent.create({
+    data: {
+      tripId: commitment.tripId,
+      kind: "VOICE_ESCALATION_PLACED",
+      scope: "GROUP",
+      actorUserId: triggeredBy.actorId === "unknown" ? null : triggeredBy.actorId,
+      subjectUserId: travellerId,
+      sourceChannel: triggeredBy.source === "AGENT" ? "AGENT" : "HUMAN",
+      // Only that a call went out and for which commitment — the reason an
+      // agent gave stays in the AuditLog row, not in a shareable event.
+      payload: JSON.stringify({ commitment: commitment.name, mode, escalationEventId: event.id }),
+      propagation: JSON.stringify(["travellers"]),
+    },
+  });
+
   await prisma.auditLog.create({
     data: {
       tripId: commitment.tripId,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { recalculateCommitmentReadiness, parseDelayMinutes } from "@/lib/readiness";
+import { applyCallOutcome } from "@/lib/voice-escalation/apply-call-outcome";
 
 // Gnani's docs (researched 2026-09-21) don't document a cryptographic
 // webhook signature scheme — the only authenticity mechanism available is
@@ -43,21 +43,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No matching escalation event" }, { status: 404 });
   }
 
-  const disposition = payload.callSummary?.disposition ?? null;
-  const estimatedDelayMinutes = parseDelayMinutes(disposition);
-
-  await prisma.escalationEvent.update({
-    where: { id: event.id },
-    data: {
-      status: "RESOLVED",
-      callStatus: payload.callStatus ?? "COMPLETED",
-      callDisposition: disposition,
-      estimatedDelayMinutes,
-      resolvedAt: new Date(),
-    },
+  await applyCallOutcome({
+    eventId: event.id,
+    callStatus: payload.callStatus ?? "COMPLETED",
+    disposition: payload.callSummary?.disposition ?? null,
+    source: "GNANI_WEBHOOK",
   });
-
-  await recalculateCommitmentReadiness(event.commitmentId, estimatedDelayMinutes);
 
   return NextResponse.json({ ok: true });
 }

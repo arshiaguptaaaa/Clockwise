@@ -919,6 +919,9 @@ model TravellerReadiness {
   travelMinutes       Int?
   bufferMinutes       Int?
   manualDelayMinutes  Int       @default(0)
+  // A ready-time the traveller reported themselves (e.g. on a Clockwise
+  // voice call: "leaving in 15 minutes" -> now + 15m).
+  reportedReadyAt     DateTime?
   signals             String    @default("[]")
   computedAt          DateTime  @default(now())
 
