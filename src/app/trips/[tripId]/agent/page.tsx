@@ -10,6 +10,10 @@ import { liveLocationOffer } from "@/lib/readiness-engine";
 import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 
+// Server actions on this page run the agent (model + tool calls), which can take
+// 15–30s; give them an explicit budget rather than the platform default.
+export const maxDuration = 60;
+
 const UBER_STATUS_MESSAGES: Record<string, string> = {
   connected: "Uber connected.",
   denied: "Uber connection cancelled.",

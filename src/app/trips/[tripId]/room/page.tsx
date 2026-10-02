@@ -7,6 +7,10 @@ import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
 
+// Server actions on this page run the agent (model + tool calls), which can take
+// 15–30s; give them an explicit budget rather than the platform default.
+export const maxDuration = 60;
+
 export default async function TripRoomChatPage({
   params,
 }: {

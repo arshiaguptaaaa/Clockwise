@@ -69,7 +69,54 @@ export async function postGroupMessage(tripId: string, formData: FormData): Prom
 // message arrives while this is still running, that turn waits for this
 // one to fully finish (see agent-lock.ts) rather than racing it, so it
 // always reasons over the complete, up-to-date conversation.
+// An unexpected exception inside an agent turn (a lock timeout, a hung model
+// call, a crashed tool) used to surface as a raw error page with nothing left
+// behind. Now it is recorded as a trace event (error NAME and a short,
+// secret-free message) and answered with a plain note. It is deliberately NOT
+// posted as a retryable `failed` message: retrying re-runs the turn, and if the
+// exception happened after a tool had already acted, a retry could repeat it.
+async function recordTurnFailure(tripId: string, channel: "GROUP" | "PRIVATE", userId: string, err: unknown) {
+  const name = err instanceof Error ? err.name : "Error";
+  const message = (err instanceof Error ? err.message : String(err)).replace(/(key|token|secret)[=:]\s*\S+/gi, "$1=[redacted]").slice(0, 200);
+  console.error(`[agent-turn] failed trip=${tripId} channel=${channel}: ${name}`);
+  await prisma.tripEvent
+    .create({
+      data: {
+        tripId,
+        kind: "AGENT_TURN_FAILED",
+        scope: channel === "PRIVATE" ? "PERSONAL" : "GROUP",
+        actorUserId: userId,
+        subjectUserId: channel === "PRIVATE" ? userId : null,
+        sourceChannel: channel,
+        payload: JSON.stringify({ name, message }),
+        propagation: "[]",
+      },
+    })
+    .catch(() => undefined);
+  const clockwiseUserId = await getClockwiseUserId();
+  await prisma.message
+    .create({
+      data: {
+        tripId,
+        senderId: clockwiseUserId,
+        channel,
+        recipientId: channel === "PRIVATE" ? userId : null,
+        content: "I hit a problem on my side handling that, so I haven't acted on it. Nothing was changed — please send it again.",
+      },
+    })
+    .catch(() => undefined);
+}
+
 export async function runGroupAgentTurn(tripId: string, actingUserId: string): Promise<void> {
+  try {
+    await runGroupAgentTurnInner(tripId, actingUserId);
+  } catch (err) {
+    await recordTurnFailure(tripId, "GROUP", actingUserId, err);
+  }
+  revalidatePath(`/trips/${tripId}/room`);
+}
+
+async function runGroupAgentTurnInner(tripId: string, actingUserId: string): Promise<void> {
   await withAgentLock(conversationLockKey(tripId, "GROUP"), async () => {
     // Every group message reaches this call; respondToGroupMessage itself
     // applies a narrow deterministic pre-filter (intervention-gate.ts) for
@@ -78,7 +125,6 @@ export async function runGroupAgentTurn(tripId: string, actingUserId: string): P
     // the stay_silent tool rather than being keyword-gated on "@Clockwise".
     await respondToGroupMessage(tripId, actingUserId);
   });
-  revalidatePath(`/trips/${tripId}/room`);
 }
 
 export async function postPrivateMessage(tripId: string, formData: FormData): Promise<{ senderId: string } | void> {
@@ -115,11 +161,15 @@ export async function postPrivateMessage(tripId: string, formData: FormData): Pr
 }
 
 export async function runPrivateAgentTurn(tripId: string, actingUserId: string): Promise<void> {
-  await withAgentLock(conversationLockKey(tripId, "PRIVATE", actingUserId), async () => {
-    // My Clockwise is a direct 1:1 conversation — the agent always replies
-    // here (stay_silent isn't offered as a tool in private context).
-    await respondToPrivateMessage(tripId, actingUserId);
-  });
+  try {
+    await withAgentLock(conversationLockKey(tripId, "PRIVATE", actingUserId), async () => {
+      // My Clockwise is a direct 1:1 conversation — the agent always replies
+      // here (stay_silent isn't offered as a tool in private context).
+      await respondToPrivateMessage(tripId, actingUserId);
+    });
+  } catch (err) {
+    await recordTurnFailure(tripId, "PRIVATE", actingUserId, err);
+  }
   revalidatePath(`/trips/${tripId}/agent`);
 }
 

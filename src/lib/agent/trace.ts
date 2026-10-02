@@ -86,6 +86,11 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Readiness recomputed deterministically from signals: ${(Array.isArray(p.signals) ? (p.signals as string[]) : []).join(", ") || "none"}.`,
         state: `${str(p.commitment)}: ${str(p.from)} → ${str(p.to)}${p.bufferMinutes != null ? ` (buffer ${str(p.bufferMinutes)} min)` : ""}. Shown as: "${str(p.line)}"`,
       };
+    case "AGENT_TURN_FAILED":
+      return {
+        understanding: `The agent turn threw an exception (${str(p.name)}: ${str(p.message)}). Nothing was acted on; the user was told to resend.`,
+        state: null,
+      };
     case "AGENT_STAYED_SILENT":
       return {
         understanding: `Read, and deliberately not acted on (${str(p.by) === "GATE" ? "deterministic filter, no model call" : "model judged it normal conversation"}): ${str(p.reason)}`,
