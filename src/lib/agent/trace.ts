@@ -86,6 +86,11 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Readiness recomputed deterministically from signals: ${(Array.isArray(p.signals) ? (p.signals as string[]) : []).join(", ") || "none"}.`,
         state: `${str(p.commitment)}: ${str(p.from)} → ${str(p.to)}${p.bufferMinutes != null ? ` (buffer ${str(p.bufferMinutes)} min)` : ""}. Shown as: "${str(p.line)}"`,
       };
+    case "AGENT_STAYED_SILENT":
+      return {
+        understanding: `Read, and deliberately not acted on (${str(p.by) === "GATE" ? "deterministic filter, no model call" : "model judged it normal conversation"}): ${str(p.reason)}`,
+        state: null,
+      };
     case "VOICE_ESCALATION_PLACED":
       return { understanding: `A voice-escalation call was placed (${str(p.mode)} mode) for ${str(p.commitment)}.`, state: null };
     case "VOICE_CALL_OUTCOME":

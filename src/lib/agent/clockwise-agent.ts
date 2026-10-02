@@ -62,6 +62,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
           "You are in Trip Room, the SHARED group conversation — all travellers see everything here.",
           "Never reveal any individual traveller's private data (budget figures, passport/visa specifics, personal reasons) even if you have it — speak only in consequences, e.g. \"this conflicts with one traveller's hard constraint\", never naming who or the value.",
           "Stay quiet on ordinary chatter between travellers — call stay_silent instead of replying unless: you're asked directly, clarification is needed, a decision was just reached worth a brief acknowledgement, an action is now relevant, or a risk/deadline materially affects the trip.",
+          "A message that STATES A CHANGE TO TRIP STATE is never chatter, even with no @Clockwise: a new/changed destination (\"actually let's do Udaipur instead\", \"change Jaipur to Goa\" — with a single-stop route this is update_trip_route REPLACE), a route change, new dates, a meeting time or place (\"we'll leave at 6 instead\"), someone's availability or arrival. Apply it with the matching tool (update_trip_route, record_personal_constraint, create_commitment, report_delay, record_trip_understanding) and then confirm in one short sentence. Only a QUESTION or a maybe (\"should we do Udaipur?\") is not a change.",
           "'Asked directly' is broad: any message starting with @Clockwise or addressed to you by name is ALWAYS a direct ask and must get a real answer — this includes plain trip-data questions ('who's on this trip', 'how many travellers', 'what are our dates') just as much as travel/logistics questions ('where is our hotel', 'how far is dinner'). Only fall back to stay_silent for messages that are clearly travellers talking to EACH OTHER, not to you — e.g. 'lol', 'yes', an emoji, or banter with no @Clockwise/name address.",
           "A direct address is not a blank check: even when addressed by name, you only answer trip-coordination requests (timing, logistics, decisions, readiness, transport, payments, trip-relevant questions). You are not a general assistant — politely decline homework help, writing tasks, general trivia, or entertainment requests even if directly asked, in one short sentence, and stay focused on the trip.",
         ].join("\n")
@@ -161,6 +162,8 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
     }
 
     if (result.toolCalls.some((c) => c.name === "stay_silent")) {
+      // Keep the call (and its reason) so a silent decision is auditable.
+      for (const c of result.toolCalls) executedTools.push({ name: c.name, input: c.input });
       return { spoke: false, toolCalls: executedTools };
     }
 
@@ -206,10 +209,20 @@ export async function respondToGroupMessage(
   const lastHumanTurn = [...ctx.history].reverse().find((h) => !h.isClockwise);
   if (lastHumanTurn && isObviousNonTripChatter(lastHumanTurn.content)) {
     console.log(`[InterventionGate] trip=${tripId} skipped obvious chatter, no Gemini call`);
+    await recordSilence(tripId, lastHumanTurn.id, "GATE", "Pure reaction or filler — not sent to the model.");
     return { spoke: false, toolCalls: [] };
   }
 
   const result = await runAgentTurnTimed(ctx, Date.now() - contextStart);
+  if (!result.spoke && lastHumanTurn) {
+    const silent = result.toolCalls.find((c) => c.name === "stay_silent");
+    await recordSilence(
+      tripId,
+      lastHumanTurn.id,
+      "MODEL",
+      (silent?.input as { reason?: string } | undefined)?.reason ?? (result.toolCalls.length ? "Acted via tools without replying." : "No reply needed.")
+    );
+  }
 
   if (result.spoke && result.replyText) {
     await prisma.message.create({
@@ -225,6 +238,26 @@ export async function respondToGroupMessage(
   }
 
   return result;
+}
+
+// Silence is a decision, so it leaves a record: the Agent Trace can show that a
+// message was read and deliberately not acted on (and by which layer), instead
+// of leaving a gap that looks like a failure.
+async function recordSilence(tripId: string, messageId: string, by: "GATE" | "MODEL", reason: string) {
+  await prisma.tripEvent
+    .create({
+      data: {
+        tripId,
+        kind: "AGENT_STAYED_SILENT",
+        scope: "GROUP",
+        sourceChannel: "GROUP",
+        sourceMessageId: messageId,
+        confidence: "MEDIUM",
+        payload: JSON.stringify({ by, reason: reason.slice(0, 200) }),
+        propagation: "[]",
+      },
+    })
+    .catch(() => undefined);
 }
 
 export async function respondToPrivateMessage(
