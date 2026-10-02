@@ -31,6 +31,11 @@ export type ActionCardData = {
   // regardless of status.
   informational?: boolean;
 
+  // A money statement proposed from chat (Budget). The card confirms or edits
+  // this Expense; nothing is recorded until then. proposerId = who may act on it.
+  expenseId?: string;
+  proposerId?: string;
+
   // Real live-search results only (src/lib/travel/*) — every entry here
   // came from an actual provider call, never invented. `provider` +
   // `retrievedAt` are shown so old results never look like permanent

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, User, ClipboardList, MoreHorizontal } from "lucide-react";
+import { Home, User, ClipboardList, Wallet, MoreHorizontal } from "lucide-react";
 
 const TABS = [
   { segment: "room", label: "Trip Room", icon: Home },
   { segment: "agent", label: "My Agent", icon: User },
   { segment: "plan", label: "Plan", icon: ClipboardList },
+  { segment: "budget", label: "Budget", icon: Wallet },
   { segment: "more", label: "More", icon: MoreHorizontal },
 ] as const;
 

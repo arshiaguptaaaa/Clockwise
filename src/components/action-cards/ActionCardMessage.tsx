@@ -7,6 +7,7 @@ import { BookingCard } from "./BookingCard";
 import { PaymentCard } from "./PaymentCard";
 import { TravelResultCard } from "./TravelResultCard";
 import { ClockwiseActionCard, type CardPerson } from "./ClockwiseActionCard";
+import { ExpenseCard } from "./ExpenseCard";
 import { dismissActionCard } from "@/app/card-actions";
 
 export function ActionCardMessage({
@@ -27,6 +28,21 @@ export function ActionCardMessage({
   currentUserId?: string | null;
 }) {
   const data = decodeCard(cardData);
+
+  if (data.expenseId) {
+    return (
+      <ExpenseCard
+        tripId={tripId}
+        messageId={messageId}
+        expenseId={data.expenseId}
+        status={cardStatus}
+        title={data.title}
+        context={data.context}
+        values={data.values}
+        canAct={Boolean(currentUserId && (currentUserId === data.proposerId || currentUserId === data.payerId))}
+      />
+    );
+  }
 
   if (cardType === "TRANSPORT" && data.transportPlanId) {
     return (

@@ -13,6 +13,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "./prisma";
 import { postActionCard } from "./action-cards";
 import { notify, otherMemberIds } from "./notifications";
+import { markPaidFromPayment } from "./budget/ledger";
 
 export type StatusSource = "CREATE" | "RETURN_PAGE" | "WEBHOOK_TRIGGERED_REFETCH" | "POLL" | "CANCEL";
 
@@ -58,6 +59,15 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
         propagation: JSON.stringify(["payments", "chat", "notifications"]),
       },
     });
+    // Verified money movement -> the Budget ledger (COMMITTED -> PAID).
+    await markPaidFromPayment({
+      tripId: booking.tripId,
+      bookingId: booking.id,
+      proposalId: booking.sourceProposalId,
+      amountMinor: booking.amount ?? 0,
+      currency: booking.currency ?? "INR",
+      payerId: booking.payerId,
+    }).catch((err) => console.error("[budget] mark paid failed:", err instanceof Error ? err.message : err));
     await postActionCard({
       tripId: booking.tripId,
       channel: "GROUP",

@@ -6,6 +6,7 @@
 // only merges and sorts, it never invents a "reasoning" string that
 // isn't backed by an actual row. There is no chain-of-thought here —
 // only the concise, factual outcome of what happened.
+import { formatMoney } from "@/lib/budget/money";
 import { prisma } from "@/lib/prisma";
 import { excludePrivateSourced } from "@/lib/decision-visibility";
 
@@ -44,6 +45,10 @@ function parseJson<T>(raw: string, fallback: T): T {
 }
 
 // Kind-specific "what changed" and "what it did to shared state".
+function money(minor: unknown, currency: unknown): string {
+  return formatMoney(Number(minor ?? 0), String(currency ?? "INR"));
+}
+
 function describeEvent(kind: string, p: Record<string, unknown>): { understanding: string; state: string | null } {
   const str = (v: unknown) => (v == null ? "" : String(v));
   switch (kind) {
@@ -138,6 +143,26 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Call result interpreted as ${str(p.outcome)}${p.estimatedDelayMinutes != null ? ` (${str(p.estimatedDelayMinutes)} min)` : ""} (${str(p.mode)} mode). Transcript is not shown here.`,
         state: "Fed into the readiness engine for this traveller.",
       };
+    case "EXPENSE_PROPOSED":
+      return { understanding: `Money statement understood from chat: ${str(p.title)} — ${money(p.amountMinor, p.currency)}, paid by ${str(p.paidBy)}.`, state: "Held as a proposal. Nothing is on the ledger until the speaker confirms." };
+    case "EXPENSE_ADDED": {
+      const shares = Array.isArray(p.shares) ? (p.shares as { name: string; shareMinor: number }[]).map((x) => `${x.name} ${money(x.shareMinor, p.currency)}`).join(", ") : "";
+      return { understanding: `Expense recorded: ${str(p.title)} — ${money(p.amountMinor, p.currency)} (${str(p.stage)}, ${str(p.splitMethod)} split).`, state: `Shares computed by code: ${shares}. Balances recalculated.` };
+    }
+    case "EXPENSE_UPDATED":
+      return { understanding: `Expense edited: ${str(p.title)} — ${money(p.amountMinor, p.currency)}.`, state: "Shares and balances recalculated from the ledger." };
+    case "EXPENSE_VOIDED":
+      return { understanding: `Expense removed: ${str(p.title)}.`, state: "Balances recalculated; the original is kept as VOID for audit." };
+    case "EXPENSE_PAID":
+      return { understanding: `Committed spend became PAID: ${str(p.title)} — ${money(p.amountMinor, p.currency)}. Payment status was verified by fetching it from Pine Labs.`, state: p.needsPayer ? "Waiting for someone to say who paid — no balance created yet." : "Now counts toward balances." };
+    case "SETTLEMENT_RECORDED":
+      return { understanding: `${str(p.from)} paid ${str(p.to)} ${money(p.amountMinor, p.currency)} (${str(p.method)}). Recorded, not moved — Clockwise doesn't transfer money.`, state: "Balances recalculated." };
+    case "BALANCES_RECALCULATED":
+      return { understanding: "Balances recomputed from the ledger (integer arithmetic, per currency).", state: "Simplified settlement suggestions refreshed; underlying expenses untouched." };
+    case "BUDGET_SET":
+      return { understanding: `Group budget set${p.totalMinor ? `: ${money(p.totalMinor, p.currency)}` : ""}.`, state: "Budget bars and thresholds updated." };
+    case "BUDGET_THRESHOLD_REACHED":
+      return { understanding: `${str(p.level)}% of the group budget is planned (${money(p.plannedMinor, p.currency)} of ${money(p.totalMinor, p.currency)}).`, state: "Group notified once." };
     case "PAYMENT_LINK_CREATED":
       return { understanding: "A payment link was created. A link is not a payment.", state: `Payment request ${str(p.status)} — paid: false` };
     case "PAYMENT_LINK_STATUS":

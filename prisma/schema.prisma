@@ -1048,3 +1048,89 @@ model EmailLog {
 
   @@index([tripId, createdAt])
 }
+
+// ---- Budget -----------------------------------------------------------
+// Money is stored as integer MINOR units (paise/cents) in the ORIGINAL
+// currency; nothing here converts currencies. `stage` separates what is only
+// planned from what is real:
+//   ESTIMATED = a planning figure, nothing bought      (never in balances)
+//   COMMITTED = group-approved, payment pending         (never in balances)
+//   PAID      = money actually moved                    (the only stage in balances)
+// `status` is the record's lifecycle: PROPOSED (suggested by chat/automation,
+// no effect on anyone until someone confirms), ACTIVE, VOID, REFUNDED.
+// Balances are computed from PAID+ACTIVE rows by deterministic code in
+// src/lib/budget — never by the model.
+model Expense {
+  id               String   @id @default(cuid())
+  tripId           String
+  title            String
+  // STAYS | TRANSPORT | FOOD | ACTIVITIES | SHOPPING | OTHER
+  category         String   @default("OTHER")
+  amountMinor      Int
+  currency         String   @default("INR")
+  stage            String   @default("PAID")
+  status           String   @default("ACTIVE")
+  // Only set when there is evidence of who paid — never inferred.
+  paidByUserId     String?
+  // MANUAL | CHAT | RECEIPT | BOOKING | PINE_LABS | TICKET
+  source           String   @default("MANUAL")
+  sourceReferenceId String?
+  // EQUAL | EXACT | PERCENT | SHARES | SELECT
+  splitMethod      String   @default("EQUAL")
+  occurredAt       DateTime @default(now())
+  createdByUserId  String?
+  // The chat card (Message id) that proposed this, if any.
+  proposalMessageId String?
+  note             String?
+  // Makes automatic creation (e.g. from a verified payment) happen once.
+  idempotencyKey   String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  participants ExpenseParticipant[]
+
+  @@index([tripId, stage, status])
+}
+
+model ExpenseParticipant {
+  id          String  @id @default(cuid())
+  expenseId   String
+  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  userId      String
+  shareMinor  Int
+  // The raw input behind the share (percent, shares or exact), kept so an edit
+  // shows what the person actually entered.
+  inputValue  Float?
+
+  @@unique([expenseId, userId])
+}
+
+// A recorded real-world repayment between two travellers. Clockwise does not
+// move this money — it records who paid whom, how much, when and by what means.
+model Settlement {
+  id              String   @id @default(cuid())
+  tripId          String
+  fromUserId      String
+  toUserId        String
+  amountMinor     Int
+  currency        String
+  method          String   @default("MANUAL")
+  note            String?
+  settledAt       DateTime @default(now())
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([tripId])
+}
+
+// Optional GROUP budget (total and/or per category). Deliberately never derived
+// from anyone's private budget.
+model TripBudget {
+  id           String   @id @default(cuid())
+  tripId       String   @unique
+  currency     String   @default("INR")
+  totalMinor   Int?
+  // JSON: { STAYS?: minor, TRANSPORT?: minor, ... }
+  categoryJson String   @default("{}")
+  updatedAt    DateTime @updatedAt
+}

@@ -20,6 +20,8 @@ import {
 import { computeReadinessStatus, recordReadinessReminder, checkEscalationReadiness } from "@/lib/readiness";
 import { performEscalation } from "@/lib/voice-escalation/perform-escalation";
 import { createProposal } from "@/lib/proposals";
+import { createExpense } from "@/lib/budget/ledger";
+import { formatMoney, parseMajorToMinor, isCategory, CATEGORY_LABEL } from "@/lib/budget/money";
 import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
@@ -272,6 +274,23 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "propose_expense",
+    description:
+      "Use when someone states that money was SPENT or PAID for the trip (\"I paid 6k for dinner, split between us\", \"Eva covered the cab, 800\"). It does NOT record anything: it posts a \"Clockwise caught that\" card the speaker confirms, so no one is ever silently given a debt. Only call it when an amount and what it was for are both stated — never guess an amount. By default the person speaking is the payer and everyone on the trip shares equally; only name participants if the message restricts it (\"just me and Eva\"). In a PRIVATE room the card stays private to the speaker. Never use this for a future cost or a proposed booking (use propose_payment_request).",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "What it was for, e.g. 'Dinner'" },
+        amount: { type: "number", description: "Whole currency units exactly as stated (6k = 6000)" },
+        currency: { type: "string", description: "ISO code; INR if rupees or unstated in an Indian-rupee conversation" },
+        paidBy: { type: "string", description: "Traveller name who paid; omit if the speaker paid" },
+        participants: { type: "array", items: { type: "string" }, description: "Traveller names sharing the cost; omit to split equally among everyone on the trip" },
+        category: { type: "string", description: "STAYS, TRANSPORT, FOOD, ACTIVITIES, SHOPPING or OTHER" },
+      },
+      required: ["title", "amount"],
+    },
+  },
+  {
     name: "check_readiness",
     description:
       "Deterministically check whether a logged commitment is ON_TRACK, AT_RISK, or MISSED by comparing its target time to now. Read-only — never guess this yourself, always call this tool.",
@@ -443,6 +462,8 @@ export async function executeTool(
       return proposeItineraryChange(input, ctx);
     case "propose_uber_ride":
       return proposeUberRide(input, ctx);
+    case "propose_expense":
+      return proposeExpense(input, ctx);
     case "check_readiness":
       return checkReadiness(input, ctx);
     case "send_readiness_reminder":
@@ -853,6 +874,78 @@ async function postProposal(
   await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
 
   return proposal;
+}
+
+// A money statement heard in chat becomes a PROPOSED expense + a card the
+// speaker confirms. Nothing touches balances (or anyone's obligations) until
+// confirmation; amounts are taken verbatim, never estimated.
+async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const title = String(input.title ?? "").trim();
+  const amountMinor = parseMajorToMinor(Number(input.amount));
+  if (!title || amountMinor == null) return { output: "Need what it was for and a stated amount — ask the person, don't guess." };
+  const currency = String(input.currency ?? "INR").toUpperCase().slice(0, 3);
+
+  const byName = (n: string) => ctx.trip.members.find((m) => m.user.name.toLowerCase().startsWith(n.trim().toLowerCase()));
+  let payerId = ctx.actingUserId;
+  if (typeof input.paidBy === "string" && input.paidBy.trim()) {
+    const m = byName(input.paidBy);
+    if (!m) return { output: `"${input.paidBy}" isn't on this trip's roster — not recorded.` };
+    payerId = m.userId;
+  }
+  let participantIds = ctx.trip.members.map((m) => m.userId).filter((id) => id !== ctx.clockwiseUserId);
+  if (Array.isArray(input.participants) && input.participants.length > 0) {
+    const ids: string[] = [];
+    for (const n of input.participants as string[]) {
+      const m = byName(String(n));
+      if (!m) return { output: `"${n}" isn't on this trip's roster — not recorded.` };
+      ids.push(m.userId);
+    }
+    participantIds = [...new Set(ids)];
+  }
+  if (participantIds.length === 0) return { output: "Nobody to split with." };
+
+  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const category = typeof input.category === "string" && isCategory(input.category.toUpperCase()) ? (input.category.toUpperCase() as keyof typeof CATEGORY_LABEL) : undefined;
+  const created = await createExpense({
+    tripId: ctx.trip.id,
+    actorUserId: ctx.actingUserId,
+    title,
+    category,
+    amountMinor,
+    currency,
+    stage: "PAID",
+    status: "PROPOSED",
+    paidByUserId: payerId,
+    source: "CHAT",
+    sourceReferenceId: sourceMessageId,
+    splitMethod: "EQUAL",
+    participants: participantIds.map((userId) => ({ userId })),
+    idempotencyKey: sourceMessageId ? `chat:${sourceMessageId}:${title.toLowerCase()}:${amountMinor}` : null,
+  });
+  if (!created.ok) return { output: created.error };
+  if (created.duplicate) return { output: "That expense was already caught from this message." };
+
+  const nameOf = (id: string) => ctx.trip.members.find((m) => m.userId === id)?.user.name ?? "Someone";
+  const each = Math.floor(amountMinor / participantIds.length);
+  await postActionCard({
+    tripId: ctx.trip.id,
+    channel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP",
+    recipientId: ctx.mode === "PRIVATE" ? ctx.actingUserId : undefined,
+    type: "DECISION",
+    status: "PENDING",
+    data: {
+      title: "Clockwise caught that ✦",
+      context: `${nameOf(payerId)} paid ${formatMoney(amountMinor, currency)} for ${title}, split ${participantIds.length} ways (about ${formatMoney(each, currency)} each). Nothing is added until it's confirmed.`,
+      values: [
+        { label: "Paid by", value: nameOf(payerId) },
+        { label: "Split between", value: participantIds.map(nameOf).join(", ") },
+      ],
+      expenseId: created.expenseId,
+      proposerId: ctx.actingUserId,
+      payerId,
+    },
+  });
+  return { output: `Posted a confirmation card for ${formatMoney(amountMinor, currency)} ${title}. Nothing is recorded until ${ctx.actingUserName} (or the payer) confirms it; say so in one short line.` };
 }
 
 async function recordPersonalConstraintTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {

@@ -12,6 +12,7 @@ import { hasValidCoordinates } from "./location/types";
 import { getOrganiserAuth, resolveRoute, isFailure } from "./transport";
 import { mobilityProvider } from "./providers/mobility";
 import { createTripPaymentRequest } from "./trip-payments";
+import { commitFromProposal } from "./budget/ledger";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -141,6 +142,15 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
     if (!result.ok) {
       return { ok: false, error: `Couldn't create the payment request: ${result.reason}` };
     }
+    // Group-approved and awaiting payment: the money is COMMITTED in Budget (never PAID until verified).
+    await commitFromProposal({
+      tripId: proposal.tripId,
+      proposalId: proposal.id,
+      title: proposal.title,
+      amountMajor: payload.amount,
+      currency: payload.currency ?? "INR",
+      actorUserId: proposal.organiserConfirmedBy ?? proposal.createdBy ?? "",
+    }).catch((err) => console.error("[budget] commit failed:", err instanceof Error ? err.message : err));
     return { ok: true, summary: `Payment request created for "${proposal.title}" — ${result.status}.` };
   }
 
