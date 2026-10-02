@@ -49,7 +49,7 @@ export function DestinationPhotoStage({
                 transform: `rotate(${tilt}deg)`,
               }}
             >
-              <Image src={p.src} alt="" fill sizes="320px" className="object-cover" style={{ objectPosition: p.objectPosition ?? "50% 50%" }} />
+              <Image src={p.src} alt="" fill sizes="480px" className="object-cover" style={{ objectPosition: p.objectPosition ?? "50% 50%" }} />
             </div>
           );
         })}
@@ -60,7 +60,7 @@ export function DestinationPhotoStage({
             className="photo-in absolute inset-0 overflow-hidden rounded-t-[999px] rounded-b-2xl bg-surface-muted shadow-[0_18px_36px_-18px_rgba(20,24,26,0.5)]"
             style={{ ["--tilt" as string]: "3deg", transform: "rotate(3deg)", zIndex: 20 }}
           >
-            <Image src={previewing.src} alt="" fill sizes="320px" className="object-cover" style={{ objectPosition: previewing.objectPosition ?? "50% 50%" }} />
+            <Image src={previewing.src} alt="" fill sizes="480px" className="object-cover" style={{ objectPosition: previewing.objectPosition ?? "50% 50%" }} />
           </div>
         )}
 

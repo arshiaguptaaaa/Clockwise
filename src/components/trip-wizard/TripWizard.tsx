@@ -221,7 +221,7 @@ export function TripWizard() {
         : "Not decided yet";
 
   return (
-    <main className="flex min-h-screen flex-col bg-white px-6 py-10">
+    <main className="flex min-h-screen shrink-0 flex-col bg-white px-6 py-10">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
         <div className="mb-4 flex items-center justify-between">
           {stepIndex > 0 ? (
