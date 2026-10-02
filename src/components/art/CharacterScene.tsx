@@ -59,7 +59,7 @@ export function SpeechBubble({
   }[tail];
   return (
     <p
-      className={`bubble-in relative inline-block max-w-[11rem] rounded-2xl bg-white px-3 py-1.5 font-display text-[13px] italic leading-snug text-foreground shadow-[0_8px_20px_-8px_rgba(20,24,26,0.35)] ring-1 ring-border ${className}`}
+      className={`bubble-in ${className.includes("absolute") ? "" : "relative"} inline-block max-w-[11rem] rounded-2xl bg-white px-3 py-1.5 font-display text-[13px] italic leading-snug text-foreground shadow-[0_8px_20px_-8px_rgba(20,24,26,0.35)] ring-1 ring-border ${className}`}
     >
       {children}
       <span aria-hidden className={`absolute size-3 rotate-45 bg-white ring-1 ring-border ${tail === "top-right" ? "[clip-path:polygon(0_0,100%_0,0_100%)]" : "[clip-path:polygon(0_0,100%_100%,0_100%)]"} ${tailPos}`} />
