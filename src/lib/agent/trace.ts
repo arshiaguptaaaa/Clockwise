@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 
 export type TraceEntry = {
   timestamp: Date;
-  kind: "MESSAGE_ACTION" | "UNDERSTANDING" | "REMINDER" | "ESCALATION" | "ESCALATION_RESULT" | "AUDIT";
+  kind: "TRIP_EVENT" | "MESSAGE_ACTION" | "UNDERSTANDING" | "REMINDER" | "ESCALATION" | "ESCALATION_RESULT" | "AUDIT";
   title: string;
   detail: string;
 };
@@ -18,7 +18,7 @@ export type TraceEntry = {
 type RawToolCall = { name: string; input: unknown };
 
 export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
-  const [messages, decisions, escalations, auditLogs] = await Promise.all([
+  const [messages, decisions, escalations, auditLogs, tripEvents] = await Promise.all([
     prisma.message.findMany({
       where: { tripId, toolCalls: { not: null } },
       orderBy: { timestamp: "asc" },
@@ -30,6 +30,7 @@ export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
       orderBy: { triggeredAt: "asc" },
     }),
     prisma.auditLog.findMany({ where: { tripId }, orderBy: { confirmedAt: "asc" } }),
+    prisma.tripEvent.findMany({ where: { tripId }, orderBy: { createdAt: "asc" } }),
   ]);
 
   const entries: TraceEntry[] = [];
@@ -104,6 +105,45 @@ export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
       title: a.actionType,
       detail: a.payloadSummary,
     });
+  }
+
+
+  // Typed events: the full chain for a consequential change. The source
+  // quote is shown only when it came from the shared group room — a
+  // PRIVATE/PERSONAL-scoped event never has its input echoed here.
+  const sourceIds = tripEvents
+    .filter((e) => e.scope === "GROUP" && e.sourceChannel === "GROUP" && e.sourceMessageId)
+    .map((e) => e.sourceMessageId as string);
+  const sourceMessages = sourceIds.length
+    ? await prisma.message.findMany({ where: { id: { in: sourceIds } }, include: { sender: true } })
+    : [];
+  const sourceById = new Map(sourceMessages.map((m) => [m.id, m]));
+
+  for (const e of tripEvents) {
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = JSON.parse(e.payload);
+    } catch {
+      // keep the empty payload — a malformed row still appears in the trace
+    }
+    let surfaces: string[] = [];
+    try {
+      surfaces = JSON.parse(e.propagation);
+    } catch {
+      // same
+    }
+    const source = e.sourceMessageId ? sourceById.get(e.sourceMessageId) : undefined;
+    const lines = [
+      source
+        ? `INPUT — ${source.sender?.name ?? "Someone"}: \"${source.content}\" (${e.sourceChannel === "GROUP" ? "group chat" : e.sourceChannel.toLowerCase()})`
+        : `INPUT — ${e.scope === "GROUP" ? e.sourceChannel.toLowerCase() : "private source (not shown)"}`,
+      `EVENT — ${e.kind}${payload.destination ? ` · ${payload.destination}` : ""}${payload.after ? ` after ${payload.after}` : ""}${e.confidence ? ` · confidence ${e.confidence}` : ""}`,
+    ];
+    if (Array.isArray(payload.routeBefore) && Array.isArray(payload.routeAfter)) {
+      lines.push(`STATE — Route: ${(payload.routeBefore as string[]).join(" → ") || "(empty)"}  ⇒  ${(payload.routeAfter as string[]).join(" → ")}`);
+    }
+    if (surfaces.length) lines.push(`PROPAGATED — ${surfaces.map((x) => `${x} ✓`).join("  ")} (these read the saved route directly)`);
+    entries.push({ timestamp: e.createdAt, kind: "TRIP_EVENT", title: `${e.kind} · ${e.scope}`, detail: lines.join("\n") });
   }
 
   return entries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());

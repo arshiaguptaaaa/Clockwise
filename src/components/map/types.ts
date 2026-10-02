@@ -28,6 +28,10 @@ export type MapRoute = {
 export type TripMapProps = {
   markers: MapMarker[];
   routes?: MapRoute[];
+  // The trip's stops in travel order, drawn as a dashed line. This is the
+  // SEQUENCE of the saved route, not a road path — it is never labelled as
+  // a driving/flight route and carries no distance or duration.
+  journeyLine?: { lat: number; lng: number }[];
   heightClassName?: string; // e.g. "h-64" — lets each consumer size the map
   emptyStateMessage?: string;
 };

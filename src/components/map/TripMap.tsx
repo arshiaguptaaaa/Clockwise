@@ -77,6 +77,7 @@ function EmptyState({ message }: { message: string }) {
 export default function TripMap({
   markers,
   routes = [],
+  journeyLine = [],
   heightClassName = "h-64",
   emptyStateMessage = "No mapped locations for this trip yet.",
 }: TripMapProps) {
@@ -109,6 +110,12 @@ export default function TripMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
+        {journeyLine.length > 1 && (
+          <Polyline
+            positions={journeyLine.map((p) => [p.lat, p.lng])}
+            pathOptions={{ color: ROUTE_COLOR, weight: 3, opacity: 0.7, dashArray: "6 8" }}
+          />
+        )}
         {routes.map((route) => (
           <Polyline
             key={route.id}

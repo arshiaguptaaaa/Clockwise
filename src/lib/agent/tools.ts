@@ -20,6 +20,7 @@ import {
 import { computeReadinessStatus, recordReadinessReminder, checkEscalationReadiness } from "@/lib/readiness";
 import { performEscalation } from "@/lib/voice-escalation/perform-escalation";
 import { createProposal } from "@/lib/proposals";
+import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
 import type { AgentContext } from "./context";
@@ -151,9 +152,27 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "update_trip_route",
+    description:
+      "Change the trip's shared ROUTE — the ordered list of cities/regions the group travels through. Use this (not propose_itinerary_change) when the GROUP states, as a decided fact, that a city or region is added to, removed from, or re-ordered within the route: \"we'll go to Udaipur after Jaipur\", \"let's drop Agra\", \"do Goa before Mumbai\". It changes the real saved route immediately — the map, Plan and Itinerary all read it — so only call it for a clear, committed statement from a participant in Trip Room, never for a question (\"should we visit Udaipur?\"), a maybe/idea (\"might be cool to add Udaipur\"), or a specific activity/venue (use propose_itinerary_change for those). Not available in a private room: a private suggestion that needs the group's agreement goes through propose_itinerary_change instead. Do NOT also call record_trip_understanding for the same route change — this tool already records it.",
+    parameters: {
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["ADD", "REMOVE", "MOVE"] },
+        place: { type: "string", description: "The city/region being added, removed or moved, as the group said it, e.g. 'Udaipur'" },
+        after: {
+          type: "string",
+          description: "ADD: which existing stop it comes after ('Jaipur'); omit to append at the end. MOVE: required — the stop it should come after.",
+        },
+        confidence: { type: "string", enum: ["MEDIUM", "HIGH"], description: "HIGH only if the speaker clearly stated it as decided. If you'd rate it LOW, don't call this tool — ask one short question instead." },
+      },
+      required: ["operation", "place", "confidence"],
+    },
+  },
+  {
     name: "propose_itinerary_change",
     description:
-      "Propose adding or changing a destination/stop for the WHOLE GROUP to vote on, in either GROUP or PRIVATE conversation — a private hint ('might be nice to see Salzburg') can still produce a group proposal. This does NOT change the Plan directly: it posts a group-visible proposal that travellers vote on and the organiser must explicitly hard-confirm before anything is added. Only call this for a genuinely concrete, specific idea the conversation is ready to consider — never for vague brainstorming ('somewhere fun?', 'maybe a beach?') and never twice for the same idea in one turn. If a specific time is mentioned or agreed (e.g. '9:30', 'morning', 'the 14th'), resolve it yourself into real ISO 8601 datetimes using the trip's actual core dates from the structured state above, and pass startTime/endTime — this is what lets a later correction ('actually make it 10 instead') update the SAME plan item instead of creating a duplicate, because execution matches on the place, not on wording.",
+      "Propose a specific place, venue or activity (e.g. a fort, restaurant, day trip) for the WHOLE GROUP to vote on — NOT a city-level change to the trip's route: when the group states that a city is added/removed/re-ordered, use update_trip_route instead. Propose adding or changing a stop for the group to vote on, in either GROUP or PRIVATE conversation — a private hint ('might be nice to see Salzburg') can still produce a group proposal. This does NOT change the Plan directly: it posts a group-visible proposal that travellers vote on and the organiser must explicitly hard-confirm before anything is added. Only call this for a genuinely concrete, specific idea the conversation is ready to consider — never for vague brainstorming ('somewhere fun?', 'maybe a beach?') and never twice for the same idea in one turn. If a specific time is mentioned or agreed (e.g. '9:30', 'morning', 'the 14th'), resolve it yourself into real ISO 8601 datetimes using the trip's actual core dates from the structured state above, and pass startTime/endTime — this is what lets a later correction ('actually make it 10 instead') update the SAME plan item instead of creating a duplicate, because execution matches on the place, not on wording.",
     parameters: {
       type: "object",
       properties: {
@@ -359,6 +378,8 @@ export async function executeTool(
       return createCommitment(input, ctx);
     case "record_trip_understanding":
       return recordTripUnderstanding(input, ctx);
+    case "update_trip_route":
+      return updateTripRoute(input, ctx);
     case "propose_payment_request":
       return proposePaymentRequest(input, ctx);
     case "propose_itinerary_change":
@@ -725,6 +746,51 @@ async function postProposal(
   await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
 
   return proposal;
+}
+
+// Direct route mutation — see src/lib/trip-route.ts. GROUP-only on purpose:
+// a private-room statement is private by default, and the existing privacy
+// model routes anything that needs the group's agreement through a
+// Proposal. Everything else about the change (provenance, what re-derived,
+// the visible card) is recorded by applyRouteChange / below.
+async function updateTripRoute(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  if (ctx.mode !== "GROUP") {
+    return {
+      output:
+        "Refused: the shared route can only be changed from Trip Room, where the group can see it. If this came up privately and needs the group's agreement, use propose_itinerary_change.",
+    };
+  }
+  const operation = input.operation;
+  const place = (input.place as string | undefined)?.trim();
+  const after = (input.after as string | undefined)?.trim() || undefined;
+  const confidence = input.confidence === "HIGH" ? "HIGH" : "MEDIUM";
+  if (!place || (operation !== "ADD" && operation !== "REMOVE" && operation !== "MOVE")) {
+    return { output: "Need an operation (ADD, REMOVE or MOVE) and a place to change the route." };
+  }
+  if (operation === "MOVE" && !after) {
+    return { output: "To move a stop I need to know which stop it should come after." };
+  }
+
+  const change: RouteOp =
+    operation === "ADD" ? { op: "ADD", place, after } : operation === "REMOVE" ? { op: "REMOVE", place } : { op: "MOVE", place, after: after! };
+
+  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const result = await applyRouteChange(
+    { tripId: ctx.trip.id, actorUserId: ctx.actingUserId, sourceChannel: "GROUP", sourceMessageId, confidence },
+    change
+  );
+  if (!result.ok) return { output: result.error };
+
+  if (result.changed) {
+    await postActionCard({
+      tripId: ctx.trip.id,
+      channel: "GROUP",
+      type: "DECISION",
+      status: "CONFIRMED",
+      data: { title: "Route updated", context: result.route.join(" → "), informational: true },
+    });
+  }
+  return { output: result.summary };
 }
 
 // Posts a BOOKING-type proposal carrying a real amount — the proposal/vote/

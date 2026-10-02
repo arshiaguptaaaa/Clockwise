@@ -181,6 +181,7 @@ model Trip {
   escalationEvents EscalationEvent[]
   proposals        Proposal[]
   attachments      Attachment[]
+  tripEvents       TripEvent[]
 
   createdAt DateTime @default(now())
 }
@@ -812,4 +813,35 @@ model Attachment {
   blobPathname String
 
   createdAt DateTime @default(now())
+}
+
+// Typed event log — the spine every derived engine (route, readiness,
+// notifications, escalation, Agent Trace) reads and writes through, so no
+// UI surface keeps its own version of what happened. An event records WHAT
+// the system understood and changed, with provenance; it is NOT itself the
+// state (Destination, Commitment, etc. remain canonical) and never stores
+// private content for GROUP-scoped surfaces to display.
+//
+// kind/scope are plain strings (not enums) so new event kinds in later
+// milestones need no migration. scope: "GROUP" = shared trip state;
+// "PERSONAL" = belongs to subjectUserId and must never be rendered to
+// anyone else without an explicit group-safe projection.
+model TripEvent {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id])
+  kind            String
+  scope           String
+  actorUserId     String?
+  subjectUserId   String?
+  sourceChannel   String
+  sourceMessageId String?
+  confidence      String?
+  // JSON: the structured understanding that produced this event.
+  payload         String
+  // JSON: list of surfaces that were re-derived from the mutated state.
+  propagation     String   @default("[]")
+  createdAt       DateTime @default(now())
+
+  @@index([tripId, createdAt])
 }

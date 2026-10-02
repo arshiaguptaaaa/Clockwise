@@ -10,6 +10,7 @@ import { buildAgentTrace, type TraceEntry } from "@/lib/agent/trace";
 // EscalationEvent, AuditLog) — nothing here is synthesized or
 // reconstructed chain-of-thought.
 const KIND_LABEL: Record<TraceEntry["kind"], string> = {
+  TRIP_EVENT: "EVENT",
   MESSAGE_ACTION: "ACTION",
   UNDERSTANDING: "UNDERSTANDING",
   REMINDER: "REMINDER",
@@ -67,7 +68,7 @@ export default async function AgentTracePage({
                 <span className="text-[11px] text-muted-foreground">{formatTimestamp(entry.timestamp)}</span>
               </div>
               <p className="mt-1.5 text-sm font-medium text-foreground">{entry.title}</p>
-              <p className="mt-0.5 break-words text-xs text-muted-foreground">{entry.detail}</p>
+              <p className="mt-0.5 whitespace-pre-line break-words text-xs text-muted-foreground">{entry.detail}</p>
             </li>
           ))}
         </ol>

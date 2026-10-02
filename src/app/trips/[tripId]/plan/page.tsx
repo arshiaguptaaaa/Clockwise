@@ -1,13 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
-import { PlaneTakeoff, PlaneLanding, MapPin, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { getTripById } from "@/lib/trip";
 import { DESTINATION_PHOTOS } from "@/lib/photos";
 import { fetchWikipediaPhoto, type WikipediaPhoto } from "@/lib/travel/wikipedia-photo";
-import { formatDateRange, hasTimeOfDay, formatTimeOfDay } from "@/lib/format";
+import { formatDateRange } from "@/lib/format";
 import { avatarColor } from "@/lib/avatar";
 import { TripMapLoader } from "@/components/map/TripMapLoader";
-import { buildDestinationMarkers, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
+import { buildDestinationMarkers, buildJourneyLine, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
+import { RouteTimeline } from "@/components/plan/RouteTimeline";
+import { prisma } from "@/lib/prisma";
 
 export default async function PlanOverviewPage({
   params,
@@ -19,6 +21,11 @@ export default async function PlanOverviewPage({
   const stops = [...trip.destinations].sort((a, b) => a.order - b.order);
   const middleStops = stops.filter((s) => s.name !== "Delhi");
   const mapMarkers = buildDestinationMarkers(stops);
+  const journeyLine = buildJourneyLine(stops);
+  const transportPlans = await prisma.transportPlan.findMany({
+    where: { tripId },
+    select: { destination: true, status: true },
+  });
   const unmapped = destinationsWithoutCoordinates(stops);
 
   // Hand-curated Commons photos exist only for the demo trip's fixed
@@ -48,6 +55,7 @@ export default async function PlanOverviewPage({
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
       <TripMapLoader
         markers={mapMarkers}
+        journeyLine={journeyLine}
         heightClassName="h-72"
         emptyStateMessage="No mapped locations yet — add destinations with a place search to see them here."
       />
@@ -118,62 +126,9 @@ export default async function PlanOverviewPage({
         </>
       )}
 
-      {stops.length === 0 ? (
-        <p className="pt-8 text-center text-sm text-muted-foreground">
-          No destinations added yet.
-        </p>
-      ) : (
-        <div className="mt-6">
-          <ol className="relative border-l border-border pl-5">
-            {stops.map((stop, i) => {
-              const isEndpoint = stop.name === "Delhi";
-              return (
-                <li key={stop.id} className="mb-5 last:mb-0">
-                  <span className="absolute -left-[7px] flex size-3.5 items-center justify-center rounded-full border-2 border-surface bg-accent" />
-                  <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                    {isEndpoint ? (
-                      i === 0 ? (
-                        <PlaneTakeoff className="size-3.5 text-muted-foreground" />
-                      ) : (
-                        <PlaneLanding className="size-3.5 text-muted-foreground" />
-                      )
-                    ) : (
-                      <MapPin className="size-3.5 text-muted-foreground" />
-                    )}
-                    <span>
-                      {stop.name}
-                      {stop.country && stop.country !== "India" && (
-                        <span className="font-normal text-muted-foreground">
-                          , {stop.country}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {stop.startDate
-                      ? isEndpoint
-                        ? `${formatDateRange(
-                            stop.startDate,
-                            stop.startDate,
-                            "short"
-                          )} · ${i === 0 ? "Depart" : "Return"}`
-                        : /* A valid startDate with no endDate (e.g. a single-point
-                             activity confirmed through chat, like "Amber Fort 10
-                             AM" with no stated end time) is real information —
-                             render it standalone rather than hiding it behind
-                             "Dates not set yet" just because one of two fields
-                             is null. */
-                          `${formatDateRange(stop.startDate, stop.endDate ?? stop.startDate, "short")}${
-                            hasTimeOfDay(stop.startDate) ? ` · ${formatTimeOfDay(stop.startDate)}` : ""
-                          }`
-                      : "Dates not set yet"}
-                  </p>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
+      <div className="mt-6">
+        <RouteTimeline stops={stops} transportPlans={transportPlans} />
+      </div>
 
       <div className="mt-6 border-t border-border pt-5">
         <div className="mb-3 flex items-center justify-between">

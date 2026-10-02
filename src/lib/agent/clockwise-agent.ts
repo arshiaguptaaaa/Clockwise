@@ -30,6 +30,7 @@ export function toolsForMode(mode: AgentContext["mode"]): AgentToolSchema[] {
   return AGENT_TOOLS.filter((t) => {
     if (t.name === "stay_silent") return mode === "GROUP"; // private room: every message deserves a reply
     if (t.name === "update_participation_window") return mode === "PRIVATE";
+    if (t.name === "update_trip_route") return mode === "GROUP"; // shared route only changes where the group can see it
     return true;
   });
 }
@@ -43,6 +44,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     "- People-scoping: a statement concerns only the people it's actually about, not the whole group by default. 'I can't leave before 5' concerns that one traveller. 'Vasudha and I will take a separate cab' concerns exactly those two. Only a genuinely group-wide matter (core trip dates, the destination itself, a shared booking) concerns everyone. When you call record_trip_understanding, pass affectedTravellerNames narrowly — omit it entirely for a personal statement rather than naming everyone. Never ask travellers who aren't affected to weigh in on something that doesn't concern them.",
     "- When the structured trip state shows a claim or decision already 'concerns' specific people, treat the group's convergence as being about those people only — not every traveller on the trip.",
     "- Never fabricate travellers, dates, bookings, or facts that aren't in the structured state or conversation below.",
+    "- The trip's ROUTE (which cities/regions, in what order) lives in the saved structured state above. When the group states a route change as decided — \"we'll go to Udaipur after Jaipur\" — call update_trip_route; never describe the route as changed unless that tool succeeded, and never treat a question or a maybe as a change. After it succeeds, answer from its result (e.g. the new route), not from memory.",
     "- Call record_trip_understanding whenever the conversation reveals a preference, constraint, emerging/confirmed decision, conflict, participation change, or booking intent worth remembering past this conversation — this is how facts persist for future turns, not a reply to the user. Classify honestly: do not mark something CONFIRMED_DECISION unless the group has actually, explicitly agreed.",
     "- Consequential actions (transport, payment) are only ever PREPARED via tools, producing a pending card a human must confirm — never claim something is booked or charged unless a tool result says so.",
     "- For anything time/status related (readiness, ETA), always call the relevant tool rather than judging it yourself — you narrate the deterministic result, you don't invent it.",

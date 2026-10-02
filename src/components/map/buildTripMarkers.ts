@@ -39,3 +39,13 @@ export function buildDestinationMarkers(destinations: DestinationLike[]): MapMar
 export function destinationsWithoutCoordinates(destinations: DestinationLike[]): DestinationLike[] {
   return destinations.filter((d) => d.latitude == null || d.longitude == null);
 }
+
+// The saved route's stops, in order, as a polyline of their stored
+// coordinates. Same exclusion rule as the markers: a stop with no stored
+// coordinate is skipped, never given a made-up position.
+export function buildJourneyLine(destinations: DestinationLike[]): { lat: number; lng: number }[] {
+  return [...destinations]
+    .sort((a, b) => a.order - b.order)
+    .filter((d) => d.latitude != null && d.longitude != null)
+    .map((d) => ({ lat: d.latitude as number, lng: d.longitude as number }));
+}
