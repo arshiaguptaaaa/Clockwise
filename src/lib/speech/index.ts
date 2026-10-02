@@ -14,7 +14,12 @@ function primary(): SpeechToTextProvider {
 // Try the primary; if Gnani can't take this recording (unsupported format,
 // outage), fall back to Gemini — and the result says "gemini", so nothing
 // downstream can mistake the source of the transcript.
-export async function transcribeSpeech(input: TranscribeInput): Promise<TranscribeResult & { fellBackFrom?: string }> {
+export async function transcribeSpeech(
+  input: TranscribeInput,
+  opts: { strictGnani?: boolean } = {}
+): Promise<TranscribeResult & { fellBackFrom?: string }> {
+  // Proof mode: Gnani or nothing. Never falls back, never uses Gemini.
+  if (opts.strictGnani) return gnaniSpeechProvider.transcribe(input);
   const first = primary();
   const result = await first.transcribe(input);
   if (result.ok || first.name === "gemini" || result.reason === "NO_SPEECH") return result;

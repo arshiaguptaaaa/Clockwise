@@ -9,7 +9,7 @@
 // conventional UA is sent. NOT verified against a live key in this
 // environment — no GNANI_API_KEY exists here — so any non-2xx or
 // unparseable reply is reported as PROVIDER_ERROR, never papered over.
-import type { SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
+import type { SpeechDiagnostics, SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
 
 const ENDPOINT = process.env.GNANI_STT_URL || "https://api.vachana.ai/stt/v3";
 const SUPPORTED = /(wav|wave|mp3|mpeg|flac|ogg|m4a|mp4|x-m4a|aac)/i;
@@ -51,6 +51,17 @@ class GnaniSpeechProvider implements SpeechToTextProvider {
     form.append("language_code", languageCode);
     form.append("format", "transcribe");
 
+    const started = Date.now();
+    const diag: SpeechDiagnostics = {
+      endpoint: new URL(ENDPOINT).host + new URL(ENDPOINT).pathname,
+      httpStatus: null,
+      requestId: null,
+      sentBytes: audio.size,
+      sentMime: mimeType,
+      languageCode,
+      responseFields: [],
+      durationMs: 0,
+    };
     try {
       const res = await fetch(ENDPOINT, {
         method: "POST",
@@ -59,20 +70,29 @@ class GnaniSpeechProvider implements SpeechToTextProvider {
           "User-Agent": "Clockwise/1.0 (+https://clockwise-lemon.vercel.app)",
         },
         body: form,
+        signal: AbortSignal.timeout(20_000),
       });
+      diag.httpStatus = res.status;
+      diag.durationMs = Date.now() - started;
       if (!res.ok) {
+        // Sanitised: Gnani doesn't echo credentials, but strip the key if it ever did.
+        diag.errorBody = (await res.text()).split(apiKey).join("[redacted]").slice(0, 300);
         console.error(`[gnani-stt] HTTP ${res.status}`);
-        return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: `Gnani returned HTTP ${res.status}.` };
+        return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: `Gnani returned HTTP ${res.status}.`, diagnostics: diag };
       }
-      const data = (await res.json()) as { success?: boolean; transcript?: string };
+      const data = (await res.json()) as { success?: boolean; transcript?: string; request_id?: string };
+      diag.responseFields = Object.keys(data);
+      diag.requestId = data.request_id ?? null;
       const transcript = data.transcript?.trim();
       if (!transcript) {
-        return { ok: false, reason: "NO_SPEECH", provider: this.name, message: "No speech was recognised." };
+        return { ok: false, reason: "NO_SPEECH", provider: this.name, message: "No speech was recognised.", diagnostics: diag };
       }
-      return { ok: true, transcript, provider: this.name };
+      return { ok: true, transcript, provider: this.name, diagnostics: diag };
     } catch (err) {
-      console.error("[gnani-stt] request failed:", err instanceof Error ? err.message : err);
-      return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: "Couldn't reach Gnani." };
+      diag.durationMs = Date.now() - started;
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      console.error("[gnani-stt] request failed:", err instanceof Error ? err.name : "unknown");
+      return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: timedOut ? "Gnani took too long to respond." : "Couldn't reach Gnani.", diagnostics: diag };
     }
   }
 }

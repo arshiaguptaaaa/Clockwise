@@ -9,9 +9,29 @@ export type TranscribeInput = {
   languageCode: string;
 };
 
+// What actually went over the wire, with nothing secret in it. Returned to
+// signed-in callers on request so an integration can be proven, not assumed.
+export type SpeechDiagnostics = {
+  endpoint: string;
+  httpStatus: number | null;
+  requestId: string | null;
+  sentBytes: number;
+  sentMime: string;
+  languageCode: string;
+  responseFields: string[];
+  durationMs: number;
+  errorBody?: string;
+};
+
 export type TranscribeResult =
-  | { ok: true; transcript: string; provider: SpeechProviderName }
-  | { ok: false; reason: "NOT_CONFIGURED" | "UNSUPPORTED_FORMAT" | "NO_SPEECH" | "PROVIDER_ERROR"; message: string; provider: SpeechProviderName };
+  | { ok: true; transcript: string; provider: SpeechProviderName; diagnostics?: SpeechDiagnostics }
+  | {
+      ok: false;
+      reason: "NOT_CONFIGURED" | "UNSUPPORTED_FORMAT" | "NO_SPEECH" | "PROVIDER_ERROR";
+      message: string;
+      provider: SpeechProviderName;
+      diagnostics?: SpeechDiagnostics;
+    };
 
 // The label a result carries is the provider that actually produced it —
 // a Gemini transcript is never reported as Gnani, even when it is the

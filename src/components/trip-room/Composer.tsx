@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Paperclip, ArrowUp, Mic, Square, Loader2, X } from "lucide-react";
 import { uploadAttachment, deleteAttachment } from "@/app/attachment-actions";
+import { recordingToWav } from "@/lib/audio/to-wav";
 
 function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
   const { pending } = useFormStatus();
@@ -19,7 +20,11 @@ function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
   );
 }
 
-type VoiceState = "idle" | "recording" | "transcribing" | "review" | "error";
+type VoiceState = "idle" | "recording" | "transcribing" | "error";
+
+// Gnani accepts up to 60 s of audio; stop a little short of that.
+const MAX_RECORDING_SECONDS = 55;
+const TRANSCRIBE_TIMEOUT_MS = 30_000;
 
 function formatElapsed(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -62,25 +67,28 @@ export function Composer({
   const [isAttaching, setIsAttaching] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
 
-  // Voice is just an alternate way to produce the same `content` text the
-  // typed composer sends — the transcript goes through the exact same
-  // `action` (and therefore the exact same agent turn) as typed input.
+  // The composer text is ONE piece of state. Typing, quick-reply chips and a
+  // voice transcript all write to it, and the normal Send button sends it —
+  // there is no separate "voice message" path.
+  const [text, setText] = useState("");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [elapsed, setElapsed] = useState(0);
-  const [transcript, setTranscript] = useState("");
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelledRef = useRef(false);
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
+  function releaseMic() {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
+  useEffect(() => releaseMic, []);
 
   async function startRecording() {
     setVoiceError(null);
@@ -94,14 +102,20 @@ export function Composer({
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
+    } catch (err) {
       setVoiceState("error");
-      setVoiceError("Microphone access was denied. Enable it in your browser settings to use voice.");
+      const name = err instanceof DOMException ? err.name : "";
+      setVoiceError(
+        name === "NotFoundError" || name === "OverconstrainedError"
+          ? "No microphone was found on this device."
+          : "Microphone access was blocked. Allow it in your browser's site settings to use voice."
+      );
       return;
     }
 
     streamRef.current = stream;
     chunksRef.current = [];
+    cancelledRef.current = false;
     const recorder = new MediaRecorder(stream);
     recorderRef.current = recorder;
 
@@ -109,72 +123,79 @@ export function Composer({
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
     recorder.onstop = () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      void transcribeRecording();
+      releaseMic();
+      if (cancelledRef.current) {
+        setVoiceState("idle");
+        return;
+      }
+      void transcribeRecording(recorder.mimeType || "audio/webm");
     };
 
     recorder.start();
     setVoiceState("recording");
     setElapsed(0);
-    timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    timerRef.current = setInterval(() => {
+      setElapsed((s) => {
+        if (s + 1 >= MAX_RECORDING_SECONDS) stopRecording();
+        return s + 1;
+      });
+    }, 1000);
   }
 
   function stopRecording() {
+    if (recorderRef.current?.state !== "recording") return;
     if (timerRef.current) clearInterval(timerRef.current);
     setVoiceState("transcribing");
-    recorderRef.current?.stop();
+    recorderRef.current.stop();
   }
 
-  async function transcribeRecording() {
-    const blob = new Blob(chunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" });
-    if (blob.size === 0) {
+  function cancelRecording() {
+    cancelledRef.current = true;
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    else {
+      releaseMic();
+      setVoiceState("idle");
+    }
+  }
+
+  async function transcribeRecording(recordedMime: string) {
+    const recorded = new Blob(chunksRef.current, { type: recordedMime });
+    if (recorded.size === 0) {
       setVoiceState("error");
       setVoiceError("Didn't catch anything — try again.");
       return;
     }
 
+    // Gnani doesn't accept WebM, so send 16 kHz mono WAV; if the browser
+    // can't decode its own recording, send it as recorded and let the server
+    // decide.
+    let upload: Blob = recorded;
+    try {
+      upload = await recordingToWav(recorded);
+    } catch {
+      upload = recorded;
+    }
+
     const body = new FormData();
-    body.set("audio", blob, "voice-message");
+    body.set("audio", upload, upload.type === "audio/wav" ? "voice.wav" : "voice");
+    body.set("language", "en-IN");
 
     try {
-      const res = await fetch("/api/transcribe", { method: "POST", body });
-      const data: { transcript?: string; error?: string } = await res.json();
+      const res = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
+      const data: { transcript?: string; error?: string } = await res.json().catch(() => ({}));
       if (!res.ok || !data.transcript) {
         setVoiceState("error");
         setVoiceError(data.error ?? "Transcription failed — try again.");
         return;
       }
-      setTranscript(data.transcript);
-      setVoiceState("review");
-    } catch {
+      // Into the normal composer, editable; nothing is sent until they press Send.
+      setText((prev) => (prev.trim() ? `${prev.trim()} ${data.transcript}` : data.transcript!));
+      setVoiceState("idle");
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (err) {
       setVoiceState("error");
-      setVoiceError("Transcription failed — try again.");
+      setVoiceError(err instanceof Error && err.name === "TimeoutError" ? "Transcription took too long — try again." : "Couldn't reach the transcription service — check your connection.");
     }
-  }
-
-  function editTranscript() {
-    if (inputRef.current) {
-      inputRef.current.value = transcript;
-      inputRef.current.focus();
-    }
-    setVoiceState("idle");
-  }
-
-  function cancelTranscript() {
-    setTranscript("");
-    setVoiceState("idle");
-  }
-
-  function sendTranscript() {
-    if (disabled) return;
-    const body = new FormData();
-    body.set("content", transcript);
-    if (pendingAttachment) body.set("attachmentId", pendingAttachment.id);
-    setVoiceState("idle");
-    setTranscript("");
-    setPendingAttachment(null);
-    void action(body);
   }
 
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
@@ -209,38 +230,19 @@ export function Composer({
     <div className="border-t border-border bg-surface">
       {suggestions && suggestions.length > 0 && voiceState === "idle" && (
         <div className="flex flex-wrap gap-1.5 px-4 pt-3">
-          {suggestions.map((text) => (
+          {suggestions.map((chip) => (
             <button
-              key={text}
+              key={chip}
               type="button"
               onClick={() => {
-                if (inputRef.current) {
-                  inputRef.current.value = text;
-                  inputRef.current.focus();
-                }
+                setText(chip);
+                inputRef.current?.focus();
               }}
               className="cursor-pointer rounded-full border border-border bg-page px-3 py-1.5 text-xs text-foreground transition-colors hover:border-accent hover:text-accent"
             >
-              {text}
+              {chip}
             </button>
           ))}
-        </div>
-      )}
-
-      {voiceState === "review" && (
-        <div className="mx-4 mt-3 rounded-xl border border-accent bg-accent-tint px-3.5 py-2.5">
-          <p className="text-sm text-accent-strong">&ldquo;{transcript}&rdquo;</p>
-          <div className="mt-2 flex gap-3">
-            <button type="button" onClick={editTranscript} className="cursor-pointer text-xs font-medium text-accent-strong hover:underline">
-              Edit
-            </button>
-            <button type="button" onClick={cancelTranscript} className="cursor-pointer text-xs font-medium text-muted-foreground hover:underline">
-              Cancel
-            </button>
-            <button type="button" onClick={sendTranscript} className="cursor-pointer text-xs font-medium text-accent-strong hover:underline">
-              Send
-            </button>
-          </div>
         </div>
       )}
 
@@ -268,9 +270,19 @@ export function Composer({
       )}
 
       {voiceState === "recording" ? (
-        <div className="flex items-center gap-2 px-4 py-3">
-          <span className="flex size-9 shrink-0 items-center justify-center">
-            <span className="size-2.5 animate-pulse rounded-full bg-danger" />
+        <div className="flex items-center gap-3 px-4 py-3" role="status" aria-live="polite">
+          <button
+            type="button"
+            onClick={cancelRecording}
+            aria-label="Cancel recording"
+            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+          <span className="flex h-5 items-center gap-[3px]" aria-hidden>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span key={i} className="voice-bar w-[3px] rounded-full bg-danger" style={{ animationDelay: `${i * 110}ms` }} />
+            ))}
           </span>
           <span className="flex-1 text-sm text-foreground">
             Listening… <span className="tabular-nums text-muted-foreground">{formatElapsed(elapsed)}</span>
@@ -285,7 +297,7 @@ export function Composer({
           </button>
         </div>
       ) : voiceState === "transcribing" ? (
-        <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground" role="status">
           <Loader2 className="size-4 animate-spin" /> Transcribing…
         </div>
       ) : (
@@ -296,8 +308,8 @@ export function Composer({
             if (disabled) return;
             if (pendingAttachment) formData.set("attachmentId", pendingAttachment.id);
             setPendingAttachment(null);
+            setText("");
             await action(formData);
-            formRef.current?.reset();
           }}
           className="flex items-center gap-2 px-4 py-3"
         >
@@ -320,6 +332,8 @@ export function Composer({
           <input
             ref={inputRef}
             name="content"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             autoComplete="off"
             placeholder={placeholder}
             disabled={disabled}
