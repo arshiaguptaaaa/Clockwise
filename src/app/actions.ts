@@ -116,7 +116,15 @@ export async function runGroupAgentTurn(tripId: string, actingUserId: string): P
   revalidatePath(`/trips/${tripId}/room`);
 }
 
+// A turn leaves a marker the moment it starts and flips it to COMPLETED (with
+// duration) when it ends. A marker still saying STARTED means the turn never
+// finished — killed by a time limit, or still running — which is otherwise
+// indistinguishable from "the agent chose not to answer".
 async function runGroupAgentTurnInner(tripId: string, actingUserId: string): Promise<void> {
+  const t0 = Date.now();
+  const marker = await prisma.tripEvent
+    .create({ data: { tripId, kind: "AGENT_TURN_STARTED", scope: "GROUP", actorUserId: actingUserId, sourceChannel: "GROUP", payload: "{}", propagation: "[]" } })
+    .catch(() => null);
   await withAgentLock(conversationLockKey(tripId, "GROUP"), async () => {
     // Every group message reaches this call; respondToGroupMessage itself
     // applies a narrow deterministic pre-filter (intervention-gate.ts) for
@@ -125,6 +133,11 @@ async function runGroupAgentTurnInner(tripId: string, actingUserId: string): Pro
     // the stay_silent tool rather than being keyword-gated on "@Clockwise".
     await respondToGroupMessage(tripId, actingUserId);
   });
+  if (marker) {
+    await prisma.tripEvent
+      .update({ where: { id: marker.id }, data: { kind: "AGENT_TURN_COMPLETED", payload: JSON.stringify({ totalMs: Date.now() - t0 }) } })
+      .catch(() => undefined);
+  }
 }
 
 export async function postPrivateMessage(tripId: string, formData: FormData): Promise<{ senderId: string } | void> {

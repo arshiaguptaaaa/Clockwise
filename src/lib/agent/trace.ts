@@ -86,6 +86,10 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Readiness recomputed deterministically from signals: ${(Array.isArray(p.signals) ? (p.signals as string[]) : []).join(", ") || "none"}.`,
         state: `${str(p.commitment)}: ${str(p.from)} → ${str(p.to)}${p.bufferMinutes != null ? ` (buffer ${str(p.bufferMinutes)} min)` : ""}. Shown as: "${str(p.line)}"`,
       };
+    case "AGENT_TURN_STARTED":
+      return { understanding: "An agent turn started and has NOT finished — it was killed by a time limit or is still running. Nothing it did after this point is recorded.", state: null };
+    case "AGENT_TURN_COMPLETED":
+      return { understanding: `Agent turn finished in ${Math.round(Number(p.totalMs) / 100) / 10}s.`, state: null };
     case "AGENT_TURN_FAILED":
       return {
         understanding: `The agent turn threw an exception (${str(p.name)}: ${str(p.message)}). Nothing was acted on; the user was told to resend.`,
