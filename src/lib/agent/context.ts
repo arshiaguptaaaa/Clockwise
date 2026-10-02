@@ -4,6 +4,8 @@ import { getClockwiseUserId } from "@/lib/clockwise";
 import { getPendingDocumentTravellers } from "@/lib/document-readiness";
 import { formatDateRange } from "@/lib/format";
 import { decodeCard } from "@/lib/action-cards";
+import { excludePrivateSourced } from "@/lib/decision-visibility";
+import { privateStateLines } from "@/lib/personal-state";
 
 export type ConversationTurn = {
   id: string;
@@ -112,13 +114,18 @@ function buildSharedStateSummary(
   return lines.join("\n");
 }
 
-async function fetchRecentDecisions(tripId: string) {
-  return prisma.decision.findMany({
+// The ambient shared state only ever shows Decisions that did not originate
+// in a private room (see decision-visibility.ts). viewerId is null for the
+// group context: nobody's private claims belong in a room everyone reads.
+// The private context passes the acting traveller, who may see their own.
+async function fetchRecentDecisions(tripId: string, viewerId: string | null) {
+  const rows = await prisma.decision.findMany({
     where: { tripId },
     orderBy: { createdAt: "desc" },
-    take: RECENT_DECISIONS_LIMIT,
-    select: { type: true, value: true, status: true, affectedUserIds: true },
+    take: RECENT_DECISIONS_LIMIT * 2,
+    select: { type: true, value: true, status: true, affectedUserIds: true, sourceMessageIds: true, actorUserId: true },
   });
+  return (await excludePrivateSourced(rows, viewerId)).slice(0, RECENT_DECISIONS_LIMIT);
 }
 
 async function fetchGroupHistory(tripId: string, clockwiseUserId: string): Promise<ConversationTurn[]> {
@@ -159,7 +166,7 @@ export async function buildGroupContext(
     }),
     getPendingDocumentTravellers(tripId),
     fetchGroupHistory(tripId, clockwiseUserId),
-    fetchRecentDecisions(tripId),
+    fetchRecentDecisions(tripId, null),
   ]);
 
   const pendingCardTitles = pendingCards
@@ -207,7 +214,7 @@ export async function buildPrivateContext(
         orderBy: { timestamp: "desc" },
         take: HISTORY_LIMIT,
       }),
-      fetchRecentDecisions(tripId),
+      fetchRecentDecisions(tripId, actingUserId),
     ]);
 
   const pendingCardTitles = pendingCards
@@ -261,6 +268,10 @@ export async function buildPrivateContext(
       `Permissions on file: ${permissions.map((p) => `${p.permissionType} (${p.visibility})`).join(", ")}`
     );
   }
+
+  // This traveller's own structured limits and private understanding — only
+  // ever theirs (privateStateLines is keyed on actingUserId alone).
+  profileLines.push(...(await privateStateLines(tripId, actingUserId)));
 
   return {
     mode: "PRIVATE",

@@ -7,6 +7,7 @@
 // isn't backed by an actual row. There is no chain-of-thought here —
 // only the concise, factual outcome of what happened.
 import { prisma } from "@/lib/prisma";
+import { excludePrivateSourced } from "@/lib/decision-visibility";
 
 export type TraceEntry = {
   timestamp: Date;
@@ -17,13 +18,21 @@ export type TraceEntry = {
 
 type RawToolCall = { name: string; input: unknown };
 
-export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
+// viewerId scopes what may be shown: another traveller's private-room tool
+// calls, private-sourced Decisions and PERSONAL events never appear — the
+// trace is evidence of what the AGENT did for the group, not a window into
+// anyone's private conversation.
+export async function buildAgentTrace(tripId: string, viewerId: string | null): Promise<TraceEntry[]> {
   const [messages, decisions, escalations, auditLogs, tripEvents] = await Promise.all([
     prisma.message.findMany({
-      where: { tripId, toolCalls: { not: null } },
+      where: {
+        tripId,
+        toolCalls: { not: null },
+        OR: [{ channel: "GROUP" }, ...(viewerId ? [{ channel: "PRIVATE" as const, recipientId: viewerId }] : [])],
+      },
       orderBy: { timestamp: "asc" },
     }),
-    prisma.decision.findMany({ where: { tripId }, orderBy: { createdAt: "asc" } }),
+    prisma.decision.findMany({ where: { tripId }, orderBy: { createdAt: "asc" } }).then((rows) => excludePrivateSourced(rows, viewerId)),
     prisma.escalationEvent.findMany({
       where: { tripId },
       include: { traveller: true, commitment: true },
@@ -120,6 +129,8 @@ export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
   const sourceById = new Map(sourceMessages.map((m) => [m.id, m]));
 
   for (const e of tripEvents) {
+    const personal = e.scope === "PERSONAL";
+    if (personal && (!viewerId || e.subjectUserId !== viewerId)) continue;
     let payload: Record<string, unknown> = {};
     try {
       payload = JSON.parse(e.payload);
@@ -143,7 +154,15 @@ export async function buildAgentTrace(tripId: string): Promise<TraceEntry[]> {
       lines.push(`STATE — Route: ${(payload.routeBefore as string[]).join(" → ") || "(empty)"}  ⇒  ${(payload.routeAfter as string[]).join(" → ")}`);
     }
     if (surfaces.length) lines.push(`PROPAGATED — ${surfaces.map((x) => `${x} ✓`).join("  ")} (these read the saved route directly)`);
-    entries.push({ timestamp: e.createdAt, kind: "TRIP_EVENT", title: `${e.kind} · ${e.scope}`, detail: lines.join("\n") });
+    if (e.kind === "TRAVELLER_CONSTRAINT_SET") {
+      lines.splice(1, 1, `EVENT — ${e.kind} · ${payload.constraintKind ?? ""} ${payload.localTime ?? ""}${payload.onDate ? ` on ${payload.onDate}` : ""}${payload.replacedPrevious ? " (replaced earlier limit)" : ""}`);
+    }
+    entries.push({
+      timestamp: e.createdAt,
+      kind: "TRIP_EVENT",
+      title: `${e.kind} · ${personal ? "PRIVATE — only you can see this" : e.scope}`,
+      detail: lines.join("\n"),
+    });
   }
 
   return entries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());

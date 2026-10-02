@@ -21,6 +21,7 @@ import { computeReadinessStatus, recordReadinessReminder, checkEscalationReadine
 import { performEscalation } from "@/lib/voice-escalation/perform-escalation";
 import { createProposal } from "@/lib/proposals";
 import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
+import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
 import type { AgentContext } from "./context";
@@ -149,6 +150,37 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         },
       },
       required: ["claimType", "category", "value", "confidence"],
+    },
+  },
+  {
+    name: "record_personal_constraint",
+    description:
+      "Record ONE scheduling limit that belongs to a single traveller, as structured state: that they must be back/finished by a time (LATEST_END, e.g. \"I have to be back by 10:30\") or can't start before a time (EARLIEST_START, e.g. \"I can't leave before 5\"). In a PRIVATE room it saves to that traveller's own private state — the group is never told it, or why; the group only ever sees a neutral sentence if and when a concrete plan time conflicts (see check_group_feasibility). In the GROUP room it records a limit someone stated openly (pass travellerName if it's about someone else; omit it when they're talking about themselves). Always convert the time to 24-hour HH:MM yourself (10:30 PM -> \"22:30\"). Use this instead of record_trip_understanding for any time-of-day limit. A newer limit of the same kind replaces the older one.",
+    parameters: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["LATEST_END", "EARLIEST_START"] },
+        time: { type: "string", description: "24-hour HH:MM, e.g. '22:30'" },
+        date: { type: "string", description: "ISO date (YYYY-MM-DD) if the limit is only for one day; omit if it applies every day" },
+        travellerName: { type: "string", description: "GROUP room only: exact roster name of the traveller this is about, if not the speaker" },
+        note: { type: "string", description: "Optional short private context in the traveller's own terms. Stored privately; never shown to the group." },
+        confidence: { type: "string", enum: ["MEDIUM", "HIGH"] },
+      },
+      required: ["kind", "time", "confidence"],
+    },
+  },
+  {
+    name: "check_group_feasibility",
+    description:
+      "Deterministically check whether a specific time works for the travellers, using every traveller's recorded limits (including private ones) on the server. Returns ONLY neutral group-safe sentences like \"Eva is unavailable after 10:30 PM\" — never a reason, never a raw private value. Call this before proposing or agreeing a concrete time for something several people attend. A result of no conflicts only means no CONFLICTING limit is on record; say so, never claim everyone is free.",
+    parameters: {
+      type: "object",
+      properties: {
+        time: { type: "string", description: "24-hour HH:MM start time to check" },
+        date: { type: "string", description: "ISO date YYYY-MM-DD if known" },
+        durationMinutes: { type: "number", description: "How long it lasts, if known" },
+      },
+      required: ["time"],
     },
   },
   {
@@ -380,6 +412,10 @@ export async function executeTool(
       return recordTripUnderstanding(input, ctx);
     case "update_trip_route":
       return updateTripRoute(input, ctx);
+    case "record_personal_constraint":
+      return recordPersonalConstraintTool(input, ctx);
+    case "check_group_feasibility":
+      return checkGroupFeasibilityTool(input, ctx);
     case "propose_payment_request":
       return proposePaymentRequest(input, ctx);
     case "propose_itinerary_change":
@@ -658,6 +694,29 @@ async function recordTripUnderstanding(input: Record<string, unknown>, ctx: Agen
     ctx.trip.members
   );
 
+  // A private room's understanding must never become a shared Decision row:
+  // Decisions are read into the GROUP agent's context and listed on Agent
+  // Trace for every member. Keep it as a PERSONAL event only its subject
+  // can see, and let privateStateLines feed it back to that traveller's own
+  // private agent.
+  if (ctx.mode === "PRIVATE") {
+    await prisma.tripEvent.create({
+      data: {
+        tripId: ctx.trip.id,
+        kind: "PERSONAL_UNDERSTANDING",
+        scope: "PERSONAL",
+        actorUserId: ctx.actingUserId,
+        subjectUserId: ctx.actingUserId,
+        sourceChannel: "PRIVATE",
+        sourceMessageId: sourceMessageIds[sourceMessageIds.length - 1] ?? null,
+        confidence,
+        payload: JSON.stringify({ claimType, category, value }),
+        propagation: JSON.stringify([]),
+      },
+    });
+    return { output: `Saved privately [${claimType}] ${category}: ${value}. This was NOT shared with the group.` };
+  }
+
   await prisma.decision.create({
     data: {
       tripId: ctx.trip.id,
@@ -746,6 +805,64 @@ async function postProposal(
   await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: message.id } });
 
   return proposal;
+}
+
+async function recordPersonalConstraintTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const kind = input.kind === "LATEST_END" || input.kind === "EARLIEST_START" ? (input.kind as ConstraintKind) : null;
+  const time = (input.time as string | undefined)?.trim();
+  if (!kind || !time || parseHHMM(time) == null) {
+    return { output: "Need a kind (LATEST_END or EARLIEST_START) and a 24-hour HH:MM time — convert it yourself (10:30 PM = 22:30) and try again." };
+  }
+  const dateRaw = (input.date as string | undefined)?.trim();
+  const onDate = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? new Date(`${dateRaw}T00:00:00.000Z`) : null;
+
+  // The subject is always the person speaking in a private room; only in
+  // the shared room (where it's already public) can it be about someone else.
+  let subjectUserId = ctx.actingUserId;
+  if (ctx.mode === "GROUP") {
+    const named = (input.travellerName as string | undefined)?.trim();
+    if (named) {
+      const member = ctx.trip.members.find((m) => m.user.name.toLowerCase() === named.toLowerCase());
+      if (!member) return { output: `"${named}" isn't on this trip's roster — not recorded.` };
+      subjectUserId = member.userId;
+    }
+  }
+
+  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const result = await recordPersonalConstraint({
+    tripId: ctx.trip.id,
+    subjectUserId,
+    actorUserId: ctx.actingUserId,
+    channel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP",
+    kind,
+    localTime: time,
+    onDate,
+    note: (input.note as string | undefined)?.trim() || null,
+    sourceMessageId,
+    confidence: input.confidence === "HIGH" ? "HIGH" : "MEDIUM",
+  });
+  if (!result.ok) return { output: result.error };
+
+  const who = ctx.trip.members.find((m) => m.userId === subjectUserId)?.user.name ?? "That traveller";
+  return {
+    output:
+      ctx.mode === "PRIVATE"
+        ? `Saved privately for ${who}. The group has NOT been told${result.replacedPrevious ? " (this replaced their earlier limit)" : ""}. Do not repeat it in the group; it will only ever surface as a neutral line if a concrete plan time conflicts.`
+        : `Recorded: ${groupSafeLine(who, kind, time)}${result.replacedPrevious ? " (replacing the earlier limit)" : ""}.`,
+  };
+}
+
+async function checkGroupFeasibilityTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const time = (input.time as string | undefined)?.trim();
+  if (!time || parseHHMM(time) == null) return { output: "Need a 24-hour HH:MM time to check." };
+  const dateRaw = (input.date as string | undefined)?.trim();
+  const date = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? new Date(`${dateRaw}T00:00:00.000Z`) : null;
+  const duration = Number(input.durationMinutes);
+  const result = await checkFeasibility(ctx.trip.id, time, date, Number.isFinite(duration) ? duration : 0);
+
+  const basis = `Based only on limits travellers have told Clockwise (${result.withKnownLimits} of ${result.travellersChecked} have shared any).`;
+  if (result.conflicts.length === 0) return { output: `No conflicting limit on record for ${time}. ${basis}` };
+  return { output: `Conflicts at ${time}: ${result.conflicts.map((c) => c.line).join("; ")}. ${basis}` };
 }
 
 // Direct route mutation — see src/lib/trip-route.ts. GROUP-only on purpose:

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getTripById } from "@/lib/trip";
 import { buildAgentTrace, type TraceEntry } from "@/lib/agent/trace";
+import { getCurrentUserId } from "@/lib/session";
 
 // Deliberately plain/minimal — this page exists to make the agent's
 // real, checkable decision chain legible for a demo recording, not to
@@ -36,7 +37,8 @@ export default async function AgentTracePage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
-  const [trip, entries] = await Promise.all([getTripById(tripId), buildAgentTrace(tripId)]);
+  const viewerId = await getCurrentUserId();
+  const [trip, entries] = await Promise.all([getTripById(tripId), buildAgentTrace(tripId, viewerId)]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">

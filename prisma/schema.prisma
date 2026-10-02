@@ -150,6 +150,7 @@ model User {
   mobilityConnections MobilityConnection[]
   escalationEvents    EscalationEvent[]
   attachments         Attachment[]
+  travellerConstraints TravellerConstraint[]
 
   createdAt DateTime @default(now())
 }
@@ -182,6 +183,7 @@ model Trip {
   proposals        Proposal[]
   attachments      Attachment[]
   tripEvents       TripEvent[]
+  travellerConstraints TravellerConstraint[]
 
   createdAt DateTime @default(now())
 }
@@ -844,4 +846,38 @@ model TripEvent {
   createdAt       DateTime @default(now())
 
   @@index([tripId, createdAt])
+}
+
+// Structured PERSONAL traveller state: a scheduling limit belonging to one
+// traveller ("must be back by 22:30"). The traveller's own words live in
+// `note` and are private to them; everything the group may ever be shown is
+// derived deterministically from the structured fields (kind + localTime)
+// by groupSafeLine() in src/lib/personal-state.ts — never from `note`, and
+// never from model-written text — so a reason can't leak by accident.
+//
+// visibility: GROUP when the traveller said it in the shared room (already
+// public), AGENT_ONLY when it came from their private My Clockwise room.
+// A newer constraint of the same kind/date supersedes the older one
+// (status SUPERSEDED) instead of leaving two contradictory ACTIVE rows.
+model TravellerConstraint {
+  id          String     @id @default(cuid())
+  tripId      String
+  trip        Trip       @relation(fields: [tripId], references: [id])
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+
+  // "LATEST_END" (must be done/back by) | "EARLIEST_START" (can't start before)
+  kind        String
+  // Wall-clock "HH:MM" (24h) in the trip's local time; trips carry no
+  // timezone, so this is only ever compared with other wall-clock times.
+  localTime   String
+  // null = applies every day of the trip.
+  onDate      DateTime?
+  note        String?
+  visibility  Visibility @default(AGENT_ONLY)
+  status      String     @default("ACTIVE")
+  sourceEventId String?
+  createdAt   DateTime   @default(now())
+
+  @@index([tripId, userId, status])
 }
