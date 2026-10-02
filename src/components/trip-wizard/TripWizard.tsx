@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import Image from "next/image";
 import { unstable_rethrow } from "next/navigation";
 import {
   ArrowLeft,
@@ -18,11 +19,13 @@ import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
 import { DestinationAutocomplete, type DestinationPreview } from "@/components/trip-wizard/DestinationAutocomplete";
 import { DestinationPhotoStage, type StagePhoto } from "@/components/trip-wizard/DestinationPhotoStage";
 import { CURATED_PHOTOS, curatedPhotoFor } from "@/lib/destination-photos";
+import { CharacterScene, Face, SpeechBubble } from "@/components/art/CharacterScene";
+import { FACE_COUNT } from "@/lib/characters";
 import { WizardStepHeader } from "@/components/trip-wizard/WizardStepHeader";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
 type DateMode = "exact" | "approximate" | "unsure";
-type TravellerDraft = { name: string; contact: string };
+type TravellerDraft = { name: string; contact: string; face: number };
 
 const STEPS = ["destinations", "dates", "travellers", "review"] as const;
 type Step = (typeof STEPS)[number];
@@ -57,6 +60,17 @@ export function TripWizard() {
   const [preview, setPreview] = useState<DestinationPreview>({ query: "", result: null });
   const handlePreview = useCallback((p: DestinationPreview) => setPreview(p), []);
   const step: Step = STEPS[stepIndex];
+
+  // Before anything is typed or chosen the page shows rotating inspiration
+  // rather than empty white — one photograph at a time.
+  const [idleIndex, setIdleIndex] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = setInterval(() => setIdleIndex((i) => (i + 1) % CURATED_PHOTOS.length), 3200);
+    return () => clearInterval(t);
+  }, []);
+  // Faces are picked by position or by the traveller — never from a name.
+  const [creatorFace, setCreatorFace] = useState(0);
 
   const [destinations, setDestinations] = useState<SelectedDestination[]>([]);
 
@@ -97,13 +111,17 @@ export function TripWizard() {
   }
 
   function addTraveller() {
-    setTravellers((prev) => [...prev, { name: "", contact: "" }]);
+    setTravellers((prev) => [...prev, { name: "", contact: "", face: (creatorFace + prev.length + 1) % FACE_COUNT }]);
   }
 
   function updateTraveller(index: number, field: keyof TravellerDraft, value: string) {
     setTravellers((prev) =>
       prev.map((t, i) => (i === index ? { ...t, [field]: value } : t))
     );
+  }
+
+  function cycleTravellerFace(index: number) {
+    setTravellers((prev) => prev.map((t, i) => (i === index ? { ...t, face: (t.face + 1) % FACE_COUNT } : t)));
   }
 
   function removeTraveller(index: number) {
@@ -149,7 +167,7 @@ export function TripWizard() {
           coreEndDate,
           creatorName,
           creatorEmail: creatorEmail.trim() || null,
-          travellers: travellers.filter((t) => t.name.trim()),
+          travellers: travellers.filter((t) => t.name.trim()).map(({ name, contact }) => ({ name, contact })),
         });
       } catch (err) {
         unstable_rethrow(err);
@@ -179,6 +197,22 @@ export function TripWizard() {
     [destinations]
   );
 
+  const idlePhoto = useMemo(() => {
+    const c = CURATED_PHOTOS[idleIndex];
+    return stagePhotoFor(c.label, null);
+  }, [idleIndex]);
+
+  const stageLabel = previewPhoto?.label ?? (selectedPhotos.length === 0 ? idlePhoto?.label : null);
+  const destinationBubble =
+    destinations.length >= 2
+      ? "Okay, now we're talking."
+      : destinations.length === 1
+        ? "Good start. Another?"
+        : previewPhoto
+          ? `${previewPhoto.label}? Tell me more.`
+          : `${stageLabel ?? "Anywhere"}? I could be convinced.`;
+  const destinationScene = destinations.length >= 2 ? "celebrating" : destinations.length === 1 ? "highfive" : "map";
+
   const dateSummary =
     dateMode === "exact" && exactStart && exactEnd
       ? formatDateRange(new Date(`${exactStart}T00:00:00Z`), new Date(`${exactEnd}T00:00:00Z`))
@@ -188,7 +222,7 @@ export function TripWizard() {
 
   return (
     <main className="flex min-h-screen flex-col bg-white px-6 py-10">
-      <div className="mx-auto flex w-full max-w-sm flex-1 flex-col">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
         <div className="mb-4 flex items-center justify-between">
           {stepIndex > 0 ? (
             <button
@@ -211,22 +245,15 @@ export function TripWizard() {
 
         {step === "destinations" && (
           <div className="flex flex-1 flex-col">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1 pt-2">
-                <h1 className="font-display text-[2rem] font-medium leading-[1.05] tracking-tight text-foreground">
-                  Where are
-                  <br />
-                  we <span className="italic text-accent">going?</span>
-                </h1>
-                <p className="mt-3 text-sm text-muted-foreground">
-                  Add as many or as few as you know. Clockwise can refine things later.
-                </p>
-              </div>
-              <DestinationPhotoStage preview={previewPhoto} selected={selectedPhotos} />
-            </div>
+            <h1 className="pt-2 font-display text-[2rem] font-medium leading-[1.05] tracking-tight text-foreground">
+              Where are we <span className="italic text-accent">going?</span>
+            </h1>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Add as many or as few as you know. Clockwise can refine things later.
+            </p>
 
             <div className="mt-6">
-              <DestinationAutocomplete onAdd={addDestination} isDuplicate={isDuplicateDestination} onPreview={handlePreview} />
+              <DestinationAutocomplete onAdd={addDestination} isDuplicate={isDuplicateDestination} onPreview={handlePreview} suggestions={["Prague", "Vienna", "Jaipur", "Nuuk"]} />
             </div>
 
             {destinations.length > 0 && (
@@ -259,7 +286,20 @@ export function TripWizard() {
               </div>
             )}
 
-            <div className="flex-1" />
+            <div className="flex flex-1 items-center justify-center">
+              <DestinationPhotoStage preview={previewPhoto} selected={selectedPhotos} idle={idlePhoto}>
+                <SpeechBubble key={destinationBubble} className="absolute -left-4 top-2 z-30 sm:-left-14" tail="bottom-left">
+                  {destinationBubble}
+                </SpeechBubble>
+                <CharacterScene
+                  key={destinationScene}
+                  scene={destinationScene}
+                  tilt={-4}
+                  sizes="120px"
+                  className="absolute -bottom-3 -left-8 z-30 w-28 sm:-left-20"
+                />
+              </DestinationPhotoStage>
+            </div>
             <button
               type="button"
               onClick={goNext}
@@ -386,55 +426,88 @@ export function TripWizard() {
 
         {step === "travellers" && (
           <div className="flex flex-1 flex-col">
-            <h1 className="font-serif text-2xl font-medium text-foreground">
-              Who&apos;s coming along?
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Just names for now — everyone shares their own details privately once they join.
-            </p>
-
-            <div className="mt-6 flex flex-col gap-2.5">
-              <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  You · Trip organiser
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 pt-2">
+                <h1 className="font-display text-[2rem] font-medium leading-[1.05] tracking-tight text-foreground">
+                  Who&apos;s coming
+                  <br />
+                  <span className="italic text-accent">along?</span>
+                </h1>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Just names and emails for now — everyone shares their own details privately once they join.
                 </p>
-                <div className="flex gap-2">
+              </div>
+              <div className="relative mt-1 w-32 shrink-0">
+                <CharacterScene scene="friendship" tilt={3} sizes="130px" />
+                <SpeechBubble className="absolute right-0 top-full z-10 mt-2 w-max" tail="top-right">
+                  {travellers.length === 0 ? "Who are we waiting for?" : "The more the merrier."}
+                </SpeechBubble>
+              </div>
+            </div>
+
+            <div className="mt-7 flex flex-col gap-4">
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCreatorFace((f) => (f + 1) % FACE_COUNT)}
+                  aria-label="Change your look"
+                  title="Tap to change look"
+                  className="mt-1 cursor-pointer rounded-full transition-transform hover:scale-105"
+                >
+                  <Face index={creatorFace} className="size-14" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Trip organiser · you</p>
                   <input
                     value={creatorName}
                     onChange={(e) => setCreatorName(e.target.value)}
                     placeholder="Your name"
                     autoFocus
-                    className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                    className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
                   />
                   <input
                     value={creatorEmail}
                     onChange={(e) => setCreatorEmail(e.target.value)}
                     placeholder="Your email"
                     type="email"
-                    className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                    className="mt-2 w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
                   />
                 </div>
               </div>
 
               {travellers.map((t, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    value={t.name}
-                    onChange={(e) => updateTraveller(i, "name", e.target.value)}
-                    placeholder="Name"
-                    className="flex-1 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
-                  />
-                  <input
-                    value={t.contact}
-                    onChange={(e) => updateTraveller(i, "contact", e.target.value)}
-                    placeholder="Email or phone"
-                    className="flex-1 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
-                  />
+                <div key={i} className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    onClick={() => cycleTravellerFace(i)}
+                    aria-label={`Change ${t.name || "traveller"}'s look`}
+                    title="Tap to change look"
+                    className="mt-1 cursor-pointer rounded-full transition-transform hover:scale-105"
+                  >
+                    <Face index={t.face} className="size-14" />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      {t.name.trim() ? "Invited" : "New traveller"}
+                    </p>
+                    <input
+                      value={t.name}
+                      onChange={(e) => updateTraveller(i, "name", e.target.value)}
+                      placeholder="Name"
+                      className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                    />
+                    <input
+                      value={t.contact}
+                      onChange={(e) => updateTraveller(i, "contact", e.target.value)}
+                      placeholder="Email address"
+                      className="mt-2 w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeTraveller(i)}
                     aria-label="Remove"
-                    className="flex shrink-0 cursor-pointer items-center justify-center text-muted-foreground hover:text-danger"
+                    className="mt-9 flex shrink-0 cursor-pointer items-center justify-center text-muted-foreground hover:text-danger"
                   >
                     <X className="size-4" />
                   </button>
@@ -444,10 +517,13 @@ export function TripWizard() {
               <button
                 type="button"
                 onClick={addTraveller}
-                className="mt-1 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-border px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent"
               >
-                <Plus className="size-4" /> Add another
+                <Plus className="size-4" /> Add another traveller
               </button>
+              <p className="-mt-2 text-xs text-muted-foreground">
+                Email is how Clockwise sends invitations and, later, trip alerts.
+              </p>
             </div>
 
             <div className="flex-1" />
@@ -463,45 +539,73 @@ export function TripWizard() {
         )}
 
         {step === "review" && (
-          <div className="flex flex-1 flex-col">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              {destinations.map((d) => d.name).join(" · ") || "Your trip"}
-            </p>
+          <div className="flex flex-1 flex-col items-center text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">Ready to go?</p>
+
+            <div className="relative mt-6 w-[62%] max-w-[250px]">
+              <div
+                className="photo-in relative aspect-[4/5] overflow-hidden rounded-t-[999px] rounded-b-[26px] bg-surface-muted shadow-[0_30px_60px_-30px_rgba(20,24,26,0.5)]"
+                style={{ ["--tilt" as string]: "-2deg", transform: "rotate(-2deg)" }}
+              >
+                {selectedPhotos[0] ? (
+                  <Image
+                    src={selectedPhotos[0].src}
+                    alt=""
+                    fill
+                    sizes="250px"
+                    priority
+                    className="object-cover"
+                    style={{ objectPosition: selectedPhotos[0].objectPosition ?? "50% 50%" }}
+                  />
+                ) : (
+                  <span className="absolute inset-0 flex items-center justify-center px-4 font-display text-3xl italic text-accent">
+                    {destinations[0]?.name ?? "Your trip"}
+                  </span>
+                )}
+              </div>
+              <div className="absolute -bottom-4 -right-14 z-10 w-24 sm:-right-20 sm:w-28">
+                <SpeechBubble className="absolute -left-10 -top-8 z-10 w-max" tail="bottom-right">
+                  Let&apos;s go.
+                </SpeechBubble>
+                <CharacterScene scene="highfive" tilt={5} sizes="120px" />
+              </div>
+            </div>
+
             <input
               value={effectiveTripName}
               onChange={(e) => setTripName(e.target.value)}
-              className="mt-1 w-full border-none bg-transparent p-0 font-serif text-2xl font-medium text-foreground focus:outline-none"
+              aria-label="Trip name"
+              className="mt-8 w-full border-none bg-transparent p-0 text-center font-display text-4xl font-medium leading-none tracking-tight text-foreground focus:outline-none"
             />
-            <p className="mt-1 text-sm text-muted-foreground">Your trip is taking shape.</p>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              {[...new Set(destinations.map((d) => (d.freeText ? null : d.country)).filter(Boolean))].join(" · ") ||
+                destinations.map((d) => d.name).join(" · ") ||
+                "Your trip"}
+            </p>
 
-            <div className="mt-6 flex flex-col divide-y divide-border">
-              <div className="flex items-center justify-between py-3">
-                <span className="text-sm font-medium text-foreground">{creatorName || "You"}</span>
-                <span className="text-xs font-medium uppercase tracking-wide text-accent-strong">Organiser</span>
-              </div>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Face index={creatorFace} className="size-8" /> {creatorName || "You"}
+              </span>
               {travellers
                 .filter((t) => t.name.trim())
                 .map((t, i) => (
-                  <div key={i} className="flex items-center justify-between py-3">
-                    <span className="text-sm font-medium text-foreground">{t.name}</span>
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {t.contact.trim() ? "Invite ready" : "No contact yet"}
-                    </span>
-                  </div>
+                  <span key={i} className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Face index={t.face} className="size-8" /> {t.name}
+                    {!t.contact.trim() && <span className="text-[10px] font-normal text-muted-foreground">(no email yet)</span>}
+                  </span>
                 ))}
             </div>
 
-            <p className="mt-5 text-sm text-muted-foreground">{dateSummary}</p>
+            <p className="mt-5 font-display text-base italic text-muted-foreground">{dateSummary}</p>
 
             <div className="flex-1" />
-            {createError && (
-              <p className="mt-4 text-sm text-danger">{createError}</p>
-            )}
+            {createError && <p className="mt-4 text-sm text-danger">{createError}</p>}
             <button
               type="button"
               onClick={handleCreate}
               disabled={isPending}
-              className="mt-4 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3.5 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-8 flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-accent px-4 py-3.5 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending ? "Creating…" : "Create our trip"} <ArrowRight className="size-4" />
             </button>

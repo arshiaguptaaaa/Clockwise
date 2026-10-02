@@ -3,7 +3,7 @@ import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
 import { TrackedLink } from "@/components/home/TrackedLink";
 import { TrackLandingView } from "@/components/home/TrackLandingView";
 import { HeroPhotoStage } from "@/components/home/HeroPhotoStage";
-import { CharacterSlot } from "@/components/art/CharacterSlot";
+import { CHARACTER_CREDIT } from "@/lib/characters";
 
 // Three real funnels, kept visually and conceptually distinct so traffic
 // analysis isn't contaminated by people accidentally landing in the demo:
@@ -30,21 +30,21 @@ export default function ClockwiseHomePage() {
         </TrackedLink>
       </header>
 
-      <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 pb-16 pt-8 sm:px-10 lg:min-h-[calc(100vh-96px)] lg:grid-cols-[1.15fr_1fr] lg:items-center lg:gap-16 lg:pt-0">
-        <section>
+      <div className="mx-auto grid w-full max-w-6xl gap-x-16 gap-y-8 px-6 pb-16 pt-4 sm:px-10 lg:min-h-[calc(100vh-96px)] lg:grid-cols-[1.15fr_1fr] lg:content-center lg:pt-0">
+        <section className="lg:col-start-1 lg:row-start-1 lg:self-end">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
             Group travel, kept on time
           </p>
-          <h1 className="mt-5 font-display text-[clamp(3rem,9vw,6.25rem)] font-medium leading-[0.95] tracking-tight text-foreground">
+          <h1 className="mt-4 font-display text-[clamp(2.75rem,9vw,6.25rem)] font-medium leading-[0.95] tracking-tight text-foreground">
             One trip.
             <br />
             <span className="italic text-accent">Many clocks.</span>
           </h1>
-          <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
-            Clockwise keeps everyone&apos;s journey in step — who&apos;s ready, who&apos;s running late, what just changed — so nobody has to chase anybody.
+          <p className="mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
+            Everyone can arrive differently. Clockwise keeps the trip together.
           </p>
 
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <TrackedLink
               href="/new"
               event="plan_trip_clicked"
@@ -56,35 +56,44 @@ export default function ClockwiseHomePage() {
             <TrackedLink
               href="/join"
               event="join_trip_clicked"
-              className="flex cursor-pointer items-center justify-center gap-2 rounded-full border border-border bg-white px-7 py-3.5 text-sm font-medium text-foreground transition-colors hover:border-accent hover:text-accent"
+              className="hidden cursor-pointer items-center justify-center gap-2 rounded-full border border-border bg-white px-7 py-3.5 text-sm font-medium text-foreground transition-colors hover:border-accent hover:text-accent sm:flex"
             >
               <Ticket className="size-4" />
               Join a trip
             </TrackedLink>
           </div>
-
-          <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <TrackedLink
-              href="/waitlist"
-              event="waitlist_clicked"
-              className="cursor-pointer font-medium text-accent underline-offset-4 hover:underline"
-            >
-              Join the early-access list →
-            </TrackedLink>
-            <TrackedLink
-              href="/demo"
-              event="demo_clicked"
-              className="cursor-pointer text-muted-foreground underline-offset-4 hover:text-accent hover:underline"
-            >
-              Explore demo trip →
-            </TrackedLink>
-          </div>
         </section>
 
-        <HeroPhotoStage>
-          <CharacterSlot name="traveller" className="absolute -bottom-6 -right-4 w-28 lg:-right-10 lg:w-40" />
-        </HeroPhotoStage>
+        <div className="lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-center">
+          <HeroPhotoStage />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm lg:col-start-1 lg:row-start-2 lg:self-start">
+          <TrackedLink
+            href="/waitlist"
+            event="waitlist_clicked"
+            className="cursor-pointer font-medium text-accent underline-offset-4 hover:underline"
+          >
+            Join the early-access list →
+          </TrackedLink>
+          <TrackedLink
+            href="/demo"
+            event="demo_clicked"
+            className="cursor-pointer text-muted-foreground underline-offset-4 hover:text-accent hover:underline"
+          >
+            Explore demo trip →
+          </TrackedLink>
+        </div>
       </div>
+
+      <footer className="mx-auto w-full max-w-6xl px-6 pb-8 text-[10px] leading-relaxed text-muted-foreground sm:px-10">
+        Illustrations: {CHARACTER_CREDIT.creators},{" "}
+        <a href={CHARACTER_CREDIT.portraitsSourceUrl} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+          {CHARACTER_CREDIT.set}
+        </a>
+        , <a href={CHARACTER_CREDIT.licenseUrl} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">{CHARACTER_CREDIT.license}</a>.
+        Photography credited beside each image.
+      </footer>
     </main>
   );
 }

@@ -22,11 +22,14 @@ export function DestinationAutocomplete({
   onAdd,
   isDuplicate,
   onPreview,
+  suggestions,
 }: {
   onAdd: (destination: SelectedDestination) => void;
   isDuplicate: (destination: SelectedDestination) => boolean;
   // Lets the page show photography for what's being typed / highlighted.
   onPreview?: (preview: DestinationPreview) => void;
+  // Quick starts shown under the field while it is empty.
+  suggestions?: string[];
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DestinationSearchResult[]>([]);
@@ -135,7 +138,7 @@ export function DestinationAutocomplete({
   const showDropdown = open && trimmedQuery.length >= MIN_QUERY_LENGTH;
 
   return (
-    <div ref={wrapperRef} className="relative flex gap-2">
+    <div ref={wrapperRef} className="relative flex flex-wrap gap-2">
       <div className="relative flex-1">
         <input
           value={query}
@@ -227,6 +230,24 @@ export function DestinationAutocomplete({
       >
         <Plus className="size-5" />
       </button>
+
+      {suggestions && suggestions.length > 0 && !trimmedQuery && (
+        <div className="flex w-full flex-wrap gap-x-4 gap-y-1 pt-1">
+          {suggestions.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => {
+                setQuery(name);
+                setOpen(true);
+              }}
+              className="cursor-pointer font-display text-base italic text-muted-foreground underline-offset-4 transition-colors hover:text-accent hover:underline"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { postPrivateMessage, runPrivateAgentTurn } from "@/app/actions";
 import { ConnectedServices } from "@/components/my-clockwise/ConnectedServices";
 import { CriticalTripAlerts } from "@/components/my-clockwise/CriticalTripAlerts";
 import { liveLocationOffer } from "@/lib/readiness-engine";
+import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 
 const UBER_STATUS_MESSAGES: Record<string, string> = {
@@ -60,9 +61,17 @@ export default async function MyClockwisePage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-border px-4 py-2.5">
-        <p className="text-sm font-semibold text-foreground">My Clockwise</p>
-        <p className="text-xs text-muted-foreground">Private · Only you and Clockwise</p>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+        <div>
+          <p className="font-display text-xl font-medium leading-tight text-foreground">My Clockwise</p>
+          <p className="text-xs text-muted-foreground">Private · Only you and Clockwise</p>
+        </div>
+        <div className="relative w-14 shrink-0">
+          <CharacterScene scene="memories" tilt={4} sizes="60px" />
+          <SpeechBubble className="absolute -left-[5.5rem] top-0 z-10 w-max" tail="right">
+            Just between us.
+          </SpeechBubble>
+        </div>
       </div>
 
       {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && (
