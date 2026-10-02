@@ -5,6 +5,7 @@ import { avatarColor } from "@/lib/avatar";
 import { formatDateRange } from "@/lib/format";
 import { computeReadinessStatus } from "@/lib/readiness";
 import { CopyInviteLink } from "@/components/trip-room/CopyInviteLink";
+import { InviteStatus } from "@/components/trip-room/InviteStatus";
 import { CommitmentEscalation, type CommitmentView } from "@/components/plan/CommitmentEscalation";
 import { readinessGroupLine, currentReadinessRows } from "@/lib/readiness-engine";
 import { MapPin, Mail } from "lucide-react";
@@ -25,6 +26,11 @@ export default async function PlanTravellersPage({
   ]);
 
   const commitmentNameById = new Map(commitments.map((c) => [c.id, c.name]));
+  const inviteJobs = await prisma.scheduledJob.findMany({
+    where: { tripId, inviteId: { in: pendingInvites.map((i) => i.id) } },
+    select: { inviteId: true, eventType: true, status: true, scheduledFor: true },
+  });
+
   const userById = new Map(trip.members.map((m) => [m.userId, m.user]));
   const viewerIsOrganiser = currentUserId === trip.createdBy;
 
@@ -139,6 +145,18 @@ export default async function PlanTravellersPage({
                       {invite.contact}
                     </p>
                   )}
+                  <InviteStatus
+                    tripId={tripId}
+                    inviteId={invite.id}
+                    inviteeName={invite.inviteeName}
+                    hasEmail={Boolean(invite.contact?.includes("@"))}
+                    lastSentAt={invite.lastSentAt ? invite.lastSentAt.toISOString() : null}
+                    sendCount={invite.sendCount}
+                    canResend={viewerIsOrganiser}
+                    jobs={inviteJobs
+                      .filter((j) => j.inviteId === invite.id)
+                      .map((j) => ({ eventType: j.eventType, status: j.status, scheduledFor: j.scheduledFor.toISOString() }))}
+                  />
                 </div>
                 <CopyInviteLink token={invite.token} />
               </div>

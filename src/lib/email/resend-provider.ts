@@ -18,12 +18,16 @@ class ResendEmailProvider implements EmailProvider {
     try {
       const resend = new Resend(apiKey);
       const from = process.env.RESEND_FROM_EMAIL || DEFAULT_FROM;
-      const result = await resend.emails.send({
-        from,
-        to: input.to,
-        subject: input.subject,
-        html: input.html,
-      });
+      const result = await resend.emails.send(
+        {
+          from,
+          to: input.to,
+          subject: input.subject,
+          html: input.html,
+          ...(input.text ? { text: input.text } : {}),
+        },
+        input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+      );
       if (result.error) {
         // Logged here too, not just returned — a caller's console.warn
         // already includes `reason`, but logging the from address and

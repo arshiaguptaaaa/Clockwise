@@ -86,6 +86,37 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Readiness recomputed deterministically from signals: ${(Array.isArray(p.signals) ? (p.signals as string[]) : []).join(", ") || "none"}.`,
         state: `${str(p.commitment)}: ${str(p.from)} → ${str(p.to)}${p.bufferMinutes != null ? ` (buffer ${str(p.bufferMinutes)} min)` : ""}. Shown as: "${str(p.line)}"`,
       };
+    case "INVITE_CREATED":
+      return { understanding: `Invitation created for ${str(p.invitee)}${p.callConsent ? " (reminder call consented)" : ""}.`, state: "Invite row PENDING; unique link generated." };
+    case "INVITE_EMAIL_SENT":
+    case "INVITE_EMAIL_RESENT":
+      return {
+        understanding: `Invitation email ${kind === "INVITE_EMAIL_RESENT" ? "re-sent" : "sent"} to ${str(p.invitee)} via ${str(p.provider)} — provider accepted it (message ${str(p.providerMessageId)}).`,
+        state: `Intended: ${str(p.intendedRecipient)} · delivered to: ${str(p.deliveryRecipient)}${p.overridden ? " (sandbox override — Resend has no verified domain yet)" : ""}`,
+      };
+    case "INVITE_EMAIL_FAILED":
+      return { understanding: `Invitation email to ${str(p.invitee)} was NOT sent: ${str(p.reason)}`, state: null };
+    case "INVITE_FOLLOWUP_SCHEDULED":
+      return {
+        understanding: `Waiting for a RESPONSE (joining), not an email open. Follow-up due ${str(p.dueAt)} (${str(p.delayMinutes)} min deadline)${p.escalationCall ? "; reminder call also queued" : ""}.`,
+        state: "Persistent scheduled job(s) created — no timers.",
+      };
+    case "INVITE_RESPONSE_OVERDUE":
+      return { understanding: `${str(p.invitee)} did not join within the deadline.`, state: "Reminder job claimed by the worker." };
+    case "INVITE_REMINDER_EMAIL_SENT":
+      return {
+        understanding: `Reminder email sent to ${str(p.invitee)} via ${str(p.provider)} (message ${str(p.providerMessageId)}).`,
+        state: `Delivered to: ${str(p.deliveryRecipient)}${p.overridden ? " (sandbox override)" : ""}`,
+      };
+    case "ESCALATION_CALL_PLACED":
+      return { understanding: `Gnani outbound call placed to ${str(p.invitee)} (request ${str(p.providerRequestId)}).`, state: null };
+    case "ESCALATION_CALL_BLOCKED":
+      return { understanding: `A reminder call to ${str(p.invitee)} was due but NOT placed: ${str(p.reason)}.`, state: "No call was made; nothing is simulated." };
+    case "INVITE_ACCEPTED":
+      return {
+        understanding: `${str(p.invitee)} accepted the invitation — the response the follow-ups were waiting for.`,
+        state: `Reminder jobs resolved: ${str(p.followUpsResolved)} · escalation calls cancelled: ${str(p.escalationsCancelled)}`,
+      };
     case "AGENT_TURN_STARTED":
       return { understanding: "An agent turn started and has NOT finished — it was killed by a time limit or is still running. Nothing it did after this point is recorded.", state: null };
     case "AGENT_TURN_COMPLETED":

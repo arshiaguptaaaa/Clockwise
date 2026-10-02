@@ -275,6 +275,14 @@ model Invite {
   // (no email attempted, or attempted and failed) rather than assuming
   // every invite with a contact was actually delivered.
   emailSentAt      DateTime?
+  // The traveller's own phone (for the optional reminder call) and whether the
+  // organiser attests they're happy to be called. `contact` stays the email.
+  phone            String?
+  callConsent      Boolean   @default(false)
+  // Last time an invitation email was accepted by the provider, and how many
+  // have been sent (each explicit resend bumps it — part of the idempotency key).
+  lastSentAt       DateTime?
+  sendCount        Int       @default(0)
 }
 
 model PrivateProfile {
@@ -978,4 +986,65 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// A persistent unit of scheduled work (reminder email, escalation call). There
+// is no in-process timer anywhere: a worker (/api/cron/reminders) repeatedly
+// claims rows with status SCHEDULED and scheduledFor <= now, atomically
+// (FOR UPDATE SKIP LOCKED), so running it twice — or from two places at once —
+// processes each job once. idempotencyKey makes creation itself idempotent.
+// Statuses: SCHEDULED PROCESSING SENT DELIVERED FAILED CANCELLED RESOLVED.
+// RESOLVED = the person completed the required action before the job fired.
+model ScheduledJob {
+  id                String    @id @default(cuid())
+  tripId            String
+  inviteId          String?
+  userId            String?
+  // INVITE_REMINDER_EMAIL | INVITE_ESCALATION_CALL
+  eventType         String
+  // EMAIL | VOICE
+  channel           String
+  // The traveller's real email/phone — never replaced by a sandbox address.
+  recipient         String
+  scheduledFor      DateTime
+  status            String    @default("SCHEDULED")
+  attemptCount      Int       @default(0)
+  providerMessageId String?
+  providerRequestId String?
+  failureReason     String?
+  resolvedAt        DateTime?
+  lockedAt          DateTime?
+  idempotencyKey    String    @unique
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([inviteId])
+}
+
+// Every email Clockwise attempts, for audit. intendedRecipient is the real
+// traveller; deliveryRecipient is where it was actually sent (differs only
+// while a sandbox delivery override is active). No secrets are stored.
+model EmailLog {
+  id                String   @id @default(cuid())
+  tripId            String?
+  inviteId          String?
+  jobId             String?
+  // INVITATION | REMINDER | TRIP_UPDATED | ...
+  kind              String
+  intendedRecipient String
+  deliveryRecipient String
+  overridden        Boolean  @default(false)
+  provider          String   @default("resend")
+  providerMessageId String?
+  // SENDING | SENT | FAILED
+  status            String
+  failureReason     String?
+  subject           String
+  ctaUrl            String?
+  idempotencyKey    String   @unique
+  sentAt            DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([tripId, createdAt])
 }

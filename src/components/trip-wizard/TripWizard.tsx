@@ -25,7 +25,7 @@ import { WizardStepHeader } from "@/components/trip-wizard/WizardStepHeader";
 import type { SelectedDestination } from "@/lib/destination-search/types";
 
 type DateMode = "exact" | "approximate" | "unsure";
-type TravellerDraft = { name: string; contact: string; face: number };
+type TravellerDraft = { name: string; contact: string; face: number; phone: string; callConsent: boolean };
 
 const STEPS = ["destinations", "dates", "travellers", "review"] as const;
 type Step = (typeof STEPS)[number];
@@ -111,10 +111,10 @@ export function TripWizard() {
   }
 
   function addTraveller() {
-    setTravellers((prev) => [...prev, { name: "", contact: "", face: (creatorFace + prev.length + 1) % FACE_COUNT }]);
+    setTravellers((prev) => [...prev, { name: "", contact: "", phone: "", callConsent: false, face: (creatorFace + prev.length + 1) % FACE_COUNT }]);
   }
 
-  function updateTraveller(index: number, field: keyof TravellerDraft, value: string) {
+  function updateTraveller(index: number, field: "name" | "contact" | "phone", value: string) {
     setTravellers((prev) =>
       prev.map((t, i) => (i === index ? { ...t, [field]: value } : t))
     );
@@ -167,7 +167,7 @@ export function TripWizard() {
           coreEndDate,
           creatorName,
           creatorEmail: creatorEmail.trim() || null,
-          travellers: travellers.filter((t) => t.name.trim()).map(({ name, contact }) => ({ name, contact })),
+          travellers: travellers.filter((t) => t.name.trim()).map(({ name, contact, phone, callConsent }) => ({ name, contact, phone, callConsent })),
         });
       } catch (err) {
         unstable_rethrow(err);
@@ -502,6 +502,23 @@ export function TripWizard() {
                       placeholder="Email address"
                       className="mt-2 w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
                     />
+                    <input
+                      value={t.phone}
+                      onChange={(e) => updateTraveller(i, "phone", e.target.value)}
+                      placeholder="Phone (optional, e.g. +91 98765 43210)"
+                      inputMode="tel"
+                      className="mt-2 w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                    />
+                    <label className={`mt-2 flex items-start gap-2 text-xs ${t.phone.trim() ? "text-foreground" : "text-muted-foreground opacity-60"}`}>
+                      <input
+                        type="checkbox"
+                        checked={t.callConsent}
+                        disabled={!t.phone.trim()}
+                        onChange={(e) => setTravellers((prev) => prev.map((x, k) => (k === i ? { ...x, callConsent: e.target.checked } : x)))}
+                        className="mt-0.5"
+                      />
+                      <span>They&apos;re happy for Clockwise to call if they haven&apos;t responded in time</span>
+                    </label>
                   </div>
                   <button
                     type="button"

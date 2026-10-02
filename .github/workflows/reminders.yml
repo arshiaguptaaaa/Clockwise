@@ -1,0 +1,19 @@
+# Runs the reminder worker on a schedule. GitHub's minimum cron interval is 5
+# minutes (and runs can be delayed), which is plenty for a 24-hour deadline.
+# The worker only ever processes jobs that are already due and is idempotent,
+# so overlapping or repeated runs are harmless. Optional repo secret
+# CRON_SECRET must match the deployment's CRON_SECRET if one is set there.
+name: reminders
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+jobs:
+  run-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the worker
+        run: |
+          curl -fsS -X POST "https://clockwise-lemon.vercel.app/api/cron/reminders" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60

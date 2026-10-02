@@ -12,7 +12,8 @@ export async function GET() {
   const from = process.env.RESEND_FROM_EMAIL || "Clockwise <onboarding@resend.dev>";
   const fromDomain = (/@([^>\s]+)/.exec(from)?.[1] ?? "").toLowerCase();
   const usingSharedSender = fromDomain === "resend.dev";
-  if (!key) return NextResponse.json({ apiKeyConfigured: false, from, usingSharedSender });
+  const deliveryOverrideActive = Boolean(process.env.EMAIL_DELIVERY_OVERRIDE?.trim() || process.env.WAITLIST_EMAIL_TEST_RECIPIENT?.trim());
+  if (!key) return NextResponse.json({ apiKeyConfigured: false, from, usingSharedSender, deliveryOverrideActive });
 
   try {
     const res = await fetch("https://api.resend.com/domains", {
@@ -24,6 +25,7 @@ export async function GET() {
     const fromDomainVerified = domains.some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified");
     return NextResponse.json({
       apiKeyConfigured: true,
+      deliveryOverrideActive,
       from,
       usingSharedSender,
       listDomainsHttpStatus: res.status,

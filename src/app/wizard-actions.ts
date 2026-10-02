@@ -16,7 +16,7 @@ export type CreateTripInput = {
   coreEndDate: string | null;
   creatorName: string;
   creatorEmail?: string | null;
-  travellers: { name: string; contact: string }[];
+  travellers: { name: string; contact: string; phone?: string; callConsent?: boolean }[];
 };
 
 // Real database writes, not a mocked screen: a Trip, its Destinations, the
@@ -103,7 +103,7 @@ export async function createTrip(input: CreateTripInput) {
   });
 
   const namedTravellers = input.travellers
-    .map((t) => ({ name: t.name.trim(), contact: t.contact.trim() }))
+    .map((t) => ({ name: t.name.trim(), contact: t.contact.trim(), phone: t.phone?.trim() || null, callConsent: Boolean(t.callConsent) }))
     .filter((t) => t.name);
 
   for (const traveller of namedTravellers) {
@@ -114,6 +114,8 @@ export async function createTrip(input: CreateTripInput) {
       invitedBy: creator.id,
       inviteeName: traveller.name,
       contact: traveller.contact || null,
+      phone: traveller.phone,
+      callConsent: traveller.callConsent,
       destinations: destinations.map((d) => d.name),
     });
   }

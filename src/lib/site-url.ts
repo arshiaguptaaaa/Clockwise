@@ -8,7 +8,11 @@
 // fallback.
 export function getAppBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  // The public production address, stated once. (An explicit NEXT_PUBLIC_APP_URL
+  // above still wins, e.g. after a custom domain is attached.)
+  if (process.env.VERCEL_ENV === "production") return "https://clockwise-lemon.vercel.app";
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  // On Vercel without any of the above, never emit a localhost link in an email.
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";
 }

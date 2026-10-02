@@ -5,6 +5,10 @@ export type SendEmailInput = {
   to: string;
   subject: string;
   html: string;
+  // Plain-text alternative (improves deliverability and accessibility).
+  text?: string;
+  // Sent to the provider so a retried request can't deliver twice.
+  idempotencyKey?: string;
 };
 
 export type SendEmailResult =

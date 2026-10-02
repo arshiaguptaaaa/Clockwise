@@ -8,8 +8,8 @@ import { getCurrentUserId } from "@/lib/session";
 // Speech key doesn't carry Platform access.
 export async function GET() {
   if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
-  const key = process.env.GNANI_API_KEY;
-  if (!key) return NextResponse.json({ configured: false, error: "GNANI_API_KEY is not visible to this deployment." }, { status: 503 });
+  const key = process.env.GNANI_PLATFORM_API_KEY;
+  if (!key) return NextResponse.json({ configured: false, error: "GNANI_PLATFORM_API_KEY is not set (GNANI_API_KEY is the Speech key and is deliberately not used here)." }, { status: 503 });
   try {
     const res = await fetch("https://api.inya.ai/platform/v1/agents", {
       headers: { "x-api-key": key, "User-Agent": "Clockwise/1.0 (+https://clockwise-lemon.vercel.app)" },

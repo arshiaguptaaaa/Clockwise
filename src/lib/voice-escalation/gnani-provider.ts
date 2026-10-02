@@ -17,12 +17,14 @@ import type { EscalationCallInput, EscalationCallResult, EscalationOutcome, Voic
 
 const BASE_URL = "https://api.inya.ai/platform";
 
+// GNANI_API_KEY is the SPEECH (STT/TTS) credential and must never place calls.
+// Outbound calling uses the separate Agent Builder platform key.
 export function isGnaniConfigured(): boolean {
-  return Boolean(process.env.GNANI_API_KEY && process.env.GNANI_BOT_ID);
+  return Boolean(process.env.GNANI_PLATFORM_API_KEY && process.env.GNANI_BOT_ID);
 }
 
 export function getMissingGnaniEnvVars(): string[] {
-  return ["GNANI_API_KEY", "GNANI_BOT_ID"].filter((name) => !process.env[name]);
+  return ["GNANI_PLATFORM_API_KEY", "GNANI_BOT_ID"].filter((name) => !process.env[name]);
 }
 
 type TriggerCallResponse = Record<string, unknown>;
@@ -35,10 +37,10 @@ function extractConversationId(data: TriggerCallResponse): string | null {
 
 class GnaniVoiceProvider implements VoiceEscalationProvider {
   async initiateCall(input: EscalationCallInput): Promise<EscalationCallResult> {
-    const apiKey = process.env.GNANI_API_KEY;
+    const apiKey = process.env.GNANI_PLATFORM_API_KEY;
     const botId = process.env.GNANI_BOT_ID;
     if (!apiKey || !botId) {
-      return { placed: false, reason: "Gnani isn't configured (GNANI_API_KEY/GNANI_BOT_ID missing)." };
+      return { placed: false, reason: "Gnani outbound isn't configured (GNANI_PLATFORM_API_KEY/GNANI_BOT_ID missing)." };
     }
 
     const environment = process.env.GNANI_ENV || "development";
@@ -73,7 +75,7 @@ class GnaniVoiceProvider implements VoiceEscalationProvider {
   }
 
   async getCallStatus(conversationId: string): Promise<EscalationOutcome | null> {
-    const apiKey = process.env.GNANI_API_KEY;
+    const apiKey = process.env.GNANI_PLATFORM_API_KEY;
     if (!apiKey) return null;
 
     try {

@@ -37,6 +37,27 @@ export async function POST(request: NextRequest) {
       ? await prisma.escalationEvent.findFirst({ where: { providerConversationId: conversationId } })
       : null;
 
+  // An invitation-reminder call: our clientReferenceId is the ScheduledJob id.
+  if (!event && clientReferenceId) {
+    const job = await prisma.scheduledJob.findUnique({ where: { id: clientReferenceId } });
+    if (job && job.channel === "VOICE") {
+      await prisma.scheduledJob.update({ where: { id: job.id }, data: { status: "DELIVERED", resolvedAt: new Date() } });
+      await prisma.tripEvent.create({
+        data: {
+          tripId: job.tripId,
+          kind: "ESCALATION_CALL_RESULT",
+          scope: "GROUP",
+          sourceChannel: "GNANI_CALL",
+          confidence: "MEDIUM",
+          // Outcome only — no transcript, no phone number.
+          payload: JSON.stringify({ jobId: job.id, callStatus: payload.callStatus ?? "COMPLETED", disposition: payload.callSummary?.disposition ?? null }),
+          propagation: JSON.stringify(["travellers"]),
+        },
+      });
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   if (!event) {
     // Real failure, not silently accepted — an unmatched webhook means
     // something is misconfigured and should be visible, not swallowed.

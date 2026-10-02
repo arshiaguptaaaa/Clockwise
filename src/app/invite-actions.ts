@@ -9,6 +9,7 @@ import { emailProvider } from "@/lib/email/resend-provider";
 import { tripJoinConfirmationEmail, tripJoinNotificationEmail } from "@/lib/email/templates";
 import { ADMIN_NOTIFY_EMAIL } from "@/lib/notify-email";
 import { createInviteOnly, sendInviteEmail, emailTestRecipient } from "@/lib/invite";
+import { recordInviteAccepted } from "@/lib/invite-engine";
 
 export type CreateInviteResult =
   | { ok: true; token: string; inviteId: string; looksLikeEmail: boolean; looksLikePhone: boolean }
@@ -140,6 +141,9 @@ export async function acceptInvite(token: string) {
     data: { status: "ACCEPTED", acceptedByUserId: newUser.id, acceptedAt: new Date() },
   });
 
+  // The required action is done: stop the reminder and cancel any call, and tell the organiser.
+  await recordInviteAccepted(invite.id);
+
   const clockwiseUserId = await getClockwiseUserId();
   await prisma.message.create({
     data: {
@@ -153,11 +157,15 @@ export async function acceptInvite(token: string) {
   });
 
   const testRecipient = emailTestRecipient();
+  // While email is in sandbox mode every message is redirected to one inbox, so
+  // these two secondary mails would only pile into the tester's inbox and blur
+  // the invitation/reminder test. They resume automatically once the override is removed.
+  const sandboxActive = Boolean(testRecipient);
 
   // Email failures never undo the join or block the redirect below — the
   // TripMember row is already saved regardless of delivery outcome, same
   // rule the waitlist flow already follows.
-  if (invite.contact?.includes("@")) {
+  if (!sandboxActive && invite.contact?.includes("@")) {
     const confirmation = tripJoinConfirmationEmail({ tripName: trip.name });
     const confirmationResult = await emailProvider.send({
       to: testRecipient ?? invite.contact,
@@ -169,18 +177,20 @@ export async function acceptInvite(token: string) {
     }
   }
 
-  const notification = tripJoinNotificationEmail({
-    inviteeName: invite.inviteeName,
-    tripName: trip.name,
-    joinedAt: new Date(),
-  });
-  const notificationResult = await emailProvider.send({
-    to: testRecipient ?? ADMIN_NOTIFY_EMAIL,
-    subject: notification.subject,
-    html: notification.html,
-  });
-  if (!notificationResult.sent) {
-    console.warn(`Trip-join admin notification not sent: ${notificationResult.reason}`);
+  if (!sandboxActive) {
+    const notification = tripJoinNotificationEmail({
+      inviteeName: invite.inviteeName,
+      tripName: trip.name,
+      joinedAt: new Date(),
+    });
+    const notificationResult = await emailProvider.send({
+      to: ADMIN_NOTIFY_EMAIL,
+      subject: notification.subject,
+      html: notification.html,
+    });
+    if (!notificationResult.sent) {
+      console.warn(`Trip-join admin notification not sent: ${notificationResult.reason}`);
+    }
   }
 
   await setCurrentUserId(newUser.id);
