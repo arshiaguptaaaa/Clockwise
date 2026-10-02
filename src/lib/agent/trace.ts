@@ -49,12 +49,31 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
   switch (kind) {
     case "DESTINATION_ADDED":
     case "DESTINATION_REMOVED":
-    case "DESTINATION_MOVED": {
+    case "DESTINATION_MOVED":
+    case "DESTINATION_REPLACED": {
       const before = Array.isArray(p.routeBefore) ? (p.routeBefore as string[]).join(" → ") : "";
       const after = Array.isArray(p.routeAfter) ? (p.routeAfter as string[]).join(" → ") : "";
+      const impact = (p.impact ?? {}) as {
+        commitments?: string[];
+        transportPlans?: number;
+        bookings?: number;
+        decisionsSuperseded?: number;
+        tripRenamed?: { from: string; to: string } | null;
+      };
+      const extra = [
+        impact.tripRenamed ? `Trip title "${impact.tripRenamed.from}" → "${impact.tripRenamed.to}"` : null,
+        impact.decisionsSuperseded ? `${impact.decisionsSuperseded} earlier claim(s) about the old stop marked SUPERSEDED (agent no longer uses them)` : null,
+        impact.commitments?.length ? `Meetings still naming the old stop (not auto-changed): ${impact.commitments.join(", ")}` : null,
+        impact.transportPlans ? `${impact.transportPlans} transport plan(s) still naming it` : null,
+        impact.bookings ? `${impact.bookings} booking(s) still naming it` : null,
+      ].filter(Boolean);
+      const what =
+        kind === "DESTINATION_REPLACED"
+          ? `A decided destination change: ${str(p.replaced)} → ${str(p.destination)}`
+          : `A decided route change (${kind.replace("DESTINATION_", "").toLowerCase()} ${str(p.destination)}${p.after ? ` after ${str(p.after)}` : ""})`;
       return {
-        understanding: `A decided route change (${kind.replace("DESTINATION_", "").toLowerCase()} ${str(p.destination)}${p.after ? ` after ${str(p.after)}` : ""}), classified GROUP-scoped.`,
-        state: after ? `Route: ${before || "(empty)"}  ⇒  ${after}` : null,
+        understanding: `${what}, classified GROUP-scoped.`,
+        state: after ? `Route: ${before || "(empty)"}  ⇒  ${after}${extra.length ? `\n${extra.join("\n")}` : ""}` : null,
       };
     }
     case "TRAVELLER_CONSTRAINT_SET":

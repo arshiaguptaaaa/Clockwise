@@ -120,7 +120,8 @@ function buildSharedStateSummary(
 // The private context passes the acting traveller, who may see their own.
 async function fetchRecentDecisions(tripId: string, viewerId: string | null) {
   const rows = await prisma.decision.findMany({
-    where: { tripId },
+    // SUPERSEDED claims were made untrue by a later change of canonical state.
+    where: { tripId, status: { not: "SUPERSEDED" } },
     orderBy: { createdAt: "desc" },
     take: RECENT_DECISIONS_LIMIT * 2,
     select: { type: true, value: true, status: true, affectedUserIds: true, sourceMessageIds: true, actorUserId: true },

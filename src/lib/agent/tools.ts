@@ -200,12 +200,17 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   {
     name: "update_trip_route",
     description:
-      "Change the trip's shared ROUTE — the ordered list of cities/regions the group travels through. Use this (not propose_itinerary_change) when the GROUP states, as a decided fact, that a city or region is added to, removed from, or re-ordered within the route: \"we'll go to Udaipur after Jaipur\", \"let's drop Agra\", \"do Goa before Mumbai\". It changes the real saved route immediately — the map, Plan and Itinerary all read it — so only call it for a clear, committed statement from a participant in Trip Room, never for a question (\"should we visit Udaipur?\"), a maybe/idea (\"might be cool to add Udaipur\"), or a specific activity/venue (use propose_itinerary_change for those). Not available in a private room: a private suggestion that needs the group's agreement goes through propose_itinerary_change instead. Do NOT also call record_trip_understanding for the same route change — this tool already records it.",
+      "Change the trip's shared ROUTE — the ordered list of cities/regions the group travels through. Use this (not propose_itinerary_change) when the GROUP states, as a decided fact, that a city or region is added to, removed from, swapped in the route, or re-ordered within it: \"we'll go to Udaipur after Jaipur\" (ADD), \"let's drop Agra\" (REMOVE), \"do Goa before Mumbai\" (MOVE), \"actually let's do Udaipur instead\" / \"change Jaipur to Udaipur\" (REPLACE — ONE call, never ADD then REMOVE). It changes the real saved route immediately — the map, Plan and Itinerary all read it — so only call it for a clear, committed statement from a participant in Trip Room, never for a question (\"should we visit Udaipur?\"), a maybe/idea (\"might be cool to add Udaipur\"), or a specific activity/venue (use propose_itinerary_change for those). Not available in a private room: a private suggestion that needs the group's agreement goes through propose_itinerary_change instead. Do NOT also call record_trip_understanding for the same route change — this tool already records it.",
     parameters: {
       type: "object",
       properties: {
-        operation: { type: "string", enum: ["ADD", "REMOVE", "MOVE"] },
-        place: { type: "string", description: "The city/region being added, removed or moved, as the group said it, e.g. 'Udaipur'" },
+        operation: { type: "string", enum: ["ADD", "REMOVE", "MOVE", "REPLACE"] },
+        place: {
+          type: "string",
+          description:
+            "The city/region being added, removed or moved, as the group said it, e.g. 'Udaipur'. For REPLACE: the CURRENT stop being swapped out (e.g. 'Jaipur'); may be omitted only when the route has exactly one stop.",
+        },
+        replaceWith: { type: "string", description: "REPLACE only: the new city/region that takes its place, e.g. 'Udaipur'." },
         after: {
           type: "string",
           description: "ADD: which existing stop it comes after ('Jaipur'); omit to append at the end. MOVE: required — the stop it should come after.",
@@ -921,18 +926,31 @@ async function updateTripRoute(input: Record<string, unknown>, ctx: AgentContext
     };
   }
   const operation = input.operation;
-  const place = (input.place as string | undefined)?.trim();
+  let place = (input.place as string | undefined)?.trim();
+  const replaceWith = (input.replaceWith as string | undefined)?.trim();
   const after = (input.after as string | undefined)?.trim() || undefined;
   const confidence = input.confidence === "HIGH" ? "HIGH" : "MEDIUM";
-  if (!place || (operation !== "ADD" && operation !== "REMOVE" && operation !== "MOVE")) {
-    return { output: "Need an operation (ADD, REMOVE or MOVE) and a place to change the route." };
+  if (operation === "REPLACE" && !place && ctx.trip.destinations.length === 1) {
+    place = ctx.trip.destinations[0].name;
+  }
+  if (!place || (operation !== "ADD" && operation !== "REMOVE" && operation !== "MOVE" && operation !== "REPLACE")) {
+    return { output: "Need an operation (ADD, REMOVE, MOVE or REPLACE) and a place to change the route. If several stops are on the route and it's unclear which one is being replaced, ask which." };
+  }
+  if (operation === "REPLACE" && !replaceWith) {
+    return { output: "To replace a stop I need to know what it's being replaced with." };
   }
   if (operation === "MOVE" && !after) {
     return { output: "To move a stop I need to know which stop it should come after." };
   }
 
   const change: RouteOp =
-    operation === "ADD" ? { op: "ADD", place, after } : operation === "REMOVE" ? { op: "REMOVE", place } : { op: "MOVE", place, after: after! };
+    operation === "ADD"
+      ? { op: "ADD", place, after }
+      : operation === "REMOVE"
+        ? { op: "REMOVE", place }
+        : operation === "REPLACE"
+          ? { op: "REPLACE", place, with: replaceWith! }
+          : { op: "MOVE", place, after: after! };
 
   const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
   const result = await applyRouteChange(
@@ -947,7 +965,11 @@ async function updateTripRoute(input: Record<string, unknown>, ctx: AgentContext
       channel: "GROUP",
       type: "DECISION",
       status: "CONFIRMED",
-      data: { title: "Route updated", context: result.route.join(" → "), informational: true },
+      data: {
+        title: operation === "REPLACE" ? "Destination changed" : "Route updated",
+        context: result.route.join(" → "),
+        informational: true,
+      },
     });
   }
   return { output: result.summary };

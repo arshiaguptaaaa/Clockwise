@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getTripById } from "@/lib/trip";
 import { DESTINATION_PHOTOS } from "@/lib/photos";
+import { curatedPhotoFor } from "@/lib/destination-photos";
 import { fetchWikipediaPhoto, type WikipediaPhoto } from "@/lib/travel/wikipedia-photo";
 import { formatDateRange } from "@/lib/format";
 import { avatarColor } from "@/lib/avatar";
@@ -19,7 +20,9 @@ export default async function PlanOverviewPage({
   const { tripId } = await params;
   const trip = await getTripById(tripId);
   const stops = [...trip.destinations].sort((a, b) => a.order - b.order);
-  const middleStops = stops.filter((s) => s.name !== "Delhi");
+  // The seeded demo route starts at Delhi, which its photo grid skips. Real
+  // trips show every stop — a real Delhi stop must not vanish.
+  const middleStops = trip.isDemo ? stops.filter((s) => s.name !== "Delhi") : stops;
   const mapMarkers = buildDestinationMarkers(stops);
   const journeyLine = buildJourneyLine(stops);
   const transportPlans = await prisma.transportPlan.findMany({
@@ -36,7 +39,7 @@ export default async function PlanOverviewPage({
   const fallbackPhotos = new Map<string, WikipediaPhoto | null>(
     await Promise.all(
       middleStops
-        .filter((s) => !DESTINATION_PHOTOS[s.name])
+        .filter((s) => !DESTINATION_PHOTOS[s.name] && !curatedPhotoFor(s.name))
         .map(async (s) => [s.name, await fetchWikipediaPhoto(s.name)] as const)
     )
   );
@@ -45,10 +48,14 @@ export default async function PlanOverviewPage({
   // Commons set — they're different sources with different attribution
   // shapes (a named photographer credit vs a link back to the article).
   const shownCommonsCredits = middleStops
-    .filter((s) => DESTINATION_PHOTOS[s.name])
-    .map((s) => DESTINATION_PHOTOS[s.name].credit.split(" /")[0]);
+    .map((s) => {
+      const c = curatedPhotoFor(s.name);
+      if (c) return `${c.credit.split(" /")[0]} (${c.license})`;
+      return DESTINATION_PHOTOS[s.name] ? DESTINATION_PHOTOS[s.name].credit.split(" /")[0] : null;
+    })
+    .filter((x): x is string => Boolean(x));
   const shownWikipediaStops = middleStops
-    .filter((s) => !DESTINATION_PHOTOS[s.name] && fallbackPhotos.get(s.name))
+    .filter((s) => !DESTINATION_PHOTOS[s.name] && !curatedPhotoFor(s.name) && fallbackPhotos.get(s.name))
     .map((s) => ({ id: s.id, name: s.name, photo: fallbackPhotos.get(s.name)! }));
 
   return (
@@ -69,7 +76,12 @@ export default async function PlanOverviewPage({
         <>
           <div className="mt-6 grid grid-cols-2 gap-2.5">
             {middleStops.map((stop) => {
-              const photo = DESTINATION_PHOTOS[stop.name] ?? fallbackPhotos.get(stop.name) ?? undefined;
+              const curated = curatedPhotoFor(stop.name);
+              const photo =
+                (curated ? { src: curated.src, alt: curated.alt } : null) ??
+                DESTINATION_PHOTOS[stop.name] ??
+                fallbackPhotos.get(stop.name) ??
+                undefined;
               return (
                 <div
                   key={stop.id}
@@ -100,7 +112,7 @@ export default async function PlanOverviewPage({
           {(shownCommonsCredits.length > 0 || shownWikipediaStops.length > 0) && (
             <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
               {shownCommonsCredits.length > 0 &&
-                `Photos: ${shownCommonsCredits.join(", ")} — Wikimedia Commons, CC BY-SA.`}
+                `Photos: ${shownCommonsCredits.join(", ")} — Wikimedia Commons.`}
               {shownWikipediaStops.length > 0 && (
                 <>
                   {" "}

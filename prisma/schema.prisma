@@ -57,6 +57,10 @@ enum DecisionStatus {
   CANDIDATE
   UNRESOLVED
   CONFIRMED
+  // A claim that a later change of canonical state made untrue (e.g. "the
+  // trip is to Jaipur" after the route moved to Udaipur). Kept for the
+  // audit trail, never fed back to the agent as current.
+  SUPERSEDED
 }
 
 enum CommitmentStatus {
