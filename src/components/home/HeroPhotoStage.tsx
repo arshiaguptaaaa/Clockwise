@@ -76,7 +76,7 @@ export function HeroPhotoStage({ children }: { children?: React.ReactNode }) {
       <div
         key={current.key}
         aria-hidden
-        className="annotation-in absolute -left-2 bottom-10 flex items-start gap-2 rounded-2xl border border-border bg-white/95 px-3 py-2 shadow-md backdrop-blur lg:-left-10"
+        className="annotation-in absolute -left-2 bottom-24 flex lg:bottom-10 items-start gap-2 rounded-2xl border border-border bg-white/95 px-3 py-2 shadow-md backdrop-blur lg:-left-10"
       >
         <span className="relative mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px] border-accent">
           <span className="absolute h-1 w-px origin-bottom -translate-y-[2px] bg-accent" />
