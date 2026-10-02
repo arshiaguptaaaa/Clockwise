@@ -38,6 +38,27 @@ async function main() {
     const demoUserIds = demoMembers.map((m) => m.userId);
 
     await prisma.auditLog.deleteMany({ where: { tripId: existingDemoTrip.id } });
+    // Rows created by using the demo trip (events, proposals, notifications,
+    // budget, ...). Without these, re-seeding fails on foreign keys the moment
+    // anyone has used the demo, which blocks every deploy.
+    const demoTripId = existingDemoTrip.id;
+    await prisma.proposalApproval.deleteMany({ where: { proposal: { tripId: demoTripId } } });
+    await prisma.proposalReminder.deleteMany({ where: { proposal: { tripId: demoTripId } } });
+    await prisma.proposal.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.attachment.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.escalationEvent.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.travellerConstraint.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.tripEvent.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.invite.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.expenseParticipant.deleteMany({ where: { expense: { tripId: demoTripId } } });
+    await prisma.expense.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.settlement.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.tripBudget.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.notification.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.travellerReadiness.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.travellerLocation.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.scheduledJob.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.emailLog.deleteMany({ where: { tripId: demoTripId } });
     await prisma.journeyParticipant.deleteMany({ where: { journey: { tripId: existingDemoTrip.id } } });
     await prisma.journey.deleteMany({ where: { tripId: existingDemoTrip.id } });
     // Uber/mobility rows, deleted child-first: TransportParticipant and
