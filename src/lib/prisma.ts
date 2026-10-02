@@ -12,13 +12,13 @@ const globalForPrisma = globalThis as unknown as {
 // connection_limit / pool_timeout already in DATABASE_URL always wins. (Observed
 // in production: "too many connections for role prisma_migration" — a direct
 // Prisma Postgres connection with a small per-role limit. A pooled connection
-// string is the proper fix; this keeps each instance to one connection until then.)
+// string is the proper fix; this caps each instance until then (1 deadlocked the build).)
 function tunedDatasourceUrl(): string | undefined {
   const raw = process.env.DATABASE_URL;
   if (!raw) return undefined;
   try {
     const url = new URL(raw);
-    if (!url.searchParams.has("connection_limit")) url.searchParams.set("connection_limit", process.env.DB_CONNECTION_LIMIT ?? "1");
+    if (!url.searchParams.has("connection_limit")) url.searchParams.set("connection_limit", process.env.DB_CONNECTION_LIMIT ?? "3");
     if (!url.searchParams.has("pool_timeout")) url.searchParams.set("pool_timeout", "20");
     return url.toString();
   } catch {
