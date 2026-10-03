@@ -4,7 +4,6 @@ import { mobilityProvider } from "@/lib/providers/mobility";
 import { getOrganiserAuth, resolveRoute, isFailure } from "@/lib/transport";
 import {
   searchNearby as geoapifySearchNearby,
-  searchPlaceByText,
   getRoute as geoapifyGetRoute,
   nearestMappedPlace,
   isGeoapifyConfigured,
@@ -13,6 +12,7 @@ import {
 import { getWeather as fetchWeather } from "@/lib/travel/open-meteo-weather";
 import {
   resolveTripCityPoint,
+  tripAnchors,
   resolveTripLocationText,
   resolveWeatherLocation,
   isResolveFailure,
@@ -25,6 +25,7 @@ import { formatMoney, parseMajorToMinor, isCategory, CATEGORY_LABEL } from "@/li
 import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
 import { hotelProvider } from "@/lib/travel/hotel-provider";
+import { checkRoutePlausibility } from "@/lib/location/plausibility";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
@@ -1316,13 +1317,9 @@ async function searchPlacesTool(input: Record<string, unknown>, ctx: AgentContex
     return { output: "Live place search is temporarily unavailable — I can only reason from stored trip state right now. Do not name any places from memory." };
   }
 
-  const cityPoint = await resolveTripCityPoint(ctx.trip);
-  let results;
-  try {
-    results = await searchPlaceByText(query, cityPoint?.point);
-  } catch (err) {
-    return { output: `Live place search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
-  }
+  const resolved = await resolveTripLocationText(query, ctx.trip.id);
+  if (isResolveFailure(resolved)) return { output: resolved.error };
+  const results = [{ name: resolved.label.split(",")[0], formattedAddress: resolved.label, latitude: resolved.point.lat, longitude: resolved.point.lng, distanceMeters: null as number | null, provider: "geoapify", retrievedAt: new Date().toISOString(), providerId: "" }];
 
   if (results.length === 0) {
     return { output: `Couldn't find a real location for "${query}".` };
@@ -1347,6 +1344,7 @@ async function searchPlacesTool(input: Record<string, unknown>, ctx: AgentContex
     },
   });
 
+  await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "search_places", provider: "geoapify", retrievedAt: results[0].retrievedAt, near: query, resultCount: 1, anchor: "named place" });
   return {
     output: `Found "${query}" at ${results[0].formattedAddress ?? `${results[0].latitude}, ${results[0].longitude}`} (source: Geoapify, just now).`,
     posted: true,
@@ -1370,12 +1368,12 @@ async function resolveSearchPoint(
 // Provider-backed answers leave evidence in Agent Trace: which provider, when it
 // was fetched, what was asked, how many results (or the measured numbers).
 // Gemini only narrates these; it never supplies them.
-async function recordLookup(ctx: AgentContext, payload: Record<string, unknown>) {
+async function recordLookup(ctx: AgentContext, kind: "PLACES_SEARCH_COMPLETED" | "ROUTE_COMPLETED" | "ROUTE_PLAUSIBILITY_FAILED", payload: Record<string, unknown>) {
   await prisma.tripEvent
     .create({
       data: {
         tripId: ctx.trip.id,
-        kind: "PROVIDER_LOOKUP",
+        kind,
         scope: ctx.mode === "PRIVATE" ? "PERSONAL" : "GROUP",
         actorUserId: ctx.actingUserId,
         subjectUserId: ctx.mode === "PRIVATE" ? ctx.actingUserId : null,
@@ -1418,7 +1416,7 @@ async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContex
     },
   });
 
-  await recordLookup(ctx, { tool: "search_hotels", provider: hotelProvider.name, retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerPlaceId), rates: "not connected" });
+  await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "search_hotels", provider: hotelProvider.name, retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerPlaceId), rates: "not connected" });
   if (results.length === 0) {
     return { output: `No stays found near ${located.label}.`, posted: true };
   }
@@ -1454,9 +1452,9 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     type: "PLACES",
     status: "CONFIRMED",
     data: {
-      title: `${diet ? `${diet[0].toUpperCase()}${diet.slice(1)} ` : ""}${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
+      title: `${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
       context: diet
-        ? `Filtered on Geoapify's own "${diet}" tag. Individual menus aren't verified — check before you go.`
+        ? `Found using Geoapify's ${diet} search. That is a provider filter, not a check of each place — individual menus aren't verified.`
         : "No dietary filter applied — nothing here is claimed to be vegetarian, vegan or halal.",
       places: results.map((r) => ({
         name: r.name,
@@ -1470,12 +1468,12 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     },
   });
 
-  await recordLookup(ctx, { tool: "search_nearby", provider: results[0]?.provider ?? "geoapify", retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), category, diet: diet ?? null, near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerId) });
+  await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "search_nearby", provider: results[0]?.provider ?? "geoapify", retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), category, diet: diet ?? null, near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerId) });
   if (results.length === 0) {
     return { output: `No ${category} found near ${located.label}.`, posted: true };
   }
   return {
-    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, filtered by the provider's own "${diet}" tag` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.`,
+    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.`,
     posted: true,
   };
 }
@@ -1508,7 +1506,7 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
     // The router rejected a raw point (typically the centre of a lake, park or
     // water body). Retry from the closest mapped place and say so plainly.
     if (!msg.includes("(400)")) return { output: `Live routing failed: ${msg}.` };
-    const [snapFrom, snapTo] = await Promise.all([nearestMappedPlace(from.point), nearestMappedPlace(to.point)]);
+    const [snapFrom, snapTo] = await Promise.all([nearestMappedPlace(from.point, 300), nearestMappedPlace(to.point, 300)]);
     if (!snapFrom && !snapTo) return { output: `Live routing failed: ${msg}. Do not estimate the time yourself.` };
     if (snapFrom) {
       fromUsed = { point: snapFrom.point, label: from.label };
@@ -1525,6 +1523,17 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
     }
   }
 
+  // Deterministic sanity check BEFORE anything is shown: the guard never invents a
+  // replacement number, it only withholds a route whose endpoints can't be right.
+  const anchors = await tripAnchors(ctx.trip.id);
+  const plausibility = checkRoutePlausibility({ from: { label: from.label, point: fromUsed.point }, to: { label: to.label, point: toUsed.point }, distanceMeters: route.distanceMeters, anchors });
+  if (!plausibility.ok) {
+    await recordLookup(ctx, "ROUTE_PLAUSIBILITY_FAILED", { tool: "get_route", provider: route.provider, retrievedAt: route.retrievedAt, from: from.label, to: to.label, reason: plausibility.reason, distanceMeters: route.distanceMeters });
+    return {
+      output: `Route withheld: ${plausibility.reason}. One of "${from.label}" / "${to.label}" probably resolved to the wrong place. Do NOT give a distance or time. Tell the user which two places were matched and ask them to confirm or name the right one.`,
+    };
+  }
+
   await postActionCard({
     tripId: ctx.trip.id,
     ...cardChannel(ctx),
@@ -1532,6 +1541,7 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
     status: "CONFIRMED",
     data: {
       title: `${from.label} → ${to.label}`,
+      context: snapNotes.length ? `${snapNotes.join("; ")}.` : undefined,
       route: {
         mode,
         fromLabel: from.label,
@@ -1549,14 +1559,9 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
 
   const km = (route.distanceMeters / 1000).toFixed(1);
   const minutes = Math.round(route.durationSeconds / 60);
-  await recordLookup(ctx, { tool: "get_route", provider: route.provider, retrievedAt: route.retrievedAt, from: from.label, to: to.label, fromPoint: fromUsed.point, toPoint: toUsed.point, mode, distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, snapped: snapNotes });
-  // A "how long from the airport to the hotel" answer of hundreds of km means an
-  // endpoint resolved to a different place. Never present that as the answer.
-  const implausible = route.distanceMeters > 150_000 || (mode === "walk" && route.distanceMeters > 25_000);
+  await recordLookup(ctx, "ROUTE_COMPLETED", { tool: "get_route", provider: route.provider, retrievedAt: route.retrievedAt, from: from.label, to: to.label, fromPoint: fromUsed.point, toPoint: toUsed.point, mode, distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, snapped: snapNotes });
   return {
-    output: implausible
-      ? `WARNING: Geoapify measured ${km} km (about ${minutes} min) between "${from.label}" and "${to.label}" — far more than a local trip, so one end probably resolved to a different place than the user meant. Say exactly which two places were measured and ask the user to confirm them; do NOT present this as the answer.`
-      : `${from.label} to ${to.label} by ${mode}: ${km} km, about ${minutes} minutes (source: Geoapify, just now — no live traffic data).${snapNotes.length ? ` Note: ${snapNotes.join("; ")}. Say so.` : ""}`,
+    output: `${from.label} to ${to.label} by ${mode}: ${km} km, about ${minutes} minutes (source: Geoapify, just now — no live traffic data).${snapNotes.length ? ` Note: ${snapNotes.join("; ")}. Say so.` : ""}`,
     posted: true,
   };
 }

@@ -61,25 +61,20 @@ type GeoapifyGeocodeResult = {
 // the Open-Meteo destination resolver (Stage 3 consolidation) so routing/
 // map/weather code never has to branch on which provider produced a point.
 export async function resolveLocationText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
-  // Text geocoding is unreliable for airports ("Maharana Pratap Airport" came back as
-  // a ground in the same city; "Udaipur Airport" as another state's Udaipur). Resolve the
-  // city first, then take the provider's own airport POI near it.
+  // Airports are looked up as the provider's own airport POIs around the named city;
+  // a text geocode of "<city> Airport" returns the city or a ground with a similar name.
   if (/\bairport\b/i.test(text)) {
-    const airport = await resolveAirport(text, near);
-    if (airport) return airport;
-    // No airport POI found: only accept a plain geocode that is itself an airport,
-    // never the city the name happens to start with.
-    const plain = await geocodeText(text, near);
-    return plain && /airport|airfield/i.test(`${plain.name} ${plain.displayName}`) ? plain : null;
+    const area = text.replace(/\b(international|domestic)?\s*airport\b/gi, "").replace(/\s+/g, " ").trim();
+    const anchor = area ? await geocodeText(area, near) : null;
+    const centre = anchor ? { lat: anchor.latitude, lng: anchor.longitude } : near;
+    return centre ? findAirportNear(centre, anchor) : null;
   }
   return geocodeText(text, near);
 }
 
-async function resolveAirport(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
-  const area = text.replace(/\b(international|domestic)?\s*airport\b/gi, "").replace(/\s+/g, " ").trim();
-  const anchor = area ? await geocodeText(area, near) : null;
-  const centre = anchor ? { lat: anchor.latitude, lng: anchor.longitude } : near;
-  if (!centre) return null;
+// The provider's airport POI within 40 km of a point. Never falls back to the
+// point itself or to a city-centre geocode: no airport found means null.
+export async function findAirportNear(centre: LatLng, anchor?: CanonicalPlace | null): Promise<CanonicalPlace | null> {
   const params = new URLSearchParams({
     categories: "airport",
     filter: `circle:${centre.lng},${centre.lat},40000`,
@@ -90,11 +85,11 @@ async function resolveAirport(text: string, near?: LatLng): Promise<CanonicalPla
   const res = await fetch(`${PLACES_URL}?${params}`);
   if (!res.ok) return null;
   const data: { features?: GeoapifyPlaceFeature[] } = await res.json();
-  const best = (data.features ?? []).find((f) => /airport|airfield/i.test(f.properties.name ?? "")) ?? data.features?.[0];
+  const best = (data.features ?? []).find((f) => /airport|airfield/i.test(f.properties.name ?? ""));
   if (!best) return null;
   return {
-    displayName: best.properties.formatted ?? best.properties.name ?? text,
-    name: best.properties.name ?? text,
+    displayName: best.properties.formatted ?? best.properties.name ?? "Airport",
+    name: best.properties.name ?? "Airport",
     city: anchor?.city ?? null,
     region: anchor?.region ?? null,
     country: anchor?.country ?? null,
@@ -106,50 +101,70 @@ async function resolveAirport(text: string, near?: LatLng): Promise<CanonicalPla
   };
 }
 
-async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
-  const key = requireApiKey();
-  const params = new URLSearchParams({ text, apiKey: key, limit: "5", format: "json" });
-  if (near) params.set("bias", `proximity:${near.lng},${near.lat}`);
+export type GeocodeCandidate = {
+  label: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  countryCode: string | null;
+  lat: number;
+  lng: number;
+  placeId: string | null;
+  importance: number;
+  resultType: string | null;
+};
 
+const CITY_LEVEL_TYPES = ["city", "county", "state", "locality", "district", "postcode", "country"];
+export const isCityLevel = (c: Pick<GeocodeCandidate, "resultType">) => CITY_LEVEL_TYPES.includes(c.resultType ?? "");
+
+// Raw provider candidates with their administrative identity. `circle` turns
+// the search into a FILTER (results must lie inside it) rather than a hint.
+export async function geocodeCandidates(text: string, opts: { circle?: { lat: number; lng: number; radiusM: number }; bias?: LatLng; limit?: number } = {}): Promise<GeocodeCandidate[]> {
+  const params = new URLSearchParams({ text, apiKey: requireApiKey(), limit: String(opts.limit ?? 5), format: "json" });
+  if (opts.circle) params.set("filter", `circle:${opts.circle.lng},${opts.circle.lat},${opts.circle.radiusM}`);
+  if (opts.bias) params.set("bias", `proximity:${opts.bias.lng},${opts.bias.lat}`);
   const res = await fetch(`${GEOCODE_URL}?${params}`);
   if (!res.ok) throw new Error(`Geoapify geocoding failed (${res.status})`);
   const data: { results?: (GeoapifyGeocodeResult & { rank?: { importance?: number }; result_type?: string })[] } = await res.json();
-  const results = data.results ?? [];
-  // Many Indian place names exist several times over ("Udaipur" is in Rajasthan,
-  // Himachal, Tripura…). A local bias is only trusted when it actually lands
-  // near one candidate (<300 km); otherwise take the provider's most important match
-  // instead of whichever one the bias happened to drag toward.
-  const km = (a: LatLng, b: LatLng) => {
-    const r = (d: number) => (d * Math.PI) / 180;
-    const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
-    return 2 * 6371 * Math.asin(Math.sqrt(h));
-  };
-  const byImportance = [...results].sort((a, b) => (b.rank?.importance ?? 0) - (a.rank?.importance ?? 0))[0];
-  const topImportance = byImportance?.rank?.importance ?? 0;
-  // The local candidate must also be a plausibly important match: a tiny village sharing
-  // the name that happens to sit near the trip's anchor city is not what a traveller meant.
-  // City-level names are the ambiguous ones ("Udaipur" exists in many states), and a
-  // trip's anchor city says nothing about which one a traveller means — so for those
-  // the provider's most important match wins outright. Bias only helps streets/POIs.
-  const cityLevel = ["city", "county", "state", "locality", "district", "postcode", "country"].includes(byImportance?.result_type ?? "");
-  const local = near && !cityLevel
-    ? results.find((x) => km(near, { lat: x.lat, lng: x.lon }) < 300 && (topImportance === 0 || (x.rank?.importance ?? 0) >= 0.75 * topImportance))
-    : undefined;
-  const first = local ?? byImportance ?? results[0];
-  if (!first) return null;
+  return (data.results ?? []).map((r) => ({
+    label: r.formatted,
+    name: r.name ?? r.city ?? text,
+    city: r.city ?? null,
+    state: r.state ?? null,
+    country: r.country ?? null,
+    countryCode: r.country_code ? r.country_code.toUpperCase() : null,
+    lat: r.lat,
+    lng: r.lon,
+    placeId: r.place_id ?? null,
+    importance: r.rank?.importance ?? 0,
+    resultType: r.result_type ?? null,
+  }));
+}
 
+export function candidateToPlace(c: GeocodeCandidate, text: string): CanonicalPlace {
   return {
-    displayName: first.formatted,
-    name: first.name ?? first.city ?? text,
-    city: first.city ?? null,
-    region: first.state ?? first.county ?? null,
-    country: first.country ?? null,
-    countryCode: first.country_code ? first.country_code.toUpperCase() : null,
-    latitude: first.lat,
-    longitude: first.lon,
+    displayName: c.label,
+    name: c.name ?? text,
+    city: c.city,
+    region: c.state,
+    country: c.country,
+    countryCode: c.countryCode,
+    latitude: c.lat,
+    longitude: c.lng,
     provider: "geoapify",
-    providerPlaceId: first.place_id ?? null,
+    providerPlaceId: c.placeId,
   };
+}
+
+// Plain resolution for callers with no trip context: the provider's most
+// important city-level match, or its own ranking (with an optional bias) for streets/POIs.
+async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
+  const results = await geocodeCandidates(text, { bias: near, limit: 5 });
+  if (results.length === 0) return null;
+  const byImportance = [...results].sort((a, b) => b.importance - a.importance)[0];
+  const first = isCityLevel(byImportance) ? byImportance : results[0];
+  return candidateToPlace(first, text);
 }
 
 type GeoapifyPlaceFeature = {
