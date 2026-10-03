@@ -23,6 +23,10 @@ export async function GET(request: NextRequest) {
       amountMinorUnits: 1000,
       currency: "INR",
       purpose: "Clockwise UAT connectivity test (₹10)",
+      // Pine Labs rejects links without customer info (400 "Customer Information is required").
+      // Clearly fake test customer — no real person's details.
+      customerName: "Clockwise UAT Test",
+      customerEmail: "uat-test@example.com",
       callbackUrl: `${getAppBaseUrl()}/api/payments/return?booking=${ref}`,
       expireInDays: 1,
     });
