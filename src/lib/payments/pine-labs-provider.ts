@@ -17,12 +17,27 @@
 // credentials exist in this environment.
 import { randomUUID } from "crypto";
 
+// PINELABS_API_BASE_URL is the documented name; PINELABS_BASE_URL is accepted
+// as an alias because that is what the Vercel project was configured with.
+const rawBaseUrl = () => process.env.PINELABS_API_BASE_URL || process.env.PINELABS_BASE_URL || "";
+
 export function isPineLabsConfigured(): boolean {
-  return Boolean(process.env.PINELABS_API_BASE_URL && process.env.PINELABS_CLIENT_ID && process.env.PINELABS_CLIENT_SECRET);
+  return Boolean(rawBaseUrl() && process.env.PINELABS_CLIENT_ID && process.env.PINELABS_CLIENT_SECRET);
 }
 
 export function getMissingPineLabsEnvVars(): string[] {
-  return ["PINELABS_API_BASE_URL", "PINELABS_CLIENT_ID", "PINELABS_CLIENT_SECRET"].filter((name) => !process.env[name]);
+  return [
+    rawBaseUrl() ? "" : "PINELABS_API_BASE_URL",
+    process.env.PINELABS_CLIENT_ID ? "" : "PINELABS_CLIENT_ID",
+    process.env.PINELABS_CLIENT_SECRET ? "" : "PINELABS_CLIENT_SECRET",
+  ].filter(Boolean);
+}
+
+// Provider error text with any credential value scrubbed before it can be shown.
+function sanitize(text: string): string {
+  let out = text.slice(0, 300);
+  for (const v of [process.env.PINELABS_CLIENT_SECRET, process.env.PINELABS_CLIENT_ID]) if (v && v.length > 3) out = out.split(v).join("[redacted]");
+  return out;
 }
 
 // Documented statuses. PROCESSED is the only one that means money moved.
@@ -54,7 +69,7 @@ export type PaymentLinkStatusResult =
 export type SimpleResult = { ok: true } | { ok: false; reason: string };
 
 const notConfigured = () => ({ ok: false as const, reason: `Pine Labs isn't configured (missing ${getMissingPineLabsEnvVars().join(", ")}).` });
-const baseUrl = () => (process.env.PINELABS_API_BASE_URL ?? "").replace(/\/+$/, "");
+const baseUrl = () => rawBaseUrl().replace(/\/+$/, "");
 
 function requestHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -70,7 +85,7 @@ function requestHeaders(extra: Record<string, string> = {}): Record<string, stri
 // module memory only — never persisted, logged, or sent to a client.
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-async function getAccessToken(): Promise<{ ok: true; token: string } | { ok: false; reason: string }> {
+async function getAccessToken(): Promise<{ ok: true; token: string } | { ok: false; reason: string; status?: number }> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return { ok: true, token: cachedToken.value };
   try {
     const res = await fetch(`${baseUrl()}/api/auth/v1/token`, {
@@ -82,7 +97,7 @@ async function getAccessToken(): Promise<{ ok: true; token: string } | { ok: fal
         grant_type: "client_credentials",
       }),
     });
-    if (!res.ok) return { ok: false, reason: `Pine Labs token request failed (${res.status}).` };
+    if (!res.ok) return { ok: false, status: res.status, reason: `Pine Labs token request failed (${res.status}): ${sanitize(await res.text().catch(() => ""))}` };
     const data: { access_token?: string; expires_in?: number } = await res.json();
     if (!data.access_token) return { ok: false, reason: "Pine Labs returned no access_token." };
     cachedToken = { value: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 };
@@ -103,7 +118,7 @@ async function call(path: string, init: { method: string; body?: unknown }): Pro
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
     if (res.status === 401) cachedToken = null;
-    if (!res.ok) return { ok: false, reason: `Pine Labs ${init.method} ${path.split("/").slice(0, 5).join("/")} failed (${res.status}): ${(await res.text()).slice(0, 300)}` };
+    if (!res.ok) return { ok: false, reason: `Pine Labs ${init.method} ${path.split("/").slice(0, 5).join("/")} failed (${res.status}): ${sanitize(await res.text())}` };
     const text = await res.text();
     return { ok: true, data: text ? (JSON.parse(text) as Record<string, unknown>) : {} };
   } catch (err) {
@@ -167,4 +182,20 @@ export async function cancelPaymentLink(paymentLinkId: string): Promise<SimpleRe
 export async function resendPaymentLinkNotification(paymentLinkId: string): Promise<SimpleResult> {
   const r = await call(`/api/pay/v1/paymentlink/${encodeURIComponent(paymentLinkId)}/resend`, { method: "PATCH" });
   return r.ok ? { ok: true } : r;
+}
+
+// Smallest real check of base URL + credentials: one token request through the
+// same client every payment uses. Never returns the token or any secret.
+export async function probePineLabsAuth(): Promise<{ ok: boolean; httpStatus: number | null; host: string; detail: string }> {
+  const host = (() => {
+    try {
+      return new URL(baseUrl()).host;
+    } catch {
+      return "(invalid base URL)";
+    }
+  })();
+  if (!isPineLabsConfigured()) return { ok: false, httpStatus: null, host, detail: `Missing ${getMissingPineLabsEnvVars().join(", ")}.` };
+  cachedToken = null;
+  const auth = await getAccessToken();
+  return auth.ok ? { ok: true, httpStatus: 200, host, detail: "Token issued (value not shown)." } : { ok: false, httpStatus: auth.status ?? null, host, detail: auth.reason };
 }
