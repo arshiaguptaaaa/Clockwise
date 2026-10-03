@@ -18,6 +18,8 @@ export type SpeechDiagnostics = {
   sentBytes: number;
   sentMime: string;
   languageCode: string;
+  // Which env var NAME supplied the key (never its value).
+  keySource?: string | null;
   responseFields: string[];
   durationMs: number;
   errorBody?: string;

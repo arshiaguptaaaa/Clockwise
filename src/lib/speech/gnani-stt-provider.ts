@@ -28,6 +28,10 @@ export function gnaniSpeechKey(): string | undefined {
   return process.env.GNANI_SPEECH_API_KEY || process.env.GNANI_API_KEY || undefined;
 }
 
+export function gnaniSpeechKeySource(): "GNANI_SPEECH_API_KEY" | "GNANI_API_KEY" | null {
+  return process.env.GNANI_SPEECH_API_KEY ? "GNANI_SPEECH_API_KEY" : process.env.GNANI_API_KEY ? "GNANI_API_KEY" : null;
+}
+
 class GnaniSpeechProvider implements SpeechToTextProvider {
   readonly name = "gnani" as const;
 
@@ -65,6 +69,7 @@ class GnaniSpeechProvider implements SpeechToTextProvider {
       sentBytes: audio.size,
       sentMime: mimeType,
       languageCode,
+      keySource: gnaniSpeechKeySource(),
       responseFields: [],
       durationMs: 0,
     };
