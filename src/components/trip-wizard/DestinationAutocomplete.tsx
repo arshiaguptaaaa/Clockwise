@@ -213,7 +213,7 @@ export function DestinationAutocomplete({
                   )}
                   <span>
                     <span className="font-medium">{r.name}</span>
-                    {r.country && <span className="block text-xs text-muted-foreground">{r.country}</span>}
+                    {r.country && <span className="block text-xs text-muted-foreground">{[r.region, r.country].filter(Boolean).join(", ")}</span>}
                   </span>
                 </button>
               ))}

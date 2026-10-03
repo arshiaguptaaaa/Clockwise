@@ -14,7 +14,7 @@ export function haversineM(a: Point, b: Point): number {
 
 export type Plausibility = { ok: true } | { ok: false; reason: string };
 
-const FAR_FROM_TRIP_M = 100_000;
+const SAME_NAME_FAR_M = 50_000;
 const LOCAL_PAIR_M = 100_000;
 
 export function checkRoutePlausibility(p: {
@@ -23,11 +23,16 @@ export function checkRoutePlausibility(p: {
   distanceMeters: number;
   anchors: Anchor[];
 }): Plausibility {
-  const nearestAnchorM = (pt: Point) => (p.anchors.length ? Math.min(...p.anchors.map((a) => haversineM(a.point, pt))) : null);
+  // SAME NAME, WRONG PLACE: an endpoint that carries the name of one of this trip's
+  // destinations but lies far from it ("Udaipur, Jhunjhunun" for a trip to Udaipur,
+  // Rajasthan). A legitimately different city (Jaipur, Delhi) is never touched.
+  const head = (l: string) => l.split(",")[0].toLowerCase().replace(/\b(international|domestic)?\s*airport\b/g, "").trim();
   for (const end of [p.from, p.to]) {
-    const d = nearestAnchorM(end.point);
-    if (d != null && d > FAR_FROM_TRIP_M) {
-      return { ok: false, reason: `"${end.label}" is ${Math.round(d / 1000)} km from every place this trip is actually at` };
+    for (const a of p.anchors.filter((x) => x.kind === "destination")) {
+      const d = haversineM(a.point, end.point);
+      if (head(end.label) && head(end.label) === head(a.label) && d > SAME_NAME_FAR_M) {
+        return { ok: false, reason: `"${end.label}" shares its name with this trip's ${a.label} but is ${Math.round(d / 1000)} km away from it` };
+      }
     }
   }
   // An airport and the stay (or any two endpoints inside the same destination) are

@@ -137,7 +137,14 @@ export async function tripAnchors(tripId: string): Promise<Anchor[]> {
   return out;
 }
 
-const distinctIdentity = (a: GeocodeCandidate, b: GeocodeCandidate) => `${a.state}|${a.country}` !== `${b.state}|${b.country}`;
+// Two same-named candidates are genuinely different places only if they are in a
+// different administrative area AND far apart ("Delhi" / "New Delhi" are one place).
+const kmBetween = (a: GeocodeCandidate, b: GeocodeCandidate) => {
+  const r = (d: number) => (d * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+};
+const distinctIdentity = (a: GeocodeCandidate, b: GeocodeCandidate) => `${a.state}|${a.country}` !== `${b.state}|${b.country}` && kmBetween(a, b) > 50;
 
 // Provider geocode with identity, in this order:
 //  1. FILTER to a 60 km circle around each trip anchor — a place the trip is

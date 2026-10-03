@@ -1473,7 +1473,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     return { output: `No ${category} found near ${located.label}.`, posted: true };
   }
   return {
-    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.`,
+    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.${diet ? ` Reply with this sentence only: "I ran Geoapify's ${diet} search near ${located.label} — the card shows what it returned." Do NOT call the places ${diet}, ${diet}-friendly or similar.` : ""}`,
     posted: true,
   };
 }
