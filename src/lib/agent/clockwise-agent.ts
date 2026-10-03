@@ -149,6 +149,22 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
       // turn has executed — tool calls are only dispatched below, after a
       // *successful* generate() — so surfacing this immediately and
       // tagging it `failed` is always safe to retry from scratch later.
+      await prisma.tripEvent
+        .create({
+          data: {
+            tripId: ctx.trip.id,
+            kind: "MODEL_REQUEST_FAILED",
+            scope: ctx.mode === "PRIVATE" ? "PERSONAL" : "GROUP",
+            actorUserId: ctx.actingUserId,
+            subjectUserId: ctx.mode === "PRIVATE" ? ctx.actingUserId : null,
+            sourceChannel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP",
+            confidence: "HIGH",
+            // Structure and Google's own error text only — never message contents.
+            payload: JSON.stringify({ category: result.error.category, status: result.error.status, round, shape: result.error.diagnostics ?? null }),
+            propagation: "[]",
+          },
+        })
+        .catch(() => undefined);
       return {
         spoke: true,
         replyText: result.text ?? "Something went wrong.",

@@ -58,6 +58,33 @@ function toGeminiContents(messages: AgentMessage[]): Content[] {
   });
 }
 
+// Structure only — never contents. Enough to see whether a rejected request had
+// an empty part, a role that doesn't alternate, a history that ends on the model,
+// or a tool call without its response.
+export function describeRequestShape(model: string, system: string, contents: Content[], toolCount: number) {
+  const roles = contents.map((c) => c.role ?? "?");
+  const parts = contents.map((c) =>
+    (c.parts ?? []).map((p) => (p.functionCall ? "functionCall" : p.functionResponse ? "functionResponse" : p.text === "" ? "EMPTY_TEXT" : p.text ? `text(${p.text.length})` : "other")).join("+")
+  );
+  const calls = contents.flatMap((c) => (c.parts ?? []).filter((p) => p.functionCall).map((p) => p.functionCall!.id ?? p.functionCall!.name ?? "?"));
+  const responses = contents.flatMap((c) => (c.parts ?? []).filter((p) => p.functionResponse).map((p) => p.functionResponse!.id ?? p.functionResponse!.name ?? "?"));
+  return {
+    model,
+    messageCount: contents.length,
+    roles,
+    parts,
+    firstRole: roles[0] ?? null,
+    lastRole: roles[roles.length - 1] ?? null,
+    consecutiveSameRole: roles.filter((r, i) => i > 0 && r === roles[i - 1]).length,
+    emptyParts: parts.reduce((n, p) => n + (p.match(/EMPTY_TEXT/g)?.length ?? 0), 0),
+    toolDeclarations: toolCount,
+    functionCalls: calls.length,
+    functionResponses: responses.length,
+    unpairedCalls: calls.filter((c) => !responses.includes(c)).length,
+    systemChars: system.length,
+  };
+}
+
 function toGeminiTools(tools: AgentToolSchema[]) {
   if (tools.length === 0) return undefined;
   return [
@@ -257,6 +284,21 @@ export class GeminiAgentProvider implements AgentModelProvider {
         console.error(
           `[GeminiAgentProvider] attempt ${attempt + 1}/${MAX_ATTEMPTS} failed — status=${classification.httpStatus} category=${classification.category} retryable=${classification.retryable}`
         );
+        // Gemini's own explanation of a 400 describes the structure problem, not our
+        // content; keep it short and strip anything key-shaped before logging/storing.
+        const googleMessage =
+          err instanceof ApiError
+            ? (() => {
+                try {
+                  const m = (JSON.parse(err.message) as { error?: { message?: string } }).error?.message ?? err.message;
+                  return m.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted]").slice(0, 300);
+                } catch {
+                  return err.message.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted]").slice(0, 300);
+                }
+              })()
+            : null;
+        const diagnostics = { ...describeRequestShape(model, system, toGeminiContents(messages), tools.length), httpStatus: classification.httpStatus, category: classification.category, googleMessage };
+        if (classification.category === "MALFORMED_REQUEST") console.error(`[GeminiAgentProvider] request shape: ${JSON.stringify(diagnostics)}`);
 
         const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
         if (classification.retryable && !isLastAttempt) {
@@ -272,7 +314,7 @@ export class GeminiAgentProvider implements AgentModelProvider {
         return {
           text: fallbackTextFor(classification.category),
           toolCalls: [],
-          error: { category: classification.category, status: classification.httpStatus },
+          error: { category: classification.category, status: classification.httpStatus, diagnostics },
         };
       }
     }

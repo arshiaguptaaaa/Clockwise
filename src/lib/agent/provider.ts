@@ -50,7 +50,7 @@ export type AgentGenerateResult = {
   // human-friendly fallback so a normal reply can always be persisted —
   // this field is what lets the UI distinguish "genuine answer" from
   // "exhausted-retry failure" and offer a Retry action.
-  error?: { category: AgentErrorCategory; status: number | null };
+  error?: { category: AgentErrorCategory; status: number | null; diagnostics?: Record<string, unknown> };
 };
 
 export interface AgentModelProvider {

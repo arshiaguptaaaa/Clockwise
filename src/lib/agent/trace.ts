@@ -131,6 +131,13 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `The agent turn threw an exception (${str(p.name)}: ${str(p.message)}). Nothing was acted on; the user was told to resend.`,
         state: null,
       };
+    case "MODEL_REQUEST_FAILED": {
+      const sh = (p.shape ?? {}) as Record<string, unknown>;
+      return {
+        understanding: `The model request was rejected: ${str(p.category)} (HTTP ${str(p.status)}), round ${str(p.round)}. Shape: ${str(sh.messageCount)} messages, roles ${Array.isArray(sh.roles) ? (sh.roles as string[]).join(">") : "?"}, last role ${str(sh.lastRole)}, ${str(sh.emptyParts)} empty part(s), ${str(sh.consecutiveSameRole)} consecutive same-role, ${str(sh.toolDeclarations)} tools, ${str(sh.functionCalls)} calls / ${str(sh.functionResponses)} responses. Google said: ${str(sh.googleMessage)}`,
+        state: "The turn was not retried automatically (a 400 is not retryable). No content is stored here.",
+      };
+    }
     case "AGENT_STAYED_SILENT":
       return {
         understanding: `Read, and deliberately not acted on (${str(p.by) === "GATE" ? "deterministic filter, no model call" : "model judged it normal conversation"}): ${str(p.reason)}`,
