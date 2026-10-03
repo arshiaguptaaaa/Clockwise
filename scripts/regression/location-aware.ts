@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { resolveAnchor, toAroundPlace, whyPicked } from "../../src/lib/travel/around";
 import { groupOverlaps } from "../../src/lib/travel/saved-overlap";
+import { spareMinutes, rainInWindow, addMinutes, STAY_MIN, BUFFER_MIN } from "../../src/lib/travel/window";
+import { orderCategories } from "../../src/lib/travel/around";
 import { AROUND_CATEGORIES, countWord } from "../../src/lib/travel/around-categories";
 
 let n = 0;
@@ -53,6 +55,29 @@ async function main() {
     const labels = Object.values(AROUND_CATEGORIES).map((c) => c.label);
     for (const l of ["Coffee", "Food", "Things to do", "Convenience", "Pharmacy", "Shopping", "ATM"]) assert.ok(labels.includes(l), l);
     assert.equal(countWord(3), "THREE");
+  });
+  await ok("feasibility: 90 min window, 8 min there, 45 there, 22 on, 10 buffer fits with 5 spare", () => {
+    assert.equal(spareMinutes(90, BUFFER_MIN, 8, 45, 22), 5);
+  });
+  await ok("feasibility: an option that does not fit the window is negative (never offered)", () => {
+    assert.ok(spareMinutes(60, BUFFER_MIN, 20, STAY_MIN.museum, 25) < 0);
+  });
+  await ok("rain: only hours overlapping the window with >=50% count; outside hours are ignored", () => {
+    const h = { utcOffsetSeconds: 0, provider: "open-meteo" as const, retrievedAt: "", hours: [
+      { time: "2026-10-04T15:00", precipitationProbability: 20, precipitationMm: 0 },
+      { time: "2026-10-04T16:00", precipitationProbability: 70, precipitationMm: 1 },
+      { time: "2026-10-04T19:00", precipitationProbability: 90, precipitationMm: 2 },
+    ] };
+    const r = rainInWindow(h, "2026-10-04T15:30", "2026-10-04T17:30");
+    assert.equal(r?.probability, 70);
+    assert.equal(rainInWindow(h, "2026-10-04T15:00", "2026-10-04T15:59"), null);
+    assert.equal(addMinutes("2026-10-04T19:30", -45), "2026-10-04T18:45");
+  });
+  await ok("Vibe Check ordering: cafés/shopping/pretty first, never drops a category", () => {
+    const all = Object.keys(AROUND_CATEGORIES);
+    const o = orderCategories(all, { nearby: ["cafe", "shopping"], energy: ["PRETTY"] });
+    assert.deepEqual(o.slice(0, 3), ["cafe", "shopping", "attraction"]);
+    for (const c of all) assert.ok(o.includes(c), c);
   });
   console.log(`${n} location-aware checks passed`);
 }

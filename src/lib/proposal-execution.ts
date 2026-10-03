@@ -4,6 +4,7 @@
 // authorization, it only performs the typed mutation. Chat is where
 // people discuss; this is what makes a confirmed idea actually become
 // Plan state instead of dying inside Message.cardData.
+import { agreeOnPlace } from "./places/place-proposals";
 import type { Proposal } from "@prisma/client";
 import { prisma } from "./prisma";
 import { decodeProposalPayload } from "./proposals";
@@ -320,7 +321,9 @@ export async function executeConfirmedProposal(proposal: Proposal): Promise<Exec
     case "UBER_RIDE":
       return executeUberRide(proposal);
     case "OTHER": {
-      if (decodeProposalPayload(proposal.payload).reschedule) return executeReschedule(proposal);
+      const decoded = decodeProposalPayload(proposal.payload);
+      if (decoded.reschedule) return executeReschedule(proposal);
+      if (decoded.place) return agreeOnPlace({ id: proposal.id, tripId: proposal.tripId }, decoded.place);
       return { ok: false, error: "Execution for this proposal type isn't implemented yet." };
     }
     case "DOCUMENT_UPDATE":

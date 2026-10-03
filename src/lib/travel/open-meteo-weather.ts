@@ -50,3 +50,34 @@ export async function getWeather(at: LatLng): Promise<WeatherResult> {
     retrievedAt,
   };
 }
+
+// Hourly rain for the next ~2 days at a point, plus the location's UTC offset so
+// "now" can be expressed as the destination's wall-clock time (the same local-time
+// convention commitments use). Provider data only: nothing here is estimated.
+export type HourlyContext = {
+  utcOffsetSeconds: number;
+  // Local wall-clock hours, "YYYY-MM-DDTHH:00".
+  hours: { time: string; precipitationProbability: number | null; precipitationMm: number | null }[];
+  provider: "open-meteo";
+  retrievedAt: string;
+};
+
+export async function getHourlyContext(at: LatLng): Promise<HourlyContext> {
+  const params = new URLSearchParams({
+    latitude: String(at.lat),
+    longitude: String(at.lng),
+    hourly: "precipitation_probability,precipitation",
+    timezone: "auto",
+    forecast_days: "2",
+  });
+  const res = await fetch(`${FORECAST_URL}?${params}`);
+  if (!res.ok) throw new Error(`Open-Meteo forecast failed (${res.status})`);
+  const data: { utc_offset_seconds?: number; hourly?: { time: string[]; precipitation_probability?: (number | null)[]; precipitation?: (number | null)[] } } = await res.json();
+  if (typeof data.utc_offset_seconds !== "number" || !data.hourly) throw new Error("Open-Meteo returned an incomplete forecast");
+  return {
+    utcOffsetSeconds: data.utc_offset_seconds,
+    hours: data.hourly.time.map((time, i) => ({ time, precipitationProbability: data.hourly!.precipitation_probability?.[i] ?? null, precipitationMm: data.hourly!.precipitation?.[i] ?? null })),
+    provider: "open-meteo",
+    retrievedAt: new Date().toISOString(),
+  };
+}

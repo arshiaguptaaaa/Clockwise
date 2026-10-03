@@ -8,6 +8,7 @@ export const AROUND_CATEGORIES: Record<string, { label: string; icon: string }> 
   shopping: { label: "Shopping", icon: "🛍" },
   atm: { label: "ATM", icon: "🏧" },
   supermarket: { label: "Supermarkets", icon: "🛒" },
+  museum: { label: "Museums", icon: "🖼" },
   park: { label: "Parks & nature", icon: "🌿" },
   nightlife: { label: "Nightlife", icon: "🌙" },
 };

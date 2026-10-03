@@ -15,6 +15,8 @@ import { prisma } from "@/lib/prisma";
 import { getTripStay } from "@/lib/stays";
 import { StaySection } from "@/components/plan/StaySection";
 import { RendezvousSection } from "@/components/plan/RendezvousSection";
+import { AgreedPlacesSection } from "@/components/plan/AgreedPlacesSection";
+import { agreedPlaces } from "@/lib/places/place-proposals";
 import { buildRendezvousView } from "@/lib/rendezvous";
 
 export default async function PlanOverviewPage({
@@ -28,7 +30,7 @@ export default async function PlanOverviewPage({
   // The seeded demo route starts at Delhi, which its photo grid skips. Real
   // trips show every stop — a real Delhi stop must not vanish.
   const middleStops = trip.isDemo ? stops.filter((s) => s.name !== "Delhi") : stops;
-  const [stay, rendezvous] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId)]);
+  const [stay, rendezvous, agreed] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId), agreedPlaces(tripId)]);
   const mapMarkers = [
     ...buildDestinationMarkers(stops),
     ...(stay?.status === "CONFIRMED" && stay.latitude != null && stay.longitude != null
@@ -84,6 +86,7 @@ export default async function PlanOverviewPage({
       )}
 
       {stay && <StaySection stay={stay} />}
+      <AgreedPlacesSection places={agreed} />
       <RendezvousSection view={rendezvous} />
 
       {middleStops.length > 0 && (

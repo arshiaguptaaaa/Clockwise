@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
 import { countWord } from "@/lib/travel/around-categories";
+import { ProposeSaved } from "@/components/around/ProposeSaved";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,13 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
         <div key={o.providerPlaceId} className="rounded-xl border border-accent bg-pop-pink-tint p-3" data-overlap={o.name}>
           <p className="font-display text-xl leading-tight">◷ WAIT. {countWord(o.count)} OF YOU SAVED THIS.</p>
           <p className="mt-1 text-sm font-semibold uppercase">{o.name}</p>
-          <p className="text-xs text-muted-foreground">Nobody is told who saved what. Proposing it to the group isn&apos;t available yet.</p>
+          <p className="text-xs text-muted-foreground">Nobody is told who saved what.</p>
+          {(() => {
+            const r = rows.find((x) => x.providerPlaceId === o.providerPlaceId);
+            return r && r.latitude != null && r.longitude != null ? (
+              <ProposeSaved tripId={tripId} kind={r.kind} place={{ provider: r.provider, providerPlaceId: r.providerPlaceId, name: r.name, address: r.address, lat: r.latitude, lng: r.longitude, categories: [], distanceMeters: null, walkMinutes: null, openingHours: null, website: null, phone: null, retrievedAt: (r.retrievedAt ?? r.createdAt).toISOString() }} />
+            ) : null;
+          })()}
         </div>
       ))}
       {rows.length === 0 && <p className="text-sm text-muted-foreground">Nothing saved yet. Tap SAVE on a place in Around You or on a stay.</p>}

@@ -6,9 +6,11 @@ import { getCurrentUserId } from "@/lib/session";
 import { destinationSearchProvider } from "@/lib/destination-search/open-meteo-provider";
 import { QUESTIONS, setPref, getPrefs, type QuestionId } from "@/lib/traveller/vibe";
 import { confirmJourney, discardJourney, createPendingJourney, type JourneyFacts } from "@/lib/traveller/journey";
-import { searchAroundPoint, brandSearch, resolveAnchor, anchorsFor, whyPicked, type AroundPlace, type AnchorType } from "@/lib/travel/around";
+import { searchAroundPoint, brandSearch, resolveAnchor, anchorsFor, whyPicked, orderCategories, type AroundPlace, type AnchorType } from "@/lib/travel/around";
+import { nextUpFor, freeTimeOptions, type NextUp, type FreeTime } from "@/lib/travel/window";
 import { getRoute } from "@/lib/travel/geoapify-provider";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
+import { proposePlace, type PlaceRef } from "@/lib/places/place-proposals";
 import type { TravelMode } from "@/lib/travel/types";
 import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
 
@@ -228,4 +230,38 @@ export async function toggleSavePlaceAction(tripId: string, place: AroundPlace, 
   }
   revalidatePath(`/trips/${tripId}/agent/saved`);
   return { ok: true, saved: true, overlap: overlap?.count };
+}
+
+// PROPOSE TO GROUP: a real provider place becomes a group proposal (vote, then organiser confirm).
+// Proposing is the traveller's own choice to go public; it never says who else saved the place.
+export async function proposePlaceAction(tripId: string, place: AroundPlace, kind: string): Promise<{ ok: boolean; error?: string; duplicate?: boolean }> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const ref: PlaceRef = { provider: place.provider, providerPlaceId: place.providerPlaceId, name: place.name, address: place.address, latitude: place.lat, longitude: place.lng, retrievedAt: place.retrievedAt, kind: kind.toUpperCase().slice(0, 20) };
+  const r = await proposePlace(tripId, userId, ref);
+  revalidatePath(`/trips/${tripId}/room`);
+  return r.ok ? { ok: true, duplicate: r.duplicate } : { ok: false, error: r.error };
+}
+
+// ---- Right now: the traveller's clock + where they are + what's next -----------
+
+export async function nextUpAction(tripId: string, opts: { anchor: AnchorType; me?: Me }): Promise<{ ok: true; nextUp: NextUp | { none: string }; anchorType: AnchorType } | { ok: false; error: string }> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  return { ok: true, nextUp: await nextUpFor(tripId, userId, a.anchor), anchorType: a.anchor.kind };
+}
+
+export async function freeTimeAction(tripId: string, opts: { anchor: AnchorType; me?: Me; minutes?: number }): Promise<(FreeTime & { anchorType: AnchorType }) | { ok: false; error: string }> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  const prefs = await getPrefs(tripId, userId);
+  const order = orderCategories(Object.keys(AROUND_CATEGORIES), prefs);
+  const r = await freeTimeOptions(tripId, userId, a.anchor, { minutes: opts.minutes, categoryOrder: order, prefs: { energy: prefs.energy, nearby: prefs.nearby, food: prefs.food } });
+  if (!r.ok) return r;
+  await personalEvent(tripId, userId, "FREE_TIME_COMPUTED", { provider: "geoapify", weather: "open-meteo", anchorType: a.anchor.kind, windowMinutes: r.windowMinutes, windowSource: r.windowSource, considered: r.considered, fitting: r.options.length, rainyMode: r.rainyMode, retrievedAt: r.retrievedAt });
+  return { ...r, anchorType: a.anchor.kind };
 }

@@ -187,6 +187,12 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
       return { understanding: "The traveller declined (or the browser blocked) location.", state: "Clockwise offered hotel/destination search instead; nothing else changed." };
     case "LOCATION_SEARCH_COMPLETED":
       return { understanding: `A location-anchored place search finished — provider ${str(p.provider)}, ${str(p.category)}, ${str(p.resultCount)} result(s), retrieved ${p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().slice(0, 19).replace("T", " ") + " UTC" : "n/a"}.`, state: "Coordinates were used for the request only (not stored)." };
+    case "FREE_TIME_COMPUTED":
+      return { understanding: `Free-time options computed: ${str(p.windowMinutes)}-minute window (${str(p.windowSource)}), anchor ${str(p.anchorType)}; ${str(p.considered)} real Geoapify places routed on foot, ${str(p.fitting)} fit${p.rainyMode ? "; rain in the window (Open-Meteo), so indoor-type categories only" : ""}.`, state: "Deterministic: provider places + provider walking routes + a stated time-at-place assumption. The model did not decide what fits." };
+    case "PLACE_PROPOSED":
+      return { understanding: `A real place (${str(p.name)}, ${str(p.provider)} id ${str(p.providerPlaceId)}) was proposed to the group.`, state: "Group proposal opened; nothing is booked or scheduled." };
+    case "PLACE_AGREED":
+      return { understanding: `The group agreed on ${str(p.name)} (${str(p.provider)} id ${str(p.providerPlaceId)}). Booked: ${str(p.booked)}.`, state: "Appears in the Plan as an agreed place. Not a booking, not a scheduled activity." };
     case "PLACE_OVERLAP_DETECTED":
       return { understanding: `${str(p.savedBy)} of ${str(p.members)} travellers saved the same real place (${str(p.name)}, ${str(p.provider)} id ${str(p.providerPlaceId)}).`, state: "A count only: who saved it is not recorded here and is not shown to anyone." };
     case "ROUTE_PLAUSIBILITY_FAILED":

@@ -49,6 +49,18 @@ export type ProposalPayload = {
     // Group-safe reason: whose arrival, and when they can reach the stay.
     because: string;
   };
+  // OTHER proposals suggesting a real place (a Geoapify result). Agreeing to it
+  // books nothing and schedules nothing: the group has only agreed on the place.
+  place?: {
+    provider: string;
+    providerPlaceId: string;
+    name: string;
+    address: string | null;
+    latitude: number;
+    longitude: number;
+    retrievedAt: string;
+    kind: string;
+  };
   stay?: {
     provider: string;
     providerPlaceId: string;

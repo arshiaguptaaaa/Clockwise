@@ -96,7 +96,7 @@ export const toAroundPlace = (r: Raw): AroundPlace => ({
 });
 
 async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<AroundPlace[]> {
-  const top = places.slice(0, 6);
+  const top = places.slice(0, 12);
   const timed = await Promise.all(
     top.map(async (p) => {
       try {
@@ -107,7 +107,7 @@ async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<Aroun
       }
     })
   );
-  return [...timed, ...places.slice(6)];
+  return [...timed, ...places.slice(12)];
 }
 
 export async function searchAroundPoint(anchor: AroundAnchor, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}): Promise<AroundResult> {
@@ -115,7 +115,7 @@ export async function searchAroundPoint(anchor: AroundAnchor, category: string, 
   if (!(category in NEARBY_CATEGORIES)) return { ok: false, error: `Unknown category "${category}".` };
   let raw;
   try {
-    raw = await searchNearby(category, anchor.point, opts.radiusM ?? 1500, opts.limit ?? 10, opts.diet);
+    raw = await searchNearby(category, anchor.point, opts.radiusM ?? 1500, opts.limit ?? 15, opts.diet);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Place search failed." };
   }
@@ -194,4 +194,12 @@ export function whyPicked(category: string, prefs: { energy?: string[]; nearby?:
   if (!parts.length) return null;
   const s = parts.join(" and ");
   return s[0].toUpperCase() + s.slice(1) + ".";
+}
+
+// Category order from the traveller's own Vibe Check: Nearby picks, then travel-energy
+// matches, then everything else. Pure.
+const ENERGY_TO_CATEGORY: Record<string, string> = { CAFES: "cafe", SLOW_MORNINGS: "cafe", FOOD: "restaurant", SHOPPING: "shopping", PRETTY: "attraction", CLASSICS: "attraction", HIDDEN_GEMS: "attraction", NATURE: "park", NIGHTLIFE: "nightlife", MUSEUMS: "museum" };
+export function orderCategories(all: string[], prefs: { energy?: string[]; nearby?: string[] }): string[] {
+  const mine = [...(prefs.nearby ?? []), ...(prefs.energy ?? []).map((e) => ENERGY_TO_CATEGORY[e]).filter(Boolean)].filter((c, i, arr) => arr.indexOf(c) === i);
+  return [...mine.filter((c) => all.includes(c) || c === "museum"), ...all.filter((c) => !mine.includes(c))];
 }

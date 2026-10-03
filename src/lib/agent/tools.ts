@@ -30,7 +30,9 @@ import { updateMyArrival } from "@/lib/traveller/arrival";
 import { ceilToQuarter } from "@/lib/traveller/arrival-rules";
 import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
 import { timeLabel } from "@/lib/traveller/journey";
-import { brandSearch, anchorsFor } from "@/lib/travel/around";
+import { brandSearch, anchorsFor, orderCategories } from "@/lib/travel/around";
+import { freeTimeOptions } from "@/lib/travel/window";
+import { getPrefs } from "@/lib/traveller/vibe";
 import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
@@ -434,6 +436,10 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
           enum: ["user_location", "hotel", "arrival"],
           description: "user_location = 'near me / what's open near me / pharmacy near me' (the traveller's CURRENT location, which Clockwise only has when they press USE MY LOCATION in Around You, so this never returns places). hotel = 'our hotel / around the hotel' (the CONFIRMED stay only; never substituted by the destination centre). arrival = 'near the airport/station' for the speaker's own confirmed arrival point.",
         },
+        maxMinutes: {
+          type: "number",
+          description: "Set for 'within N minutes' requests ('coffee within 10 minutes', 'vegetarian food within a 15 minute walk'). Candidate places are routed on foot with Geoapify and only those whose real walking time is at most this many minutes are returned. Never convert distance to minutes yourself.",
+        },
         brand: {
           type: "string",
           description: "A specific store or chain the user named (e.g. '7-Eleven'). Searches the provider's convenience stores and supermarkets for that name; if none match it returns the closest real alternatives. Never claim a brand exists nearby unless this returns it.",
@@ -445,6 +451,18 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         },
       },
       required: ["category"],
+    },
+  },
+  {
+    name: "free_time_options",
+    description:
+      "Read-only: 'what can we do in the next 90 minutes?', 'what can we do before dinner?', 'something to do while it rains'. Deterministically finds real places (Geoapify) that FIT the time window: real walking routes there and on to the next commitment, with rain from Open-Meteo steering toward indoor places. Gemini must not decide what fits; call this and report what it returns.",
+    parameters: {
+      type: "object",
+      properties: {
+        minutes: { type: "number", description: "The window in minutes if the user stated one (e.g. 90). Omit for 'before dinner' so the window runs to the next commitment." },
+        anchor: { type: "string", enum: ["user_location", "hotel", "arrival", "destination"], description: "Where from. 'user_location' (near me) is not available in chat: it returns a prompt to use USE MY LOCATION. Default: hotel when there is a confirmed stay, else the destination (stated on the card)." },
+      },
     },
   },
   {
@@ -539,6 +557,8 @@ export async function executeTool(
       return searchHotelsTool(input, ctx);
     case "search_nearby":
       return searchNearbyTool(input, ctx);
+    case "free_time_options":
+      return freeTimeTool(input, ctx);
     case "find_saved_overlap":
       return findSavedOverlapTool(ctx);
     case "get_route":
@@ -1612,9 +1632,27 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   }
 
   const diet = (["vegetarian", "vegan", "halal"] as const).find((d) => d === input.diet);
+  const maxMinutes = typeof input.maxMinutes === "number" && input.maxMinutes > 0 ? Math.min(60, Math.round(input.maxMinutes)) : null;
   let results;
+  let walkById = new Map<string, number>();
   try {
-    results = await geoapifySearchNearby(category, located.point, 1500, 8, diet);
+    results = await geoapifySearchNearby(category, located.point, maxMinutes ? Math.min(5000, Math.max(800, maxMinutes * 110)) : 1500, maxMinutes ? 15 : 8, diet);
+    if (maxMinutes) {
+      // Real routes, then filter on the provider's own duration; no straight-line conversion.
+      const timed = await Promise.all(
+        results.slice(0, 12).map(async (r) => {
+          try {
+            const rt = await geoapifyGetRoute(located.point, { lat: r.latitude, lng: r.longitude }, "walk");
+            return [r, Math.max(1, Math.round(rt.durationSeconds / 60))] as const;
+          } catch {
+            return [r, null] as const;
+          }
+        })
+      );
+      const fit = timed.filter(([, m]) => m != null && m <= maxMinutes).sort((a, b) => a[1]! - b[1]!);
+      walkById = new Map(fit.map(([r, m]) => [r.providerId, m!]));
+      results = fit.map(([r]) => r);
+    }
   } catch (err) {
     return { output: `Live nearby search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
   }
@@ -1625,7 +1663,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     type: "PLACES",
     status: "CONFIRMED",
     data: {
-      title: `${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
+      title: `${category[0].toUpperCase()}${category.slice(1)} ${maxMinutes ? `within ${maxMinutes} min of` : "near"} ${located.label}`,
       context: diet
         ? `Found using Geoapify's ${diet} search. That is a provider filter, not a check of each place — individual menus aren't verified.`
         : "No dietary filter applied — nothing here is claimed to be vegetarian, vegan or halal.",
@@ -1635,6 +1673,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
         distanceMeters: r.distanceMeters,
         latitude: r.latitude,
         longitude: r.longitude,
+        walkMinutes: walkById.get(r.providerId) ?? null,
       })),
       provider: results[0]?.provider,
       retrievedAt: results[0]?.retrievedAt,
@@ -1643,7 +1682,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
 
   await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "search_nearby", provider: results[0]?.provider ?? "geoapify", retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), category, diet: diet ?? null, near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerId) });
   if (results.length === 0) {
-    return { output: `No ${category} found near ${located.label}.`, posted: true };
+    return { output: maxMinutes ? `No ${category} within a ${maxMinutes}-minute walk of ${located.label} in the provider's data (real walking routes checked). Say so; offer a longer time. Never name one from memory.` : `No ${category} found near ${located.label}.`, posted: true };
   }
   return {
     output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.${diet ? ` Reply with this sentence only: "I ran Geoapify's ${diet} search near ${located.label} — the card shows what it returned." Do NOT call the places ${diet}, ${diet}-friendly or similar.` : ""}`,
@@ -1662,6 +1701,39 @@ async function findSavedOverlapTool(ctx: AgentContext): Promise<ToolExecutionRes
   const mine = await savedOverlaps(ctx.trip.id, ctx.actingUserId);
   if (mine.length === 0) return { output: "None of this traveller's saved places has been saved by anyone else yet. Do not say who else saved anything." };
   return { output: `Overlap with this traveller's own saves (counts only, never names of people): ${mine.map((o) => `${o.name} - ${o.count} of ${o.members} travellers saved it`).join("; ")}. Offer nothing about who. Proposing to the group isn't available yet.` };
+}
+
+async function freeTimeTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  if (!isGeoapifyConfigured()) return { output: "Live place search isn't connected, so I can't work out what fits. Do not name any places from memory." };
+  if (input.anchor === "user_location") {
+    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION, then WHAT CAN I DO NOW? It stays private to you. Or I can work it out from your hotel."` };
+  }
+  const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
+  const want = input.anchor === "arrival" ? a.arrival : input.anchor === "destination" ? a.destination : (a.stay ?? a.destination);
+  if (!want) return { output: "There's no stay, arrival point or destination to measure from yet. Say so." };
+  const prefs = await getPrefs(ctx.trip.id, ctx.actingUserId);
+  const minutes = typeof input.minutes === "number" && input.minutes > 0 ? Math.round(input.minutes) : undefined;
+  const r = await freeTimeOptions(ctx.trip.id, ctx.actingUserId, want, { minutes, categoryOrder: orderCategories(Object.keys(NEARBY_CATEGORIES), prefs), prefs: { energy: prefs.energy, nearby: prefs.nearby, food: prefs.food } });
+  if (!r.ok) return { output: r.error };
+  await postActionCard({
+    tripId: ctx.trip.id,
+    ...cardChannel(ctx),
+    type: "PLACES",
+    status: "CONFIRMED",
+    data: {
+      title: `YOU'VE GOT ${r.windowMinutes} MIN${r.rainyMode ? " · RAINY WINDOW" : ""}`,
+      context: `From ${want.kind === "stay" ? "your hotel" : want.label}. Each place fits the window including the real walks. ${r.assumptions}`,
+      places: r.options.map((o) => ({ name: o.place.name, formattedAddress: o.place.address, distanceMeters: o.place.distanceMeters, latitude: o.place.lat, longitude: o.place.lng, walkMinutes: o.walkToMin })),
+      provider: "geoapify",
+      retrievedAt: r.retrievedAt,
+    },
+  });
+  await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "free_time_options", provider: "geoapify", weather: "open-meteo", retrievedAt: r.retrievedAt, category: "free-time", anchorType: want.kind, near: want.label, resultCount: r.options.length, windowMinutes: r.windowMinutes, rainyMode: r.rainyMode, considered: r.considered });
+  if (r.options.length === 0) return { output: `Nothing real that I checked fits ${r.windowMinutes} minutes (${r.considered} places routed). Say so plainly and suggest a longer window. Never invent an option.`, posted: true };
+  return {
+    output: `Posted ${r.options.length} option(s) that fit a ${r.windowMinutes}-minute window${r.rainyMode ? " (rain likely, so indoor-type places only)" : ""}. Each includes real walking time there and onward. Say in ONE short line how long the window is and that the card shows what fits; do not list places or add any that are not on the card. Time at each place is an assumption; say so if asked.`,
+    posted: true,
+  };
 }
 
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {

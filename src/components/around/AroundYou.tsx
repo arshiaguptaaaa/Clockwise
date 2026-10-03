@@ -3,7 +3,9 @@
 import { useEffect, useState, useTransition } from "react";
 import { Heart } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
-import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import type { NextUp, FreeTime } from "@/lib/travel/window";
+import type { AroundPlace } from "@/lib/travel/around";
 import { AROUND_CATEGORIES, countWord } from "@/lib/travel/around-categories";
 
 type Ok = Extract<AroundResponse, { ok: true }>;
@@ -14,6 +16,10 @@ type Fix = { lat: number; lng: number; at: number };
 
 const FRESH_MS = 10 * 60 * 1000;
 const MODE_LABEL: Record<string, string> = { walk: "Walking", drive: "Driving", bicycle: "Cycling", transit: "Transit" };
+
+
+const fmtDur = (m: number) => (m < 60 ? `${m} MIN` : `${Math.floor(m / 60)} H${m % 60 ? ` ${m % 60} MIN` : ""}`);
+const hhmm = (iso: string) => iso.slice(11, 16);
 
 function minutesAgo(at: number, now: number) {
   const m = Math.max(0, Math.round((now - at) / 60000));
@@ -45,15 +51,20 @@ function RouteMap({ geometry }: { geometry: { lat: number; lng: number }[] }) {
   );
 }
 
-export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }: { tripId: string; ordered: string[]; initialCategory?: string; anchors: AnchorStatus; wantsMe?: boolean }) {
+export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, defaultAnchor }: { tripId: string; ordered: string[]; initialCategory?: string; anchors: AnchorStatus; wantsMe?: boolean; defaultAnchor?: Anchor | null }) {
   const [cat, setCat] = useState<string>(initialCategory && ordered.includes(initialCategory) ? initialCategory : ordered[0]);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(wantsMe ? null : (defaultAnchor ?? null));
   const [fix, setFix] = useState<Fix | null>(null);
   const [loc, setLoc] = useState<"idle" | "asking" | "denied" | "failed">("idle");
   const [res, setRes] = useState<Ok | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [veg, setVeg] = useState(false);
   const [maxWalk, setMaxWalk] = useState<number | null>(null);
+  const [proposed, setProposed] = useState<string[]>([]);
+  const [nextUp, setNextUp] = useState<NextUp | { none: string } | null>(null);
+  const [free, setFree] = useState<(FreeTime & { anchorType: Anchor }) | null>(null);
+  const [freeErr, setFreeErr] = useState<string | null>(null);
+  const [minutes, setMinutes] = useState<number | null>(null);
   const [brand, setBrand] = useState("");
   const [saved, setSaved] = useState<string[]>([]);
   const [overlap, setOverlap] = useState<{ id: string; name: string; count: number } | null>(null);
@@ -128,6 +139,18 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cat, veg, anchor, fix?.at]);
 
+  useEffect(() => {
+    if (!anchor) return;
+    let alive = true;
+    void nextUpAction(tripId, { anchor, me }).then((r) => {
+      if (alive) setNextUp(r.ok ? r.nextUp : { none: r.error });
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor, fix?.at]);
+
   const shown = res?.places.filter((p) => maxWalk == null || (p.walkMinutes != null && p.walkMinutes <= maxWalk)) ?? [];
   const anchorChips: { id: Anchor; icon: string; label: string; ok: boolean; why?: string }[] = [
     { id: "me", icon: "📍", label: "ME", ok: true },
@@ -170,6 +193,112 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }
       </div>
     );
   }
+
+  const renderCard = (p: AroundPlace, catKey: string, whyText: string | null | undefined, extra?: React.ReactNode) => {
+    const on = saved.includes(p.providerPlaceId);
+    const open = routeFor === p.providerPlaceId;
+    const cc = AROUND_CATEGORIES[catKey] ?? AROUND_CATEGORIES[cat];
+    return (
+          <li key={p.providerPlaceId} className="rounded-xl border border-border p-3" data-around-place={p.name}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {cc.icon} {cc.label}
+              </p>
+              <p className="mt-0.5 text-sm font-bold uppercase tracking-wide">{p.name}</p>
+              <p className="mt-1 text-xs">
+                {p.walkMinutes != null ? <span className="font-semibold">{p.walkMinutes} min walk</span> : p.distanceMeters != null ? `${p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) + " km" : Math.round(p.distanceMeters) + " m"} away` : null}
+                {p.address ? <span className="text-muted-foreground">{p.walkMinutes != null || p.distanceMeters != null ? " · " : ""}{p.address}</span> : null}
+              </p>
+              <p className="text-xs text-muted-foreground" data-hours>
+                {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
+              </p>
+              {whyText && (
+                <p className="mt-1.5 text-xs" data-why>
+                  <span className="font-semibold">Why Clockwise picked it:</span> {whyText}
+                </p>
+              )}
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  data-route
+                  onClick={() => {
+                    if (open) return setRouteFor(null);
+                    setRouteFor(p.providerPlaceId);
+                    setRoute(null);
+                    setRouteErr(null);
+                    start(async () => {
+                      const r = await routeToPlaceAction(tripId, { name: p.name, lat: p.lat, lng: p.lng }, { anchor, me });
+                      if (r.ok) setRoute(r);
+                      else setRouteErr(r.error);
+                    });
+                  }}
+                  className="cursor-pointer text-xs font-semibold text-accent"
+                >
+                  {open ? "HIDE ROUTE" : "ROUTE"}
+                </button>
+                <button
+                  type="button"
+                  data-save
+                  onClick={() =>
+                    start(async () => {
+                      const r = await toggleSavePlaceAction(tripId, p, cat);
+                      if (r.ok) {
+                        setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
+                        setOverlap(r.saved && r.overlap ? { id: p.providerPlaceId, name: p.name, count: r.overlap } : null);
+                      }
+                    })
+                  }
+                  className={`flex cursor-pointer items-center gap-1 text-xs font-semibold ${on ? "text-accent-strong" : "text-muted-foreground"}`}
+                >
+                  <Heart className="size-3.5" fill={on ? "currentColor" : "none"} />
+                  {on ? "SAVED" : "SAVE"}
+                </button>
+                {on && (
+                  <button
+                    type="button"
+                    data-propose
+                    disabled={proposed.includes(p.providerPlaceId)}
+                    onClick={() =>
+                      start(async () => {
+                        const r = await proposePlaceAction(tripId, p, catKey);
+                        if (r.ok) setProposed((x) => [...x, p.providerPlaceId]);
+                        else setErr(r.error ?? "Couldn't propose it.");
+                      })
+                    }
+                    className="cursor-pointer text-xs font-semibold text-accent-strong disabled:opacity-60"
+                  >
+                    {proposed.includes(p.providerPlaceId) ? "PROPOSED" : "PROPOSE"}
+                  </button>
+                )}
+                <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-muted-foreground underline">
+                  Open in Maps
+                </a>
+              </div>
+              {extra}
+              {open && (
+                <div className="mt-3 space-y-2 rounded-lg border border-border p-3" data-route-panel>
+                  {routeErr && <p className="text-xs text-danger">{routeErr}</p>}
+                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Asking Geoapify for the route…</p>}
+                  {route && (
+                    <>
+                      <p className="text-xs">
+                        <span className="font-semibold">{route.fromLabel}</span> → <span className="font-semibold">{route.toLabel}</span>
+                      </p>
+                      {route.geometry && route.geometry.length > 1 && <RouteMap geometry={route.geometry} />}
+                      <ul className="space-y-0.5 text-xs">
+                        {route.legs.map((l) => (
+                        <li key={l.mode} data-route-leg={l.mode}>
+                            <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-muted-foreground">Geoapify routing, {new Date(route.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Only modes the provider returned are shown.</p>
+                    </>
+                  )}
+                </div>
+              )}
+            </li>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -226,6 +355,110 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }
         )}
       </div>
 
+      {/* RIGHT NOW: the traveller's clock + where they are + what's next. Deterministic; no model involved. */}
+      <section className="space-y-2 rounded-xl border border-border p-3" data-right-now>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Right now</p>
+        {nextUp && "commitment" in nextUp && (
+          <div data-next-up>
+            <p className="font-display text-xl leading-tight">
+              ◷ {nextUp.commitment.name.toUpperCase()} {nextUp.minutesUntil > 0 ? `IN ${fmtDur(nextUp.minutesUntil)}` : "IS NOW"}
+            </p>
+            {nextUp.walkMinutes != null ? (
+              <p className="text-sm">
+                About a {nextUp.walkMinutes}-minute walk from {nextUp.fromLabel}. {nextUp.leaveByLocal && nextUp.minutesUntil > nextUp.walkMinutes ? `Leave around ${hhmm(nextUp.leaveByLocal)}?` : nextUp.minutesUntil <= nextUp.walkMinutes ? "You'd need to leave now." : ""}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">I couldn&apos;t place &ldquo;{nextUp.commitment.location}&rdquo; on the map, so there&apos;s no walk time to show.</p>
+            )}
+            {nextUp.toPoint && nextUp.walkMinutes != null && (
+              <button
+                type="button"
+                className="mt-1 cursor-pointer text-xs font-semibold text-accent"
+                onClick={() => {
+                  const tp = nextUp.toPoint!;
+                  const id = "next-up";
+                  setRouteFor(id);
+                  setRoute(null);
+                  setRouteErr(null);
+                  start(async () => {
+                    const r = await routeToPlaceAction(tripId, { name: nextUp.commitment.location, lat: tp.lat, lng: tp.lng }, { anchor, me });
+                    if (r.ok) setRoute(r);
+                    else setRouteErr(r.error);
+                  });
+                }}
+              >
+                ROUTE
+              </button>
+            )}
+            {routeFor === "next-up" && (
+              <div className="mt-2 space-y-1 rounded-lg border border-border p-2 text-xs" data-route-panel>
+                {routeErr && <p className="text-danger">{routeErr}</p>}
+                {!route && !routeErr && <p className="text-muted-foreground">Asking Geoapify for the route…</p>}
+                {route && route.legs.map((l) => (
+                  <p key={l.mode} data-route-leg={l.mode}>
+                    <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
+                  </p>
+                ))}
+              </div>
+            )}
+            {nextUp.rain && (
+              <p className="mt-1 text-xs" data-rain>
+                🌧 Rain is likely around {hhmm(nextUp.rain.atLocal)} ({nextUp.rain.probability}% chance, Open-Meteo).
+              </p>
+            )}
+          </div>
+        )}
+        {nextUp && "none" in nextUp && <p className="text-xs text-muted-foreground">{nextUp.none}</p>}
+        {!nextUp && <p className="text-xs text-muted-foreground">Checking your clock…</p>}
+        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+          <button
+            type="button"
+            data-what-can-we-do
+            disabled={busy}
+            onClick={() =>
+              start(async () => {
+                setFreeErr(null);
+                const r = await freeTimeAction(tripId, { anchor, me, minutes: minutes ?? undefined });
+                if ("ok" in r && r.ok === false) {
+                  setFree(null);
+                  setFreeErr(r.error);
+                } else setFree(r as FreeTime & { anchorType: Anchor });
+              })
+            }
+            className="cursor-pointer rounded-full bg-accent px-3.5 py-1.5 font-semibold text-accent-foreground"
+          >
+            WHAT CAN I DO NOW?
+          </button>
+          {[30, 60, 90, 120].map((m) => (
+            <button key={m} type="button" onClick={() => setMinutes(minutes === m ? null : m)} className={`cursor-pointer rounded-full border px-3 py-1 font-semibold ${minutes === m ? "border-accent bg-accent-tint" : "border-border"}`}>
+              {m} MIN
+            </button>
+          ))}
+        </div>
+        {freeErr && <p className="text-xs text-danger" data-free-error>{freeErr}</p>}
+        {free && free.anchorType === anchor && (
+          <div className="space-y-2 pt-1" data-free-time>
+            <p className="font-display text-lg leading-tight">YOU&apos;VE GOT {fmtDur(free.windowMinutes)}.</p>
+            {free.next && free.windowSource === "next-commitment" && <p className="text-xs text-muted-foreground">Until {free.next.name} at {hhmm(free.next.targetLocal)}, {free.next.pointLabel ?? "location not on the map"}.</p>}
+            {free.rainyMode && free.rain && <p className="rounded-lg bg-pop-yellow-tint px-2 py-1 text-xs" data-rainy>RAINY WINDOW. Rain is likely around {hhmm(free.rain.atLocal)} ({free.rain.probability}%). Indoor-type places only.</p>}
+            {free.options.length === 0 && <p className="text-sm text-muted-foreground">Nothing I checked fits that window (I routed {free.considered} real places). Try a longer window or a different anchor.</p>}
+            <ul className="space-y-2">
+              {free.options.map((o) =>
+                renderCard(
+                  o.place,
+                  o.category,
+                  o.why,
+                  <p className="mt-1 text-xs" data-fits>
+                    <span className="font-semibold text-accent-strong">Fits ✓</span> · {o.walkToMin} min away · ~{o.stayMin} min there (assumed) · {o.walkOnMin} min {free.windowSource === "next-commitment" && free.next ? `to ${free.next.name} afterwards` : "back afterwards"} · {o.spareMin} min spare
+                  </p>
+                )
+              )}
+            </ul>
+            <p className="text-[11px] text-muted-foreground">{free.assumptions} Places and walking times: Geoapify. Weather and local time: Open-Meteo.</p>
+          </div>
+        )}
+      </section>
+
       <div className="flex gap-2 overflow-x-auto pb-1">
         {ordered.map((c) => (
           <button key={c} type="button" onClick={() => { setCat(c); setMaxWalk(null); }} data-around-cat={c} className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-sm ${cat === c ? "border-accent bg-pop-pink-tint text-accent-strong" : "border-border bg-page"}`}>
@@ -236,7 +469,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        {[5, 10].map((m) => (
+        {[5, 10, 15].map((m) => (
           <button key={m} type="button" onClick={() => setMaxWalk(maxWalk === m ? null : m)} className={`cursor-pointer rounded-full border px-3 py-1 font-semibold ${maxWalk === m ? "border-accent bg-accent-tint" : "border-border"}`}>
             {m} MIN WALK
           </button>
@@ -280,93 +513,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }
       )}
 
       <ul className="space-y-2">
-        {shown.map((p) => {
-          const on = saved.includes(p.providerPlaceId);
-          const open = routeFor === p.providerPlaceId;
-          const cc = AROUND_CATEGORIES[res?.category ?? cat] ?? AROUND_CATEGORIES[cat];
-          return (
-            <li key={p.providerPlaceId} className="rounded-xl border border-border p-3" data-around-place={p.name}>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                {cc.icon} {cc.label}
-              </p>
-              <p className="mt-0.5 text-sm font-bold uppercase tracking-wide">{p.name}</p>
-              <p className="mt-1 text-xs">
-                {p.walkMinutes != null ? <span className="font-semibold">{p.walkMinutes} min walk</span> : p.distanceMeters != null ? `${p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) + " km" : Math.round(p.distanceMeters) + " m"} away` : null}
-                {p.address ? <span className="text-muted-foreground">{p.walkMinutes != null || p.distanceMeters != null ? " · " : ""}{p.address}</span> : null}
-              </p>
-              <p className="text-xs text-muted-foreground" data-hours>
-                {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
-              </p>
-              {res?.why[p.providerPlaceId] && (
-                <p className="mt-1.5 text-xs" data-why>
-                  <span className="font-semibold">Why Clockwise picked it:</span> {res.why[p.providerPlaceId]}
-                </p>
-              )}
-              <div className="mt-2 flex items-center gap-3">
-                <button
-                  type="button"
-                  data-route
-                  onClick={() => {
-                    if (open) return setRouteFor(null);
-                    setRouteFor(p.providerPlaceId);
-                    setRoute(null);
-                    setRouteErr(null);
-                    start(async () => {
-                      const r = await routeToPlaceAction(tripId, { name: p.name, lat: p.lat, lng: p.lng }, { anchor, me });
-                      if (r.ok) setRoute(r);
-                      else setRouteErr(r.error);
-                    });
-                  }}
-                  className="cursor-pointer text-xs font-semibold text-accent"
-                >
-                  {open ? "HIDE ROUTE" : "ROUTE"}
-                </button>
-                <button
-                  type="button"
-                  data-save
-                  onClick={() =>
-                    start(async () => {
-                      const r = await toggleSavePlaceAction(tripId, p, cat);
-                      if (r.ok) {
-                        setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
-                        setOverlap(r.saved && r.overlap ? { id: p.providerPlaceId, name: p.name, count: r.overlap } : null);
-                      }
-                    })
-                  }
-                  className={`flex cursor-pointer items-center gap-1 text-xs font-semibold ${on ? "text-accent-strong" : "text-muted-foreground"}`}
-                >
-                  <Heart className="size-3.5" fill={on ? "currentColor" : "none"} />
-                  {on ? "SAVED" : "SAVE"}
-                </button>
-                <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-muted-foreground underline">
-                  Open in Maps
-                </a>
-              </div>
-              {open && (
-                <div className="mt-3 space-y-2 rounded-lg border border-border p-3" data-route-panel>
-                  {routeErr && <p className="text-xs text-danger">{routeErr}</p>}
-                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Asking Geoapify for the route…</p>}
-                  {route && (
-                    <>
-                      <p className="text-xs">
-                        <span className="font-semibold">{route.fromLabel}</span> → <span className="font-semibold">{route.toLabel}</span>
-                      </p>
-                      {route.geometry && route.geometry.length > 1 && <RouteMap geometry={route.geometry} />}
-                      <ul className="space-y-0.5 text-xs">
-                        {route.legs.map((l) => (
-                          <li key={l.mode} data-route-leg={l.mode}>
-                            <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="text-[11px] text-muted-foreground">Geoapify routing, {new Date(route.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Only modes the provider returned are shown.</p>
-                    </>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
+        {shown.map((p) => renderCard(p, res?.category ?? cat, res?.why[p.providerPlaceId]))}
         {res && shown.length === 0 && !busy && <li className="text-sm text-muted-foreground">Nothing found{maxWalk ? ` within a ${maxWalk}-minute walk` : " here"} in the provider&apos;s data.</li>}
       </ul>
       {res && (

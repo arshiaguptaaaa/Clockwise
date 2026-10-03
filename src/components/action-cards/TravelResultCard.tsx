@@ -79,8 +79,9 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
             <div key={i} className="rounded-lg border border-border px-2.5 py-2 text-xs">
               <p className="font-medium text-foreground">{p.name}</p>
               <p className="mt-0.5 text-muted-foreground">
-                {formatDistance(p.distanceMeters) && `${formatDistance(p.distanceMeters)} away`}
-                {formatDistance(p.distanceMeters) && p.formattedAddress && " · "}
+                {(p as { walkMinutes?: number | null }).walkMinutes != null && <span className="font-semibold text-foreground">{(p as { walkMinutes?: number | null }).walkMinutes} min walk{(p.formattedAddress || formatDistance(p.distanceMeters)) && " · "}</span>}
+                {(p as { walkMinutes?: number | null }).walkMinutes == null && formatDistance(p.distanceMeters) && `${formatDistance(p.distanceMeters)} away`}
+                {(p as { walkMinutes?: number | null }).walkMinutes == null && formatDistance(p.distanceMeters) && p.formattedAddress && " · "}
                 {p.formattedAddress}
               </p>
             </div>
