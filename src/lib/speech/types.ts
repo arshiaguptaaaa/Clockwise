@@ -43,3 +43,22 @@ export interface SpeechToTextProvider {
   isConfigured(): boolean;
   transcribe(input: TranscribeInput): Promise<TranscribeResult>;
 }
+
+// Languages Gnani Vachana supports for file STT. en-IN is the default; the
+// composer can expose a picker later without touching the server.
+export const SPEECH_LANGUAGES = [
+  { code: "en-IN", label: "English" },
+  { code: "hi-IN", label: "Hindi" },
+  { code: "pa-IN", label: "Punjabi" },
+  { code: "bn-IN", label: "Bengali" },
+  { code: "gu-IN", label: "Gujarati" },
+  { code: "kn-IN", label: "Kannada" },
+  { code: "ml-IN", label: "Malayalam" },
+  { code: "mr-IN", label: "Marathi" },
+  { code: "ta-IN", label: "Tamil" },
+  { code: "te-IN", label: "Telugu" },
+] as const;
+export const DEFAULT_SPEECH_LANGUAGE = "en-IN";
+export function resolveSpeechLanguage(code: string | null | undefined): string {
+  return SPEECH_LANGUAGES.some((l) => l.code === code) ? (code as string) : DEFAULT_SPEECH_LANGUAGE;
+}

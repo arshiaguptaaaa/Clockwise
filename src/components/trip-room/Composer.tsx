@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { Paperclip, ArrowUp, Mic, Square, Loader2, X } from "lucide-react";
 import { uploadAttachment, deleteAttachment } from "@/app/attachment-actions";
 import { recordingToWav } from "@/lib/audio/to-wav";
+import { DEFAULT_SPEECH_LANGUAGE } from "@/lib/speech/types";
 
 function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
   const { pending } = useFormStatus();
@@ -73,6 +74,7 @@ export function Composer({
   const [text, setText] = useState("");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -80,6 +82,8 @@ export function Composer({
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelledRef = useRef(false);
+  // The last upload, kept so TRY AGAIN can resend it without re-recording.
+  const lastUploadRef = useRef<{ blob: Blob; durationMs: number } | null>(null);
 
   function releaseMic() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -134,9 +138,11 @@ export function Composer({
     recorder.start();
     setVoiceState("recording");
     setElapsed(0);
+    elapsedRef.current = 0;
     timerRef.current = setInterval(() => {
       setElapsed((s) => {
         if (s + 1 >= MAX_RECORDING_SECONDS) stopRecording();
+        elapsedRef.current = s + 1;
         return s + 1;
       });
     }, 1000);
@@ -176,25 +182,42 @@ export function Composer({
       upload = recorded;
     }
 
+    lastUploadRef.current = { blob: upload, durationMs: Math.max(0, Math.round(elapsedRef.current * 1000)) };
+    await sendForTranscription();
+  }
+
+  async function retryTranscription() {
+    if (!lastUploadRef.current) return;
+    setVoiceError(null);
+    setVoiceState("transcribing");
+    await sendForTranscription();
+  }
+
+  async function sendForTranscription() {
+    const last = lastUploadRef.current;
+    if (!last) return;
+    const upload = last.blob;
     const body = new FormData();
     body.set("audio", upload, upload.type === "audio/wav" ? "voice.wav" : "voice");
-    body.set("language", "en-IN");
+    body.set("language", DEFAULT_SPEECH_LANGUAGE);
+    body.set("tripId", tripId);
+    body.set("durationMs", String(last.durationMs));
 
     try {
       const res = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
       const data: { transcript?: string; error?: string } = await res.json().catch(() => ({}));
       if (!res.ok || !data.transcript) {
         setVoiceState("error");
-        setVoiceError(data.error ?? "Transcription failed — try again.");
+        setVoiceError(data.error ?? "Couldn't transcribe that. Try again?");
         return;
       }
       // Into the normal composer, editable; nothing is sent until they press Send.
       setText((prev) => (prev.trim() ? `${prev.trim()} ${data.transcript}` : data.transcript!));
       setVoiceState("idle");
       requestAnimationFrame(() => inputRef.current?.focus());
-    } catch (err) {
+    } catch {
       setVoiceState("error");
-      setVoiceError(err instanceof Error && err.name === "TimeoutError" ? "Transcription took too long — try again." : "Couldn't reach the transcription service — check your connection.");
+      setVoiceError("Couldn't transcribe that. Try again?");
     }
   }
 
@@ -247,7 +270,18 @@ export function Composer({
       )}
 
       {voiceError && voiceState === "error" && (
-        <p className="px-4 pt-3 text-xs text-danger">{voiceError}</p>
+        <div className="flex items-center gap-3 px-4 pt-3 text-xs text-danger" role="alert">
+          <span>{voiceError}</span>
+          {lastUploadRef.current && (
+            <button
+              type="button"
+              onClick={retryTranscription}
+              className="cursor-pointer rounded-full border border-danger px-3 py-1 font-semibold uppercase tracking-wider"
+            >
+              Try again
+            </button>
+          )}
+        </div>
       )}
 
       {attachError && (

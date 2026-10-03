@@ -143,6 +143,17 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         understanding: `Call result interpreted as ${str(p.outcome)}${p.estimatedDelayMinutes != null ? ` (${str(p.estimatedDelayMinutes)} min)` : ""} (${str(p.mode)} mode). Transcript is not shown here.`,
         state: "Fed into the readiness engine for this traveller.",
       };
+    case "VOICE_CAPTURED":
+      return { understanding: `Voice captured${p.audioMs ? ` (${(Number(p.audioMs) / 1000).toFixed(1)}s)` : ""}, ${str(p.language)}. Recording kept only long enough to transcribe.`, state: null };
+    case "GNANI_STT_STARTED":
+      return { understanding: `Audio sent from Clockwise's server to ${str(p.provider)} for transcription (${str(p.language)}).`, state: null };
+    case "GNANI_STT_COMPLETED":
+      return {
+        understanding: p.ok
+          ? `${str(p.provider)} returned a transcript (${str(p.transcriptChars)} characters) in ${str(p.latencyMs)} ms, request ${str(p.requestId) || "n/a"}. The text went to the composer for you to edit — nothing was sent automatically.`
+          : `${str(p.provider)} could not transcribe (${str(p.reason)}${p.httpStatus ? `, HTTP ${str(p.httpStatus)}` : ""}) after ${str(p.latencyMs)} ms. No other provider was substituted.`,
+        state: null,
+      };
     case "EXPENSE_PROPOSED":
       return { understanding: `Money statement understood from chat: ${str(p.title)} — ${money(p.amountMinor, p.currency)}, paid by ${str(p.paidBy)}.`, state: "Held as a proposal. Nothing is on the ledger until the speaker confirms." };
     case "EXPENSE_ADDED": {

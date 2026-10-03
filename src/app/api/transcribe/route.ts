@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { transcribeSpeech } from "@/lib/speech";
 import { getCurrentUserId } from "@/lib/session";
+import { resolveSpeechLanguage } from "@/lib/speech/types";
+import { recordVoiceTrace } from "@/lib/speech/trace";
 
 // Voice note -> raw transcript. Signed-in travellers only (every call can
 // spend Gnani credits). The provider that actually produced the text is
@@ -17,11 +19,33 @@ export async function POST(request: NextRequest) {
   if (!(audio instanceof Blob) || audio.size === 0) {
     return NextResponse.json({ error: "No audio was received." }, { status: 400 });
   }
-  const language = String(formData.get("language") ?? "") || process.env.SPEECH_LANGUAGE || "en-IN";
+  const userId = (await getCurrentUserId())!;
+  const language = resolveSpeechLanguage(String(formData.get("language") ?? "") || process.env.SPEECH_LANGUAGE);
+  const tripId = String(formData.get("tripId") ?? "");
+  const clientDurationMs = Number(formData.get("durationMs"));
+  const audioMs = Number.isFinite(clientDurationMs) && clientDurationMs > 0 ? Math.round(clientDurationMs) : null;
   const strict = request.nextUrl.searchParams.get("strict") === "gnani";
   const debug = request.nextUrl.searchParams.get("debug") === "1";
 
+  const trace = tripId ? { tripId, userId } : null;
+  if (trace) await recordVoiceTrace(trace, "VOICE_CAPTURED", { provider: "GNANI", language, audioBytes: audio.size, audioMs });
+  if (trace) await recordVoiceTrace(trace, "GNANI_STT_STARTED", { provider: "GNANI", language });
+  const startedAt = Date.now();
   const result = await transcribeSpeech({ audio, mimeType: audio.type || "audio/webm", languageCode: language }, { strictGnani: strict });
+  if (trace) {
+    await recordVoiceTrace(trace, "GNANI_STT_COMPLETED", {
+      provider: result.provider.toUpperCase(),
+      ok: result.ok,
+      reason: result.ok ? null : result.reason,
+      httpStatus: result.diagnostics?.httpStatus ?? null,
+      requestId: result.diagnostics?.requestId ?? null,
+      language,
+      audioMs,
+      latencyMs: Date.now() - startedAt,
+      // Length only — the transcript itself is never written to the trace.
+      transcriptChars: result.ok ? result.transcript.length : 0,
+    });
+  }
   const diagnostics = debug ? { diagnostics: result.diagnostics ?? null } : {};
 
   if (result.ok) {
@@ -36,10 +60,10 @@ export async function POST(request: NextRequest) {
   const message =
     result.reason === "NOT_CONFIGURED"
       ? strict
-        ? "GNANI_API_KEY is not visible to this deployment (env vars only reach deployments built after they were added)."
+        ? "GNANI_SPEECH_API_KEY is not visible to this deployment (env vars only reach deployments built after they were added)."
         : "Voice transcription isn't configured yet."
       : result.reason === "NO_SPEECH"
-        ? "Couldn't make out any speech in that — try again."
-        : "Transcription failed — try again.";
-  return NextResponse.json({ error: message, provider: result.provider, reason: result.reason, ...diagnostics }, { status });
+        ? "Couldn't transcribe that. Try again?"
+        : "Couldn't transcribe that. Try again?";
+  return NextResponse.json({ error: message, provider: result.provider, reason: result.reason, providerStatus: result.diagnostics?.httpStatus ?? null, ...diagnostics }, { status });
 }

@@ -3,7 +3,7 @@ import { geminiSpeechProvider } from "./gemini-stt-provider";
 import type { SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
 
 // SPEECH_PROVIDER = "gnani" | "gemini" picks the primary; unset means Gnani
-// when GNANI_API_KEY exists, otherwise Gemini.
+// when a Gnani key exists, otherwise Gemini.
 function primary(): SpeechToTextProvider {
   const choice = process.env.SPEECH_PROVIDER;
   if (choice === "gemini") return geminiSpeechProvider;
@@ -20,6 +20,9 @@ export async function transcribeSpeech(
 ): Promise<TranscribeResult & { fellBackFrom?: string }> {
   // Proof mode: Gnani or nothing. Never falls back, never uses Gemini.
   if (opts.strictGnani) return gnaniSpeechProvider.transcribe(input);
+  // With Gnani configured there is no silent substitute: a Gnani failure is
+  // reported as a failure, never answered by another provider.
+  if (process.env.SPEECH_PROVIDER !== "gemini" && gnaniSpeechProvider.isConfigured()) return gnaniSpeechProvider.transcribe(input);
   const first = primary();
   const result = await first.transcribe(input);
   if (result.ok || first.name === "gemini" || result.reason === "NO_SPEECH") return result;

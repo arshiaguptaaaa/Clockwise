@@ -7,7 +7,7 @@
 //   200     { success, request_id, timestamp, transcript }
 // Gnani sits behind Cloudflare, which rejects bare default User-Agents, so a
 // conventional UA is sent. NOT verified against a live key in this
-// environment — no GNANI_API_KEY exists here — so any non-2xx or
+// environment — no Gnani key exists here — so any non-2xx or
 // unparseable reply is reported as PROVIDER_ERROR, never papered over.
 import type { SpeechDiagnostics, SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
 
@@ -22,17 +22,23 @@ const EXTENSION: Array<[RegExp, string]> = [
   [/m4a|mp4|aac/i, "m4a"],
 ];
 
+// Server-side only. GNANI_SPEECH_API_KEY is the documented name; GNANI_API_KEY is
+// what the Vercel project was first configured with and is still honoured.
+export function gnaniSpeechKey(): string | undefined {
+  return process.env.GNANI_SPEECH_API_KEY || process.env.GNANI_API_KEY || undefined;
+}
+
 class GnaniSpeechProvider implements SpeechToTextProvider {
   readonly name = "gnani" as const;
 
   isConfigured() {
-    return Boolean(process.env.GNANI_API_KEY);
+    return Boolean(gnaniSpeechKey());
   }
 
   async transcribe({ audio, mimeType, languageCode }: TranscribeInput): Promise<TranscribeResult> {
-    const apiKey = process.env.GNANI_API_KEY;
+    const apiKey = gnaniSpeechKey();
     if (!apiKey) {
-      return { ok: false, reason: "NOT_CONFIGURED", provider: this.name, message: "GNANI_API_KEY is not set." };
+      return { ok: false, reason: "NOT_CONFIGURED", provider: this.name, message: "GNANI_SPEECH_API_KEY is not set." };
     }
     // WebM (Chrome/Edge MediaRecorder default) is not a documented Gnani
     // input format; say so rather than send something it may reject.
