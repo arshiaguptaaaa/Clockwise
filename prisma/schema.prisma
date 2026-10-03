@@ -1163,3 +1163,85 @@ model SavedPlace {
   @@unique([tripId, userId, provider, providerPlaceId])
   @@index([tripId, userId])
 }
+
+// ---- Traveller intelligence (all PRIVATE to the traveller unless noted) ----
+// One row per (traveller, key, value) so preferences are queryable:
+//   food = VEGETARIAN, energy includes CAFES, origin = <resolved place in detailJson>.
+// `visibility`: PRIVATE (never leaves the traveller), DERIVED_GROUP_SAFE (only
+// neutral aggregates may be shown), GROUP.
+model TravellerPreference {
+  id         String   @id @default(cuid())
+  tripId     String
+  userId     String
+  key        String
+  value      String
+  detailJson String?
+  visibility String   @default("PRIVATE")
+  source     String   @default("VIBE_CHECK")
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tripId, userId, key, value])
+  @@index([tripId, key, value])
+}
+
+// Where a traveller is in the vibe check. No row = never offered.
+model VibeCheck {
+  id          String    @id @default(cuid())
+  tripId      String
+  userId      String
+  // DEFERRED (chose "later") | COMPLETED
+  status      String
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tripId, userId])
+}
+
+// A traveller's own journey to the destination. PENDING_CONFIRMATION rows come
+// from ticket extraction and change nothing until the traveller confirms;
+// CONFIRMED is the canonical journey the rest of the product reads. Times are
+// local wall-clock strings exactly as printed (YYYY-MM-DDTHH:mm), no TZ maths.
+// PNR, passenger name, seat and fare are never stored.
+model TravellerJourney {
+  id                 String    @id @default(cuid())
+  tripId             String
+  userId             String
+  // FLIGHT | TRAIN | BUS | DRIVE | OTHER
+  mode               String
+  // PENDING_CONFIRMATION | CONFIRMED | DISCARDED
+  status             String
+  carrier            String?
+  originName         String?
+  destinationName    String?
+  departLocal        String?
+  arriveLocal        String?
+  arrivalPlaceName   String?
+  arrivalLat         Float?
+  arrivalLng         Float?
+  // TICKET | MANUAL
+  source             String
+  attachmentId       String?
+  // Provider-measured arrival-point -> confirmed-stay route (rendezvous input).
+  routeToStayMeters  Int?
+  routeToStaySeconds Int?
+  routeProvider      String?
+  routeComputedAt    DateTime?
+  routeStayBookingId String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([tripId, userId, status])
+}
+
+// Manual ticks on the Ready? checklist. The checklist itself is derived from
+// state on every read; only the traveller's own "done" marks are stored.
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  tripId    String
+  userId    String
+  key       String
+  done      Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@unique([tripId, userId, key])
+}

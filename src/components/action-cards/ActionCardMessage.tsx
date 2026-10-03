@@ -10,6 +10,7 @@ import { ClockwiseActionCard, type CardPerson } from "./ClockwiseActionCard";
 import { ExpenseCard } from "./ExpenseCard";
 import { PaymentLinkCard } from "./PaymentLinkCard";
 import { StayBookedCard } from "./StayBookedCard";
+import { JourneyConfirmCard } from "./JourneyConfirmCard";
 import { StayList } from "@/components/stays/StayList";
 import { dismissActionCard } from "@/app/card-actions";
 
@@ -33,6 +34,10 @@ export function ActionCardMessage({
   organiserId?: string;
 }) {
   const data = decodeCard(cardData);
+
+  if (data.journeyId) {
+    return <JourneyConfirmCard tripId={tripId} journeyId={data.journeyId} status={cardStatus} title={data.title} context={data.context} />;
+  }
 
   if (data.stayBooking && data.bookingId) {
     return <StayBookedCard bookingId={data.bookingId} status={cardStatus} title={data.title} context={data.context} canMark={Boolean(currentUserId && currentUserId === organiserId)} />;

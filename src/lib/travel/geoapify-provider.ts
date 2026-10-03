@@ -25,6 +25,9 @@ export const NEARBY_CATEGORIES: Record<string, string> = {
   attraction: "tourism.attraction",
   museum: "entertainment.museum",
   park: "leisure.park",
+  convenience: "commercial.convenience",
+  shopping: "commercial.shopping_mall,commercial.clothing",
+  nightlife: "adult.nightclub,catering.bar,catering.pub",
 };
 
 export function isGeoapifyConfigured(): boolean {

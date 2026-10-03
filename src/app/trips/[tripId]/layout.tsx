@@ -3,6 +3,9 @@ import { getCurrentMember } from "@/lib/trip";
 import { formatDateRange } from "@/lib/format";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
+import { VibeCheck } from "@/components/vibe/VibeCheck";
+import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
+import { prisma } from "@/lib/prisma";
 
 export default async function TripShellLayout({
   children,
@@ -22,6 +25,16 @@ export default async function TripShellLayout({
     trip.coreStartDate && trip.coreEndDate
       ? `${formatDateRange(trip.coreStartDate, trip.coreEndDate)} ${trip.coreEndDate.getUTCFullYear()}`
       : "dates not set yet";
+  // Private vibe check: offered once, right after joining (and again on request).
+  const vibeStatus = await getVibeStatus(tripId, member.userId);
+  let vibe: React.ReactNode = null;
+  if (vibeStatus === "NONE") {
+    const [prefs, journey] = await Promise.all([getPrefs(tripId, member.userId), prisma.travellerJourney.findFirst({ where: { tripId, userId: member.userId, status: "CONFIRMED" } })]);
+    const asks = questionsToAsk(prefs, { origin: journey?.originName, mode: journey?.mode });
+    const known = [journey?.originName ? `you're coming from ${journey.originName}` : null, journey?.mode ? `you're travelling by ${journey.mode.toLowerCase()}` : null].filter(Boolean).join(" and ");
+    vibe = <VibeCheck tripId={tripId} firstName={member.user.name.split(" ")[0]} questions={asks} knownLine={known || null} />;
+  }
+
   const subtitle = `${trip.members.length} ${trip.members.length === 1 ? "traveller" : "travellers"} · ${dateRange}`;
 
   return (
@@ -37,6 +50,7 @@ export default async function TripShellLayout({
         {children}
       </div>
       <BottomNav tripId={tripId} />
+      {vibe}
     </div>
   );
 }

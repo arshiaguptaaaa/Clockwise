@@ -19,7 +19,7 @@ const DEFAULT_MODEL = "gemini-flash-lite-latest";
 
 type GeminiToolCallMeta = { thoughtSignature?: string };
 
-function toGeminiContents(messages: AgentMessage[]): Content[] {
+export function toGeminiContents(messages: AgentMessage[]): Content[] {
   return messages.map((m): Content => {
     if (m.role === "user") {
       return { role: "user", parts: [{ text: m.content }] };

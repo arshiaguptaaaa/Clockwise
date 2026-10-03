@@ -40,6 +40,8 @@ export type ActionCardData = {
   payLink?: boolean;
   // An approved stay waiting for the organiser to mark it booked.
   stayBooking?: boolean;
+  // A pending journey read from a ticket, waiting for the traveller's confirmation.
+  journeyId?: string;
 
   // Real live-search results only (src/lib/travel/*) — every entry here
   // came from an actual provider call, never invented. `provider` +

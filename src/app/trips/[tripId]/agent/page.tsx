@@ -10,6 +10,8 @@ import { liveLocationOffer } from "@/lib/readiness-engine";
 import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 import { getTripStay } from "@/lib/stays";
+import { VibeCheck } from "@/components/vibe/VibeCheck";
+import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -28,10 +30,10 @@ export default async function MyClockwisePage({
   searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ uber?: string }>;
+  searchParams: Promise<{ uber?: string; vibe?: string }>;
 }) {
   const { tripId } = await params;
-  const { uber: uberStatus } = await searchParams;
+  const { uber: uberStatus, vibe: vibeParam } = await searchParams;
   const [trip, clockwiseUserId, currentUserId] = await Promise.all([
     getTripById(tripId),
     getClockwiseUserId(),
@@ -39,6 +41,14 @@ export default async function MyClockwisePage({
   ]);
 
   const stay = await getTripStay(tripId);
+  // "Later" on the vibe check leaves a way back: ?vibe=1 (linked from Ready?).
+  let vibeGate: React.ReactNode = null;
+  if (vibeParam && currentUserId && (await getVibeStatus(tripId, currentUserId)) === "DEFERRED") {
+    const prefs = await getPrefs(tripId, currentUserId);
+    const j = await prisma.travellerJourney.findFirst({ where: { tripId, userId: currentUserId, status: "CONFIRMED" } });
+    const me = trip.members.find((m) => m.userId === currentUserId)?.user.name ?? "there";
+    vibeGate = <VibeCheck tripId={tripId} firstName={me.split(" ")[0]} questions={questionsToAsk(prefs, { origin: j?.originName, mode: j?.mode })} />;
+  }
   const messages = await prisma.message.findMany({
     where: { tripId: trip.id, channel: "PRIVATE", recipientId: currentUserId },
     include: {
@@ -67,6 +77,7 @@ export default async function MyClockwisePage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {vibeGate}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div>
           <p className="font-display text-xl font-medium leading-tight text-foreground">My Clockwise</p>

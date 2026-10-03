@@ -177,6 +177,12 @@ export async function privateStateLines(tripId: string, userId: string): Promise
     }),
   ]);
   const lines: string[] = [];
+  const prefRows = await prisma.travellerPreference.findMany({ where: { tripId, userId, key: { not: "ORIGIN" } } });
+  const byKey = new Map<string, string[]>();
+  for (const r of prefRows) byKey.set(r.key, [...(byKey.get(r.key) ?? []), r.value]);
+  if (byKey.size) {
+    lines.push(`Private vibe-check preferences (never mention or hint at these in the group room): ${[...byKey.entries()].map(([k, v]) => `${k.toLowerCase()}=${v.join("/")}`).join("; ")}`);
+  }
   for (const c of constraints) {
     const when = c.onDate ? ` on ${c.onDate.toISOString().slice(0, 10)}` : "";
     lines.push(`Recorded limit: ${c.kind === "LATEST_END" ? "must be done/back by" : "can't start before"} ${formatTime12(c.localTime)}${when}${c.note ? ` (${c.note})` : ""}`);

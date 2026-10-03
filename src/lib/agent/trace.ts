@@ -177,6 +177,18 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
     }
     case "ROUTE_PLAUSIBILITY_FAILED":
       return { understanding: `ROUTE_PLAUSIBILITY_FAILED — ${str(p.from)} → ${str(p.to)} (provider measured ${(Number(p.distanceMeters) / 1000).toFixed(0)} km): ${str(p.reason)}.`, state: "Route withheld; the user was asked to confirm the places. No substitute number was produced." };
+    case "VIBE_CHECK_COMPLETED":
+      return { understanding: `Vibe check completed (${Array.isArray(p.answered) ? (p.answered as string[]).length : 0} questions answered). Answers are stored as private structured preferences — they are not shown here and never went to the group.`, state: "Feeds Around You ordering and Ready?; nothing posted to group chat." };
+    case "AROUND_YOU_REFRESHED":
+      return { understanding: `Around You — provider ${str(p.provider)}, ${p.brand ? `brand search "${str(p.brand)}" (found ${str(p.found)}, closest alternatives ${str(p.alternatives)})` : `category ${str(p.category)}${p.diet ? ` (provider ${str(p.diet)} search)` : ""}, ${str(p.resultCount)} result(s), walking times from provider routes for ${str(p.walkMinutesFromProvider)}`}; anchor ${str(p.anchorType)}: ${str(p.anchor)}; retrieved ${p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().slice(0, 19).replace("T", " ") + " UTC" : "n/a"}.`, state: "Places and minutes are provider data; the model was not involved." };
+    case "SAVED_PLACE_ADDED":
+      return { understanding: `A place was saved privately (${str(p.kind)}, ${str(p.provider)} id ${str(p.providerPlaceId)}).`, state: "Private. The Plan and group are unchanged." };
+    case "TRAVELLER_JOURNEY_CONFIRMED":
+      return { understanding: `${str(p.name)} confirmed their journey: ${str(p.mode)}${p.arriveLocal ? `, arriving ${str(p.arriveLocal).replace("T", " ")}` : ""}${p.arrivalPlace ? ` at ${str(p.arrivalPlace)}` : ""}${p.resolvedArrival ? "" : " (arrival point not resolved)"}. Ticket identifiers are not stored or shown.`, state: "Updated: My Clockwise journey, Plan arrivals, Ready?, rendezvous, notifications." };
+    case "RENDEZVOUS_COMPUTED":
+      return { understanding: `Rendezvous recomputed from ${str(p.journeys)} confirmed journey(s) against ${p.stay ? str(p.stay) : "no confirmed stay yet"}; ${str(p.routedNow)} new provider route(s) (${str(p.provider)}), ${str(p.bufferMinutes)}-minute arrival allowance.`, state: "Plan shows each traveller's clock and any clash with shared commitments." };
+    case "RENDEZVOUS_AT_RISK":
+      return { understanding: `${str(p.traveller)} can't be at the stay before ${str(p.hotelBy).replace("T", " ")}, but "${str(p.commitment)}" is at ${str(p.target).replace("T", " ")}.`, state: "Organiser notified once." };
     case "STAY_PROPOSED":
       return { understanding: `A stay was proposed: ${str(p.name)} (${str(p.provider)} place ${str(p.providerPlaceId)}). Provider facts only — no rate or availability exists.`, state: "Opened a group vote. The Plan is unchanged." };
     case "STAY_APPROVED":

@@ -26,6 +26,7 @@ import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
 import { hotelProvider } from "@/lib/travel/hotel-provider";
 import { checkRoutePlausibility } from "@/lib/location/plausibility";
+import { brandSearch } from "@/lib/travel/around";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
@@ -396,6 +397,10 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         near: {
           type: "string",
           description: "Area/landmark/'our hotel' to search near; omit to use the trip's current destination",
+        },
+        brand: {
+          type: "string",
+          description: "A specific store or chain the user named (e.g. '7-Eleven'). Searches the provider's convenience stores and supermarkets for that name; if none match it returns the closest real alternatives. Never claim a brand exists nearby unless this returns it.",
         },
         diet: {
           type: "string",
@@ -1437,6 +1442,32 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
 
   const located = await resolveSearchPoint((input.near as string | undefined)?.trim(), ctx);
   if ("error" in located) return { output: located.error };
+
+  const brandText = typeof input.brand === "string" ? input.brand.trim().slice(0, 60) : "";
+  if (brandText) {
+    const b = await brandSearch(ctx.trip.id, brandText, { kind: "destination", label: located.label, point: located.point });
+    if (!b.ok) return { output: b.error };
+    await postActionCard({
+      tripId: ctx.trip.id,
+      ...cardChannel(ctx),
+      type: "PLACES",
+      status: "CONFIRMED",
+      data: {
+        title: b.found.length ? `${brandText} near ${located.label}` : `Convenience stores near ${located.label}`,
+        context: b.note ?? "Matched by name in the provider's convenience-store and supermarket data. Being nearby doesn't mean a product is in stock.",
+        places: b.places.map((r) => ({ name: r.name, formattedAddress: r.address, distanceMeters: r.distanceMeters, latitude: r.lat, longitude: r.lng })),
+        provider: b.places[0]?.provider ?? "geoapify",
+        retrievedAt: b.retrievedAt,
+      },
+    });
+    await recordLookup(ctx, "PLACES_SEARCH_COMPLETED", { tool: "search_nearby", provider: "geoapify", retrievedAt: b.retrievedAt, category: "convenience+supermarket", brand: brandText, near: located.label, point: located.point, resultCount: b.places.length, matchedBrand: b.found.length > 0 });
+    return {
+      output: b.found.length
+        ? `Found ${b.found.length} place(s) named like "${brandText}" in the provider's data near ${located.label}. The card shows them; don't list them again.`
+        : `No place named "${brandText}" was found near ${located.label} in the provider's data. Say exactly: "I couldn't find a nearby ${brandText}, but here are the closest convenience stores." The card shows the real alternatives. Never imply the brand exists nearby.`,
+      posted: true,
+    };
+  }
 
   const diet = (["vegetarian", "vegan", "halal"] as const).find((d) => d === input.diet);
   let results;

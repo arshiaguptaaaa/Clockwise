@@ -12,6 +12,7 @@ import { getClockwiseUserId } from "./clockwise";
 import { formatMoney } from "./budget/money";
 import { createExpense } from "./budget/ledger";
 import { revalidatePath } from "next/cache";
+import { recomputeRendezvous } from "./rendezvous";
 
 export type StayRef = NonNullable<ProposalPayload["stay"]>;
 
@@ -250,7 +251,9 @@ export async function markStayBooked(
     body: `${booking.placeName} is confirmed${money ? ` (${formatMoney(money.amountMinor, money.currency)})` : ""}. It's now in the Plan.`,
     href: `/trips/${booking.tripId}/plan`,
   });
-  for (const path of ["plan", "room", "agent", "budget"]) revalidatePath(`/trips/${booking.tripId}/${path}`);
+  // The stay is the anchor every traveller's arrival is measured against.
+  await recomputeRendezvous(booking.tripId).catch((err: unknown) => console.error("[rendezvous]", err instanceof Error ? err.message : err));
+  for (const path of ["plan", "room", "agent", "agent/around", "agent/ready", "budget"]) revalidatePath(`/trips/${booking.tripId}/${path}`);
   return { ok: true };
 }
 

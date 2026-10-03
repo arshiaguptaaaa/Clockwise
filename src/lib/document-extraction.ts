@@ -16,14 +16,11 @@ import { GoogleGenAI } from "@google/genai";
 import { revalidatePath } from "next/cache";
 import { prisma } from "./prisma";
 import { getClockwiseUserId } from "./clockwise";
-import { recordPersonalConstraint, formatTime12 } from "./personal-state";
+import { createPendingJourney, postJourneyConfirmCard, type JourneyMode } from "./traveller/journey";
 
-// Stated assumption, shown to the user: how early they must be at the
-// departure point. Not read from the ticket.
-const LEAD_MINUTES: Record<string, number> = { FLIGHT: 180, TRAIN: 45 };
 
 type Facts = {
-  documentKind: "FLIGHT" | "TRAIN" | "HOTEL" | "OTHER";
+  documentKind: "FLIGHT" | "TRAIN" | "BUS" | "HOTEL" | "OTHER";
   carrier: string | null;
   origin: string | null;
   destination: string | null;
@@ -32,13 +29,13 @@ type Facts = {
 };
 
 const PROMPT = `Read this travel document and return JSON with EXACTLY these keys and nothing else:
-{"documentKind":"FLIGHT"|"TRAIN"|"HOTEL"|"OTHER","carrier":string|null,"origin":string|null,"destination":string|null,"departureLocal":"YYYY-MM-DDTHH:mm"|null,"arrivalLocal":"YYYY-MM-DDTHH:mm"|null}
+{"documentKind":"FLIGHT"|"TRAIN"|"BUS"|"HOTEL"|"OTHER","carrier":string|null,"origin":string|null,"destination":string|null,"departureLocal":"YYYY-MM-DDTHH:mm"|null,"arrivalLocal":"YYYY-MM-DDTHH:mm"|null}
 Use local times exactly as printed (do not convert time zones). Use null for anything not clearly stated. Do NOT output passenger names, booking references, PNRs, ticket numbers, seats, prices, or any other field.`;
 
 export function parseFacts(raw: string): Facts | null {
   try {
     const o = JSON.parse(raw) as Record<string, unknown>;
-    const kind = ["FLIGHT", "TRAIN", "HOTEL", "OTHER"].includes(String(o.documentKind)) ? (o.documentKind as Facts["documentKind"]) : "OTHER";
+    const kind = ["FLIGHT", "TRAIN", "BUS", "HOTEL", "OTHER"].includes(String(o.documentKind)) ? (o.documentKind as Facts["documentKind"]) : "OTHER";
     const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 80) : null);
     const dt = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? v : null);
     return { documentKind: kind, carrier: str(o.carrier), origin: str(o.origin), destination: str(o.destination), departureLocal: dt(o.departureLocal), arrivalLocal: dt(o.arrivalLocal) };
@@ -100,34 +97,22 @@ export async function extractFromAttachment(attachmentId: string) {
     return;
   }
 
-  const lead = LEAD_MINUTES[facts.documentKind];
-  const route = [facts.origin, facts.destination].filter(Boolean).join(" → ");
-  const what = `${facts.documentKind === "FLIGHT" ? "flight" : facts.documentKind === "TRAIN" ? "train" : "booking"}${facts.carrier ? ` (${facts.carrier})` : ""}${route ? ` ${route}` : ""}`;
-  const depTime = formatTime12(facts.departureLocal.slice(11));
-
-  if (!lead) {
-    await privateNote(att.tripId, userId, `I read your ${what}, departing ${facts.departureLocal.slice(0, 10)} at ${depTime}, and kept it private. I haven't set any availability limit from it.`);
+  // A readable journey becomes a PENDING journey and a private confirm card. NOTHING
+  // is saved as canonical, no availability limit is set, and the group is told
+  // nothing until the traveller confirms (see traveller/journey.ts confirmJourney).
+  if (facts.documentKind === "HOTEL") {
+    await privateNote(att.tripId, userId, `I read this as a stay booking and kept it private. I haven't changed anything.`);
     return;
   }
-
-  const latest = latestArrivalFor(facts.departureLocal, lead);
-  const result = await recordPersonalConstraint({
-    tripId: att.tripId,
-    subjectUserId: userId,
-    actorUserId: userId,
-    channel: "PRIVATE",
-    kind: "LATEST_END",
-    localTime: latest.hhmm,
-    onDate: new Date(`${latest.date}T00:00:00.000Z`),
-    note: `From your uploaded ${facts.documentKind.toLowerCase()} ticket (departs ${depTime}); assumed ${lead / 60}h${lead % 60 ? ` ${lead % 60}m` : ""} lead time.`,
-    sourceMessageId: null,
-    confidence: "MEDIUM",
-  });
-  await privateNote(
-    att.tripId,
-    userId,
-    result.ok
-      ? `I read your ${what}, departing ${facts.departureLocal.slice(0, 10)} at ${depTime}, and kept the file private. Assuming you need to leave about ${lead / 60}h before departure, I've noted you as unavailable after ${formatTime12(latest.hhmm)} on ${latest.date}. The group won't see the ticket or why — only a neutral "unavailable after" line if a plan clashes. Tell me if that's wrong and I'll change it.`
-      : `I read your ${what} and kept it private, but couldn't save an availability limit from it.`
-  );
+  const journey = await createPendingJourney(att.tripId, userId, {
+    mode: facts.documentKind as JourneyMode,
+    carrier: facts.carrier,
+    originName: facts.origin,
+    destinationName: facts.destination,
+    departLocal: facts.departureLocal,
+    arriveLocal: facts.arrivalLocal,
+  }, "TICKET", att.id);
+  await postJourneyConfirmCard(journey.id);
+  revalidatePath(`/trips/${att.tripId}/agent`);
+  revalidatePath(`/trips/${att.tripId}/agent/journey`);
 }
