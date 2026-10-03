@@ -67,6 +67,10 @@ export async function resolveLocationText(text: string, near?: LatLng): Promise<
   if (/\bairport\b/i.test(text)) {
     const airport = await resolveAirport(text, near);
     if (airport) return airport;
+    // No airport POI found: only accept a plain geocode that is itself an airport,
+    // never the city the name happens to start with.
+    const plain = await geocodeText(text, near);
+    return plain && /airport|airfield/i.test(`${plain.name} ${plain.displayName}`) ? plain : null;
   }
   return geocodeText(text, near);
 }
@@ -120,8 +124,13 @@ async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace 
     const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
     return 2 * 6371 * Math.asin(Math.sqrt(h));
   };
-  const local = near ? results.find((x) => km(near, { lat: x.lat, lng: x.lon }) < 300) : undefined;
   const byImportance = [...results].sort((a, b) => (b.rank?.importance ?? 0) - (a.rank?.importance ?? 0))[0];
+  const topImportance = byImportance?.rank?.importance ?? 0;
+  // The local candidate must also be a plausibly important match: a tiny village sharing
+  // the name that happens to sit near the trip's anchor city is not what a traveller meant.
+  const local = near
+    ? results.find((x) => km(near, { lat: x.lat, lng: x.lon }) < 300 && (topImportance === 0 || (x.rank?.importance ?? 0) >= 0.75 * topImportance))
+    : undefined;
   const first = local ?? byImportance ?? results[0];
   if (!first) return null;
 
@@ -263,7 +272,10 @@ export async function getRoute(from: LatLng, to: LatLng, mode: TravelMode): Prom
     apiKey: key,
   });
   const res = await fetch(`${ROUTING_URL}?${params}`);
-  if (!res.ok) throw new Error(`Geoapify routing failed (${res.status})`);
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).split(key).join("[redacted]").replace(/\s+/g, " ").slice(0, 200);
+    throw new Error(`Geoapify routing failed (${res.status})${body ? `: ${body}` : ""}`);
+  }
   const data: GeoapifyRouteResponse = await res.json();
   const feature = data.features?.[0];
   if (!feature) throw new Error("Geoapify returned no route for this pair of points");
@@ -330,4 +342,21 @@ export async function getPlaceDetails(placeId: string): Promise<Partial<Geoapify
   const p = data.features?.[0]?.properties as { name?: string; formatted?: string; website?: string; contact?: { phone?: string } } | undefined;
   if (!p) return null;
   return { name: p.name, formattedAddress: p.formatted ?? null, website: p.website ?? null, phone: p.contact?.phone ?? null, retrievedAt: nowIso() };
+}
+
+// A point that a router can start from: the closest mapped place within a short
+// walk. Used only after the router rejected a raw point (e.g. the centre of a lake).
+export async function nearestMappedPlace(point: LatLng, radiusMeters = 700): Promise<{ name: string; point: LatLng } | null> {
+  const params = new URLSearchParams({
+    categories: "catering,accommodation,tourism,commercial,leisure",
+    filter: `circle:${point.lng},${point.lat},${radiusMeters}`,
+    bias: `proximity:${point.lng},${point.lat}`,
+    limit: "5",
+    apiKey: requireApiKey(),
+  });
+  const res = await fetch(`${PLACES_URL}?${params}`);
+  if (!res.ok) return null;
+  const data: { features?: GeoapifyPlaceFeature[] } = await res.json();
+  const f = (data.features ?? []).find((x) => x.properties.name);
+  return f ? { name: f.properties.name!, point: { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] } } : null;
 }

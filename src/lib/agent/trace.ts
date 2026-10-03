@@ -154,6 +154,14 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
           : `${str(p.provider)} could not transcribe (${str(p.reason)}${p.httpStatus ? `, HTTP ${str(p.httpStatus)}` : ""}) after ${str(p.latencyMs)} ms. No other provider was substituted.`,
         state: null,
       };
+    case "PROVIDER_LOOKUP": {
+      const when = p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().replace("T", " ").slice(0, 19) + " UTC" : "n/a";
+      const detail =
+        p.tool === "get_route"
+          ? `${str(p.from)} → ${str(p.to)} by ${str(p.mode)}: ${(Number(p.distanceMeters) / 1000).toFixed(1)} km, ${Math.round(Number(p.durationSeconds) / 60)} min${Array.isArray(p.snapped) && p.snapped.length ? ` (${(p.snapped as string[]).join("; ")})` : ""}`
+          : `near ${str(p.near)}: ${str(p.resultCount)} result(s)${p.diet ? `, filtered by provider tag "${str(p.diet)}"` : ""}${p.rates ? `; rates ${str(p.rates)}` : ""}`;
+      return { understanding: `Provider lookup (${str(p.tool)}) via ${str(p.provider)}, retrieved ${when}. ${detail}.`, state: "Numbers and places come from the provider; the model only narrated them." };
+    }
     case "STAY_PROPOSED":
       return { understanding: `A stay was proposed: ${str(p.name)} (${str(p.provider)} place ${str(p.providerPlaceId)}). Provider facts only — no rate or availability exists.`, state: "Opened a group vote. The Plan is unchanged." };
     case "STAY_APPROVED":

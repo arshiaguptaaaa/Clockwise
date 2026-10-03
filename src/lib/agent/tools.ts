@@ -6,6 +6,7 @@ import {
   searchNearby as geoapifySearchNearby,
   searchPlaceByText,
   getRoute as geoapifyGetRoute,
+  nearestMappedPlace,
   isGeoapifyConfigured,
   NEARBY_CATEGORIES,
 } from "@/lib/travel/geoapify-provider";
@@ -1366,6 +1367,27 @@ async function resolveSearchPoint(
   return resolved;
 }
 
+// Provider-backed answers leave evidence in Agent Trace: which provider, when it
+// was fetched, what was asked, how many results (or the measured numbers).
+// Gemini only narrates these; it never supplies them.
+async function recordLookup(ctx: AgentContext, payload: Record<string, unknown>) {
+  await prisma.tripEvent
+    .create({
+      data: {
+        tripId: ctx.trip.id,
+        kind: "PROVIDER_LOOKUP",
+        scope: ctx.mode === "PRIVATE" ? "PERSONAL" : "GROUP",
+        actorUserId: ctx.actingUserId,
+        subjectUserId: ctx.mode === "PRIVATE" ? ctx.actingUserId : null,
+        sourceChannel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP",
+        confidence: "HIGH",
+        payload: JSON.stringify(payload),
+        propagation: JSON.stringify(["chat-card"]),
+      },
+    })
+    .catch(() => undefined);
+}
+
 async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!hotelProvider.isConfigured()) {
     return { output: "Live stay search isn't connected in this environment yet, so I can't list real hotels. Don't name any hotels from memory." };
@@ -1396,6 +1418,7 @@ async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContex
     },
   });
 
+  await recordLookup(ctx, { tool: "search_hotels", provider: hotelProvider.name, retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerPlaceId), rates: "not connected" });
   if (results.length === 0) {
     return { output: `No stays found near ${located.label}.`, posted: true };
   }
@@ -1432,6 +1455,9 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     status: "CONFIRMED",
     data: {
       title: `${diet ? `${diet[0].toUpperCase()}${diet.slice(1)} ` : ""}${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
+      context: diet
+        ? `Filtered on Geoapify's own "${diet}" tag. Individual menus aren't verified — check before you go.`
+        : "No dietary filter applied — nothing here is claimed to be vegetarian, vegan or halal.",
       places: results.map((r) => ({
         name: r.name,
         formattedAddress: r.formattedAddress,
@@ -1444,6 +1470,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     },
   });
 
+  await recordLookup(ctx, { tool: "search_nearby", provider: results[0]?.provider ?? "geoapify", retrievedAt: results[0]?.retrievedAt ?? new Date().toISOString(), category, diet: diet ?? null, near: located.label, point: located.point, resultCount: results.length, providerPlaceIds: results.map((r) => r.providerId) });
   if (results.length === 0) {
     return { output: `No ${category} found near ${located.label}.`, posted: true };
   }
@@ -1471,10 +1498,31 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
   if (isResolveFailure(to)) return { output: to.error };
 
   let route;
+  let fromUsed = from;
+  let toUsed = to;
+  const snapNotes: string[] = [];
   try {
     route = await geoapifyGetRoute(from.point, to.point, mode);
   } catch (err) {
-    return { output: `Live routing failed: ${err instanceof Error ? err.message : "unknown error"}.` };
+    const msg = err instanceof Error ? err.message : "unknown error";
+    // The router rejected a raw point (typically the centre of a lake, park or
+    // water body). Retry from the closest mapped place and say so plainly.
+    if (!msg.includes("(400)")) return { output: `Live routing failed: ${msg}.` };
+    const [snapFrom, snapTo] = await Promise.all([nearestMappedPlace(from.point), nearestMappedPlace(to.point)]);
+    if (!snapFrom && !snapTo) return { output: `Live routing failed: ${msg}. Do not estimate the time yourself.` };
+    if (snapFrom) {
+      fromUsed = { point: snapFrom.point, label: from.label };
+      snapNotes.push(`start measured from the nearest mapped place, ${snapFrom.name}`);
+    }
+    if (snapTo) {
+      toUsed = { point: snapTo.point, label: to.label };
+      snapNotes.push(`end measured to the nearest mapped place, ${snapTo.name}`);
+    }
+    try {
+      route = await geoapifyGetRoute(fromUsed.point, toUsed.point, mode);
+    } catch (err2) {
+      return { output: `Live routing failed: ${err2 instanceof Error ? err2.message : "unknown error"}. Do not estimate the time yourself.` };
+    }
   }
 
   await postActionCard({
@@ -1501,8 +1549,14 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
 
   const km = (route.distanceMeters / 1000).toFixed(1);
   const minutes = Math.round(route.durationSeconds / 60);
+  await recordLookup(ctx, { tool: "get_route", provider: route.provider, retrievedAt: route.retrievedAt, from: from.label, to: to.label, fromPoint: fromUsed.point, toPoint: toUsed.point, mode, distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, snapped: snapNotes });
+  // A "how long from the airport to the hotel" answer of hundreds of km means an
+  // endpoint resolved to a different place. Never present that as the answer.
+  const implausible = route.distanceMeters > 150_000 || (mode === "walk" && route.distanceMeters > 25_000);
   return {
-    output: `${from.label} to ${to.label} by ${mode}: ${km} km, about ${minutes} minutes (source: Geoapify, just now — no live traffic data).`,
+    output: implausible
+      ? `WARNING: Geoapify measured ${km} km (about ${minutes} min) between "${from.label}" and "${to.label}" — far more than a local trip, so one end probably resolved to a different place than the user meant. Say exactly which two places were measured and ask the user to confirm them; do NOT present this as the answer.`
+      : `${from.label} to ${to.label} by ${mode}: ${km} km, about ${minutes} minutes (source: Geoapify, just now — no live traffic data).${snapNotes.length ? ` Note: ${snapNotes.join("; ")}. Say so.` : ""}`,
     posted: true,
   };
 }
