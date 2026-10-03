@@ -50,3 +50,22 @@ export function isDirectlyAddressed(content: string): boolean {
   const t = content.trim();
   return /^@?clockwise\b/i.test(t) || /(^|\s)@clockwise\b/i.test(t);
 }
+
+// Group chat is human-first. A message that doesn't mention Clockwise at all is
+// "unaddressed": Clockwise may quietly CAPTURE consequential facts from it (a
+// route change, a personal time limit, a delay, money spent) but it may not
+// propose, search, or reply. Enforced in code — the tool list is cut down and
+// any text the model returns is dropped — because prompts alone were observed
+// to be ignored ("guys dinner?" produced an unprompted dinner proposal).
+export function mentionsClockwise(content: string): boolean {
+  return /\bclockwise\b/i.test(content);
+}
+
+export const QUIET_CAPTURE_TOOLS = new Set([
+  "stay_silent",
+  "record_trip_understanding",
+  "update_trip_route",
+  "record_personal_constraint",
+  "report_delay",
+  "propose_expense",
+]);

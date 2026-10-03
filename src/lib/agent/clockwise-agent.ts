@@ -3,7 +3,7 @@ import { buildGroupContext, buildPrivateContext, type AgentContext } from "./con
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
 import { acknowledgeOpenReminders } from "@/lib/readiness";
-import { isObviousNonTripChatter, isDirectlyAddressed } from "./intervention-gate";
+import { isObviousNonTripChatter, isDirectlyAddressed, mentionsClockwise, QUIET_CAPTURE_TOOLS } from "./intervention-gate";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -122,10 +122,18 @@ async function runAgentTurnTimed(ctx: AgentContext, contextBuildMs?: number): Pr
 
 async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: number[]): Promise<AgentTurnResult> {
   const provider = getAgentProvider();
-  const system = buildSystemPrompt(ctx);
   const lastHuman = [...ctx.history].reverse().find((h) => !h.isClockwise);
+  // Group chat is human-first: an unaddressed message gets quiet capture only.
+  const quiet = ctx.mode === "GROUP" && !(lastHuman && mentionsClockwise(lastHuman.content));
+  const system =
+    buildSystemPrompt(ctx) +
+    (quiet
+      ? "\n\nQUIET MODE: nobody addressed Clockwise in the latest message. People are talking to each other. Use a tool ONLY to capture a consequential fact that was stated as decided (route change, personal time limit, delay, money spent). Otherwise call stay_silent. Never reply with text, never propose, search or suggest."
+      : "");
   // Directly addressed => a reply is mandatory, so silence isn't an option.
-  const tools = toolsForMode(ctx.mode).filter((t) => !(t.name === "stay_silent" && lastHuman && isDirectlyAddressed(lastHuman.content)));
+  const tools = toolsForMode(ctx.mode)
+    .filter((t) => !(t.name === "stay_silent" && lastHuman && isDirectlyAddressed(lastHuman.content)))
+    .filter((t) => !quiet || QUIET_CAPTURE_TOOLS.has(t.name));
   let messages = toAgentMessages(ctx.history);
   const executedTools: { name: string; input: unknown }[] = [];
 
@@ -216,7 +224,11 @@ export async function respondToGroupMessage(
     return { spoke: false, toolCalls: [] };
   }
 
-  const result = await runAgentTurnTimed(ctx, Date.now() - contextStart);
+  const rawResult = await runAgentTurnTimed(ctx, Date.now() - contextStart);
+  // Unaddressed group message: whatever the model said is dropped; only its
+  // captures (tool effects, which post their own cards) remain.
+  const unaddressed = !(lastHumanTurn && mentionsClockwise(lastHumanTurn.content));
+  const result = unaddressed && rawResult.spoke && !rawResult.failed ? { ...rawResult, spoke: false, replyText: undefined } : rawResult;
   if (!result.spoke && lastHumanTurn) {
     const silent = result.toolCalls.find((c) => c.name === "stay_silent");
     await recordSilence(
