@@ -26,6 +26,10 @@ import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
 import { hotelProvider } from "@/lib/travel/hotel-provider";
 import { checkRoutePlausibility } from "@/lib/location/plausibility";
+import { updateMyArrival } from "@/lib/traveller/arrival";
+import { ceilToQuarter } from "@/lib/traveller/arrival-rules";
+import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
+import { timeLabel } from "@/lib/traveller/journey";
 import { brandSearch } from "@/lib/travel/around";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
@@ -295,6 +299,32 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "update_my_arrival",
+    description:
+      "Use when the SPEAKER says THEIR OWN arrival at the destination has changed (\"my flight is delayed, I'll reach around 8:15\", \"we landed early\"). It updates only the speaker's own confirmed journey, recomputes everyone's clocks against the confirmed stay with provider routes, and returns which shared commitments are now at risk with a suggested time. Pass the new time in 24-hour HH:MM (convert yourself: 8:15 in the evening = 20:15). If it is unclear whether they mean morning or evening, or which day, DO NOT call this — ask ONE short question instead. Never use it for anyone but the speaker, and never to change a commitment.",
+    parameters: {
+      type: "object",
+      properties: {
+        arrivalTime: { type: "string", description: "New arrival time, 24-hour HH:MM" },
+        arrivalDate: { type: "string", description: "YYYY-MM-DD, only if the day changed (e.g. a very late flight lands after midnight); omit to keep the current arrival day" },
+      },
+      required: ["arrivalTime"],
+    },
+  },
+  {
+    name: "propose_commitment_reschedule",
+    description:
+      "After update_my_arrival (or a delay report) shows a shared commitment is at risk, post a GROUP proposal to move that commitment to the suggested time. It does NOT move anything: members vote and the organiser confirms before the Plan changes. Use the time update_my_arrival suggested; the tool refuses a time that still leaves someone unable to make it. Never move a commitment any other way.",
+    parameters: {
+      type: "object",
+      properties: {
+        commitmentName: { type: "string", description: "The commitment's name as logged, e.g. 'Dinner'" },
+        newTime: { type: "string", description: "New time, 24-hour HH:MM, same day as the commitment" },
+      },
+      required: ["commitmentName", "newTime"],
+    },
+  },
+  {
     name: "check_readiness",
     description:
       "Deterministically check whether a logged commitment is ON_TRACK, AT_RISK, or MISSED by comparing its target time to now. Read-only — never guess this yourself, always call this tool.",
@@ -477,6 +507,10 @@ export async function executeTool(
       return proposeUberRide(input, ctx);
     case "propose_expense":
       return proposeExpense(input, ctx);
+    case "update_my_arrival":
+      return updateMyArrivalTool(input, ctx);
+    case "propose_commitment_reschedule":
+      return proposeCommitmentReschedule(input, ctx);
     case "check_readiness":
       return checkReadiness(input, ctx);
     case "send_readiness_reminder":
@@ -865,7 +899,7 @@ async function recordTripUnderstanding(input: Record<string, unknown>, ctx: Agen
 // place a group-visible proposal gets created from conversation.
 async function postProposal(
   ctx: AgentContext,
-  params: { type: "ITINERARY_CHANGE" | "UBER_RIDE" | "BOOKING"; title: string; summary: string; payload: Parameters<typeof createProposal>[0]["payload"] }
+  params: { type: "ITINERARY_CHANGE" | "UBER_RIDE" | "BOOKING" | "OTHER"; title: string; summary: string; payload: Parameters<typeof createProposal>[0]["payload"] }
 ) {
   const proposal = await createProposal({
     tripId: ctx.trip.id,
@@ -959,6 +993,85 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
     },
   });
   return { output: `Posted a confirmation card for ${formatMoney(amountMinor, currency)} ${title}. Nothing is recorded until ${ctx.actingUserName} (or the payer) confirms it; say so in one short line.` };
+}
+
+// The speaker's OWN journey only: the acting user id comes from the session, never
+// from a name in the model's arguments, so one traveller can't change another's.
+async function updateMyArrivalTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const r = await updateMyArrival({
+    tripId: ctx.trip.id,
+    userId: ctx.actingUserId,
+    arrivalTime: typeof input.arrivalTime === "string" ? input.arrivalTime : undefined,
+    arrivalDate: typeof input.arrivalDate === "string" ? input.arrivalDate : undefined,
+    sourceMessageId,
+    sourceChannel: ctx.mode,
+  });
+  if (!r.ok) return { output: `Not changed: ${r.error}` };
+  const risk = r.atRisk.length
+    ? r.atRisk
+        .map((a) => `${a.name} (${timeLabel(a.oldTime)}) is now at risk — ${a.blocking.map((b) => `${b.name} can't be at the stay before ${timeLabel(b.hotelBy)}`).join("; ")}. Suggested new time: ${a.suggestedTime.slice(11)} (24h, same day). Call propose_commitment_reschedule with commitmentName "${a.name}" and newTime "${a.suggestedTime.slice(11)}".`)
+        .join(" ")
+    : r.unknownRoute
+      ? "No shared commitment could be checked because there is no confirmed stay or no provider route for this traveller yet — say so, don't claim it's fine."
+      : "No shared commitment is put at risk by this.";
+  return { output: `Updated ${r.name}'s arrival: ${r.oldArrival ? `${timeLabel(r.oldArrival)} → ` : ""}${timeLabel(r.newArrival)}. Everyone's clocks were recomputed with provider routes. ${risk}` };
+}
+
+async function proposeCommitmentReschedule(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const name = String(input.commitmentName ?? "").trim();
+  const newTime = String(input.newTime ?? "").trim();
+  if (!name || !/^([01]\d|2[0-3]):[0-5]\d$/.test(newTime)) return { output: "Need the commitment's name and the new time in 24-hour HH:MM." };
+  const commitments = await prisma.commitment.findMany({ where: { tripId: ctx.trip.id } });
+  const c = commitments.find((x) => x.name.toLowerCase() === name.toLowerCase()) ?? commitments.find((x) => x.name.toLowerCase().includes(name.toLowerCase()));
+  if (!c) return { output: `There's no logged commitment called "${name}", so there is nothing to reschedule.` };
+  const oldTime = c.targetTime.toISOString().slice(0, 16);
+  const newLocal = `${oldTime.slice(0, 10)}T${newTime}`;
+  if (newLocal === oldTime) return { output: "That is the time it already has." };
+
+  // Deterministic: the new time must actually resolve the clash for everyone we can measure.
+  const view = await buildRendezvousView(ctx.trip.id);
+  const applies = appliesTo(c.participantIds);
+  const stillLate = view.clocks.filter((k) => applies(k.userId) && k.status === "KNOWN" && k.hotelBy! > newLocal);
+  if (stillLate.length > 0) {
+    const need = ceilToQuarter(stillLate.map((k) => k.hotelBy!).sort().at(-1)!);
+    return { output: `Refused: at ${timeLabel(newLocal)} ${stillLate.map((k) => `${k.name} (at the stay by ${timeLabel(k.hotelBy!)})`).join(", ")} still couldn't make it. The earliest workable time is ${need.slice(11)} — propose that instead.` };
+  }
+  const late = view.commitments.find((x) => x.id === c.id)?.late ?? [];
+  if (late.length === 0) return { output: `${c.name} isn't at risk for anyone right now, so I won't propose moving it.` };
+
+  const open = await prisma.proposal.findMany({ where: { tripId: ctx.trip.id, type: "OTHER", status: { in: ["AWAITING_APPROVAL", "APPROVED"] } } });
+  const dup = open.find((p) => {
+    try {
+      const r = (JSON.parse(p.payload) as { reschedule?: { commitmentId: string; newTime: string } }).reschedule;
+      return r?.commitmentId === c.id && r.newTime === newLocal;
+    } catch {
+      return false;
+    }
+  });
+  if (dup) return { output: "That reschedule is already waiting for the group's vote." };
+
+  const because = late.map((l) => `${l.name}'s arrival means they can't be at the stay before ${timeLabel(l.hotelBy)}`).join("; ");
+  const proposal = await postProposal(ctx, {
+    type: "OTHER",
+    title: `Move ${c.name} to ${timeLabel(newLocal)}?`,
+    summary: `${because}, but ${c.name} is at ${timeLabel(oldTime)}. Moving it to ${timeLabel(newLocal)} lets everyone make it.`,
+    payload: { timing: `${timeLabel(oldTime)} → ${timeLabel(newLocal)}`, reschedule: { commitmentId: c.id, commitmentName: c.name, oldTime, newTime: newLocal, because } },
+  });
+  await prisma.tripEvent.create({
+    data: {
+      tripId: ctx.trip.id,
+      kind: "COMMITMENT_RESCHEDULE_PROPOSED",
+      scope: "GROUP",
+      actorUserId: ctx.actingUserId,
+      sourceChannel: ctx.mode,
+      sourceMessageId: [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null,
+      confidence: "HIGH",
+      payload: JSON.stringify({ commitment: c.name, commitmentId: c.id, oldTime, proposedTime: newLocal, because, proposalId: proposal.id }),
+      propagation: JSON.stringify(["proposals", "notifications"]),
+    },
+  });
+  return { output: `Posted a group proposal to move ${c.name} from ${timeLabel(oldTime)} to ${timeLabel(newLocal)}. Nothing changes until the group votes and the organiser confirms. Tell the group in one short line.` };
 }
 
 async function recordPersonalConstraintTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {

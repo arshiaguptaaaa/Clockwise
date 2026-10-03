@@ -15,6 +15,7 @@
 import { prisma } from "./prisma";
 import { getAppBaseUrl } from "./site-url";
 import { applyVerifiedPaymentStatus } from "./payment-lifecycle";
+import { withRailContext } from "./rails/evidence";
 import {
   createPaymentLink,
   getPaymentLinkStatus,
@@ -73,7 +74,7 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
     return { ok: false, reason: "The payer has no email or phone on file, which Pine Labs requires.", bookingId: booking.id };
   }
 
-  const result = await createPaymentLink({
+  const result = await withRailContext({ tripId: input.tripId, userId: input.payerId ?? null, relatedKind: "BOOKING", relatedId: booking.id, decision: "Group proposal confirmed by the organiser → create a Pine Labs payment link" }, () => createPaymentLink({
     merchantReference: booking.id,
     amountMinorUnits: input.amountMinorUnits,
     currency: input.currency,
@@ -83,7 +84,7 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
     // Where the payer is sent after the hosted page: our own landing route,
     // which re-fetches the real status. Not the webhook endpoint.
     callbackUrl: `${getAppBaseUrl()}/api/payments/return?booking=${booking.id}`,
-  });
+  }));
 
   if (!result.ok) {
     await prisma.booking.update({ where: { id: booking.id }, data: { status: "FAILED" } });
@@ -131,7 +132,7 @@ export async function refreshTripPaymentStatus(bookingId: string): Promise<TripP
   if (!booking) return { ok: false, reason: "No payment request found for that id." };
   if (!booking.confirmationId) return { ok: false, reason: "This payment request has no Pine Labs reference yet." };
 
-  const live = await getPaymentLinkStatus(booking.confirmationId);
+  const live = await withRailContext({ tripId: booking.tripId, relatedKind: "BOOKING", relatedId: booking.id, decision: "Verify payment: fetch the link's authoritative status from Pine Labs" }, () => getPaymentLinkStatus(booking.confirmationId!));
   if (!live.ok) return { ok: false, reason: live.reason };
 
   await applyVerifiedPaymentStatus(booking.id, live.status, "RETURN_PAGE");

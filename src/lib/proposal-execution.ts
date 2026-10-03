@@ -15,6 +15,9 @@ import { createTripPaymentRequest } from "./trip-payments";
 import { commitFromProposal } from "./budget/ledger";
 import { postActionCard } from "./action-cards";
 import { approveStayFromProposal } from "./stays";
+import { recomputeRendezvous, buildRendezvousView } from "./rendezvous";
+import { notify } from "./notifications";
+import { timeLabel } from "./traveller/journey";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -316,10 +319,61 @@ export async function executeConfirmedProposal(proposal: Proposal): Promise<Exec
       return executeBooking(proposal);
     case "UBER_RIDE":
       return executeUberRide(proposal);
+    case "OTHER": {
+      if (decodeProposalPayload(proposal.payload).reschedule) return executeReschedule(proposal);
+      return { ok: false, error: "Execution for this proposal type isn't implemented yet." };
+    }
     case "DOCUMENT_UPDATE":
-    case "OTHER":
       return { ok: false, error: `Execution for proposal type ${proposal.type} isn't implemented yet.` };
     default:
       return { ok: false, error: "Unknown proposal type." };
   }
+}
+
+// The approved move of a shared commitment. This is the ONLY code path that changes
+// a Commitment's time, and it is reachable only through organiserHardConfirm after
+// the group voted — Clockwise never moves a commitment on its own.
+async function executeReschedule(proposal: Proposal): Promise<ExecutionResult> {
+  const r = decodeProposalPayload(proposal.payload).reschedule;
+  if (!r) return { ok: false, error: "No reschedule in this proposal." };
+  const c = await prisma.commitment.findUnique({ where: { id: r.commitmentId } });
+  if (!c || c.tripId !== proposal.tripId) return { ok: false, error: "That commitment no longer exists." };
+  const current = c.targetTime.toISOString().slice(0, 16);
+  if (current === r.newTime) return { ok: true, summary: `${c.name} was already at ${timeLabel(r.newTime)}.` };
+
+  const votes = await prisma.proposalApproval.findMany({ where: { proposalId: proposal.id }, select: { decision: true } });
+  const approvals = { approved: votes.filter((v) => v.decision === "APPROVED").length, rejected: votes.filter((v) => v.decision === "REJECTED").length, total: votes.length };
+
+  await prisma.commitment.update({ where: { id: c.id }, data: { targetTime: new Date(`${r.newTime}:00.000Z`) } });
+  await prisma.tripEvent.create({
+    data: {
+      tripId: proposal.tripId,
+      kind: "COMMITMENT_RESCHEDULED",
+      scope: "GROUP",
+      actorUserId: proposal.organiserConfirmedBy ?? null,
+      sourceChannel: "SYSTEM",
+      confidence: "HIGH",
+      payload: JSON.stringify({ commitment: c.name, commitmentId: c.id, oldTime: current, newTime: r.newTime, why: r.because, proposalId: proposal.id, approvals, confirmedBy: proposal.organiserConfirmedBy }),
+      propagation: JSON.stringify(["plan", "rendezvous", "notifications"]),
+    },
+  });
+
+  await recomputeRendezvous(proposal.tripId);
+  const view = await buildRendezvousView(proposal.tripId);
+  const check = view.commitments.find((x) => x.id === c.id);
+  const everyone = Boolean(check) && check!.allAtHotelBy;
+  await postActionCard({
+    tripId: proposal.tripId,
+    channel: "GROUP",
+    type: "DECISION",
+    status: "CONFIRMED",
+    data: {
+      title: `${c.name.toUpperCase()} MOVED ✓ ${timeLabel(r.newTime)}`,
+      context: everyone ? "Everyone can make this one." : check && check.late.length ? `${check.late.map((l) => l.name).join(", ")} still can't be at the stay by then.` : "Some arrivals are still unknown, so I can't promise everyone makes it.",
+      informational: true,
+    },
+  });
+  const members = (await prisma.tripMember.findMany({ where: { tripId: proposal.tripId }, select: { userId: true } })).map((m) => m.userId);
+  await notify({ tripId: proposal.tripId, recipientIds: members, severity: "IMPORTANT", kind: "COMMITMENT_RESCHEDULED", title: `${c.name} moved to ${timeLabel(r.newTime)}`, body: `It was ${timeLabel(current)}. The group approved the change.`, href: `/trips/${proposal.tripId}/plan` });
+  return { ok: true, summary: `Moved ${c.name} from ${timeLabel(current)} to ${timeLabel(r.newTime)}.` };
 }

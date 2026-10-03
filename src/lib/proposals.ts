@@ -39,6 +39,16 @@ export type ProposalPayload = {
   // BOOKING proposals for a place to stay. Everything here came from a
   // provider search (see travel/hotel-provider.ts); nothing is model-written.
   // Rates are deliberately absent: Geoapify supplies none.
+  // OTHER proposals that move a shared commitment (e.g. dinner 20:00 -> 21:30).
+  // Times are local wall-clock strings (YYYY-MM-DDTHH:mm), the Commitment convention.
+  reschedule?: {
+    commitmentId: string;
+    commitmentName: string;
+    oldTime: string;
+    newTime: string;
+    // Group-safe reason: whose arrival, and when they can reach the stay.
+    because: string;
+  };
   stay?: {
     provider: string;
     providerPlaceId: string;

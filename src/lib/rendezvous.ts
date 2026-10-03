@@ -74,6 +74,18 @@ export type RendezvousView = {
   commitments: CommitmentCheck[];
 };
 
+// Who a commitment applies to: its listed participants (empty/unparseable = everyone).
+export function appliesTo(participantIdsJson: string): (userId: string) => boolean {
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(participantIdsJson);
+    if (Array.isArray(parsed)) ids = parsed.filter((x): x is string => typeof x === "string");
+  } catch {
+    ids = [];
+  }
+  return (userId) => ids.length === 0 || ids.includes(userId);
+}
+
 export async function buildRendezvousView(tripId: string): Promise<RendezvousView> {
   const [stay, journeys, members, commitments] = await Promise.all([
     confirmedStay(tripId),
@@ -99,9 +111,14 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
 
   const checks: CommitmentCheck[] = commitments.map((c) => {
     const target = c.targetTime.toISOString().slice(0, 16);
-    const late = known.filter((k) => k.hotelBy! > target).map((k) => ({ name: k.name, hotelBy: k.hotelBy! }));
-    const unknown = clocks.filter((k) => k.status !== "KNOWN").map((k) => k.name);
-    return { id: c.id, name: c.name, target, allAtHotelBy: late.length === 0 && unknown.length === 0 && noJourney.length === 0, late, unknown };
+    // A commitment applies to its listed participants (empty/unparseable = everyone).
+    const applies = appliesTo(c.participantIds);
+    const scoped = clocks.filter((k) => applies(k.userId));
+    const knownHere = scoped.filter((k) => k.status === "KNOWN");
+    const late = knownHere.filter((k) => k.hotelBy! > target).map((k) => ({ name: k.name, hotelBy: k.hotelBy! }));
+    const unknown = scoped.filter((k) => k.status !== "KNOWN").map((k) => k.name);
+    const missing = members.filter((m) => applies(m.userId) && !have.has(m.userId)).map((m) => m.user.name);
+    return { id: c.id, name: c.name, target, allAtHotelBy: late.length === 0 && unknown.length === 0 && missing.length === 0, late, unknown };
   });
   return { stayName: stay?.placeName ?? null, clocks, noJourney, meetAt, meetComplete, commitments: checks };
 }

@@ -25,14 +25,27 @@ export type SpeechDiagnostics = {
   errorBody?: string;
 };
 
+// What went over the wire to the partner, already free of secrets. Only the Gnani
+// provider fills this; the route stores it as organiser-only rail evidence.
+export type RailEvidence = {
+  endpoint: string;
+  method: string;
+  request: unknown;
+  response?: unknown;
+  httpStatus: number | null;
+  providerRequestId: string | null;
+  durationMs: number;
+};
+
 export type TranscribeResult =
-  | { ok: true; transcript: string; provider: SpeechProviderName; diagnostics?: SpeechDiagnostics }
+  | { ok: true; transcript: string; provider: SpeechProviderName; diagnostics?: SpeechDiagnostics; evidence?: RailEvidence }
   | {
       ok: false;
       reason: "NOT_CONFIGURED" | "UNSUPPORTED_FORMAT" | "NO_SPEECH" | "PROVIDER_ERROR";
       message: string;
       provider: SpeechProviderName;
       diagnostics?: SpeechDiagnostics;
+      evidence?: RailEvidence;
     };
 
 // The label a result carries is the provider that actually produced it —

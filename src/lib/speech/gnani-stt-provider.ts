@@ -9,7 +9,7 @@
 // conventional UA is sent. NOT verified against a live key in this
 // environment — no Gnani key exists here — so any non-2xx or
 // unparseable reply is reported as PROVIDER_ERROR, never papered over.
-import type { SpeechDiagnostics, SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
+import type { RailEvidence, SpeechDiagnostics, SpeechToTextProvider, TranscribeInput, TranscribeResult } from "./types";
 
 const ENDPOINT = process.env.GNANI_STT_URL || "https://api.vachana.ai/stt/v3";
 const SUPPORTED = /(wav|wave|mp3|mpeg|flac|ogg|m4a|mp4|x-m4a|aac)/i;
@@ -73,6 +73,19 @@ class GnaniSpeechProvider implements SpeechToTextProvider {
       responseFields: [],
       durationMs: 0,
     };
+    const evidenceRequest = {
+      headers: { "X-API-Key-ID": "[REDACTED]", "User-Agent": "Clockwise/1.0 (+https://clockwise-lemon.vercel.app)", "Content-Type": "multipart/form-data" },
+      body: { audio_file: `<${audio.size} bytes, ${mimeType}, not stored>`, language_code: languageCode, format: "transcribe" },
+    };
+    const evidence = (httpStatus: number | null, response: unknown, requestId: string | null): RailEvidence => ({
+      endpoint: ENDPOINT,
+      method: "POST",
+      request: evidenceRequest,
+      response,
+      httpStatus,
+      providerRequestId: requestId,
+      durationMs: Date.now() - started,
+    });
     try {
       const res = await fetch(ENDPOINT, {
         method: "POST",
@@ -89,16 +102,16 @@ class GnaniSpeechProvider implements SpeechToTextProvider {
         // Sanitised: Gnani doesn't echo credentials, but strip the key if it ever did.
         diag.errorBody = (await res.text()).split(apiKey).join("[redacted]").slice(0, 300);
         console.error(`[gnani-stt] HTTP ${res.status}`);
-        return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: `Gnani returned HTTP ${res.status}.`, diagnostics: diag };
+        return { ok: false, reason: "PROVIDER_ERROR", provider: this.name, message: `Gnani returned HTTP ${res.status}.`, diagnostics: diag, evidence: evidence(res.status, diag.errorBody, null) };
       }
       const data = (await res.json()) as { success?: boolean; transcript?: string; request_id?: string };
       diag.responseFields = Object.keys(data);
       diag.requestId = data.request_id ?? null;
       const transcript = data.transcript?.trim();
       if (!transcript) {
-        return { ok: false, reason: "NO_SPEECH", provider: this.name, message: "No speech was recognised.", diagnostics: diag };
+        return { ok: false, reason: "NO_SPEECH", provider: this.name, message: "No speech was recognised.", diagnostics: diag, evidence: evidence(res.status, data, data.request_id ?? null) };
       }
-      return { ok: true, transcript, provider: this.name, diagnostics: diag };
+      return { ok: true, transcript, provider: this.name, diagnostics: diag, evidence: evidence(res.status, data, data.request_id ?? null) };
     } catch (err) {
       diag.durationMs = Date.now() - started;
       const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");

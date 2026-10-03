@@ -84,6 +84,8 @@ export function Composer({
   const cancelledRef = useRef(false);
   // The last upload, kept so TRY AGAIN can resend it without re-recording.
   const lastUploadRef = useRef<{ blob: Blob; durationMs: number } | null>(null);
+  // The rail-evidence row of the last transcription, linked to the message when it is sent.
+  const voiceCallRef = useRef<string | null>(null);
 
   function releaseMic() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -205,12 +207,13 @@ export function Composer({
 
     try {
       const res = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
-      const data: { transcript?: string; error?: string } = await res.json().catch(() => ({}));
+      const data: { transcript?: string; error?: string; voiceRailCallId?: string | null } = await res.json().catch(() => ({}));
       if (!res.ok || !data.transcript) {
         setVoiceState("error");
         setVoiceError(data.error ?? "Couldn't transcribe that. Try again?");
         return;
       }
+      voiceCallRef.current = data.voiceRailCallId ?? null;
       // Into the normal composer, editable; nothing is sent until they press Send.
       setText((prev) => (prev.trim() ? `${prev.trim()} ${data.transcript}` : data.transcript!));
       setVoiceState("idle");
@@ -341,6 +344,10 @@ export function Composer({
           action={async (formData) => {
             if (disabled) return;
             if (pendingAttachment) formData.set("attachmentId", pendingAttachment.id);
+            if (voiceCallRef.current) {
+              formData.set("voiceRailCallId", voiceCallRef.current);
+              voiceCallRef.current = null;
+            }
             setPendingAttachment(null);
             setText("");
             await action(formData);

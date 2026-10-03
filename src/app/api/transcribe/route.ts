@@ -3,6 +3,7 @@ import { transcribeSpeech } from "@/lib/speech";
 import { getCurrentUserId } from "@/lib/session";
 import { resolveSpeechLanguage } from "@/lib/speech/types";
 import { recordVoiceTrace } from "@/lib/speech/trace";
+import { logRailCall } from "@/lib/rails/evidence";
 
 // Voice note -> raw transcript. Signed-in travellers only (every call can
 // spend Gnani credits). The provider that actually produced the text is
@@ -46,12 +47,29 @@ export async function POST(request: NextRequest) {
       transcriptChars: result.ok ? result.transcript.length : 0,
     });
   }
+  // Organiser-only rail evidence (sanitised request + the exact provider response).
+  let railCallId: string | null = null;
+  if (result.evidence && result.provider === "gnani") {
+    railCallId = await logRailCall({
+      partner: "GNANI",
+      operation: "stt.transcribe",
+      endpoint: result.evidence.endpoint,
+      method: result.evidence.method,
+      request: result.evidence.request,
+      response: result.evidence.response,
+      httpStatus: result.evidence.httpStatus,
+      providerRequestId: result.evidence.providerRequestId,
+      durationMs: result.evidence.durationMs,
+      context: { tripId: tripId || null, userId, decision: "Voice note sent to Gnani; transcript returned to the composer for the person to edit and send" },
+    });
+  }
   const diagnostics = debug ? { diagnostics: result.diagnostics ?? null } : {};
 
   if (result.ok) {
     return NextResponse.json({
       transcript: result.transcript,
       provider: result.provider,
+      voiceRailCallId: railCallId,
       fellBackFrom: "fellBackFrom" in result ? (result.fellBackFrom ?? null) : null,
       ...diagnostics,
     });

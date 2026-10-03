@@ -1245,3 +1245,31 @@ model ChecklistItem {
 
   @@unique([tripId, userId, key])
 }
+
+// ---- Rail evidence (organiser-only) ----------------------------------------
+// One row per real call to a partner rail (Gnani, Pine Labs), kept for the Ken
+// submission: exact endpoint, method, request and response AFTER redaction
+// (keys, Authorization headers, client secrets, tokens and cookies never reach
+// this table; contact details are masked). Never rendered in group chat.
+model RailCall {
+  id                String   @id @default(cuid())
+  tripId            String?
+  userId            String?
+  // GNANI | PINELABS
+  partner           String
+  operation         String
+  endpoint          String
+  method            String
+  requestJson       String
+  responseJson      String?
+  httpStatus        Int?
+  providerRequestId String?
+  durationMs        Int?
+  // What this call was part of: MESSAGE | BOOKING | PROPOSAL, plus a plain-words decision.
+  relatedKind       String?
+  relatedId         String?
+  decision          String?
+  createdAt         DateTime @default(now())
+
+  @@index([tripId, createdAt])
+}

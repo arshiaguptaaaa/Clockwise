@@ -68,4 +68,13 @@ export const QUIET_CAPTURE_TOOLS = new Set([
   "record_personal_constraint",
   "report_delay",
   "propose_expense",
+  "update_my_arrival",
+  "propose_commitment_reschedule",
 ]);
+
+// A traveller saying their OWN journey changed. Clockwise may ask one short clarifying
+// question about it (e.g. morning or evening?) even though nobody addressed it — a
+// question is the only safe alternative to guessing, and silence would drop the update.
+export function mentionsOwnJourneyChange(content: string): boolean {
+  return /\b(land|landing|landed|arriv\w*|reach\w*|flight|train|bus|delayed|delay|late|running late|get in|getting in)\b/i.test(content);
+}

@@ -177,6 +177,19 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
     }
     case "ROUTE_PLAUSIBILITY_FAILED":
       return { understanding: `ROUTE_PLAUSIBILITY_FAILED — ${str(p.from)} → ${str(p.to)} (provider measured ${(Number(p.distanceMeters) / 1000).toFixed(0)} km): ${str(p.reason)}.`, state: "Route withheld; the user was asked to confirm the places. No substitute number was produced." };
+    case "TRAVELLER_ARRIVAL_UPDATED": {
+      const aff = Array.isArray(p.affectedCommitments) ? (p.affectedCommitments as { name: string; at: string; suggested: string }[]) : [];
+      return {
+        understanding: `${str(p.traveller)} changed THEIR OWN arrival: ${str(p.oldArrival).replace("T", " ") || "none"} → ${str(p.newArrival).replace("T", " ")} (${Number(p.movedMinutes) >= 0 ? "+" : ""}${str(p.movedMinutes)} min). No transcript or reason is stored here. Commitments now at risk: ${aff.length ? aff.map((a) => `${a.name} at ${a.at.replace("T", " ")} (suggested ${a.suggested.replace("T", " ")})`).join("; ") : "none"}.`,
+        state: `Journey updated; provider routes recomputed${p.routeKnown ? "" : " (route unknown — nothing was assumed)"}; Plan arrivals, Ready? and rendezvous refreshed.`,
+      };
+    }
+    case "COMMITMENT_RESCHEDULE_PROPOSED":
+      return { understanding: `Clockwise proposed moving "${str(p.commitment)}" ${str(p.oldTime).replace("T", " ")} → ${str(p.proposedTime).replace("T", " ")} because ${str(p.because)}.`, state: "Group proposal opened. The Plan is unchanged until the group votes and the organiser confirms." };
+    case "COMMITMENT_RESCHEDULED": {
+      const a = (p.approvals ?? {}) as { approved?: number; rejected?: number; total?: number };
+      return { understanding: `"${str(p.commitment)}" moved ${str(p.oldTime).replace("T", " ")} → ${str(p.newTime).replace("T", " ")}. Why: ${str(p.why)}. Votes: ${str(a.approved)} approved, ${str(a.rejected)} rejected of ${str(a.total)}; organiser confirmed.`, state: "Canonical commitment changed; rendezvous recomputed; group told once." };
+    }
     case "VIBE_CHECK_COMPLETED":
       return { understanding: `Vibe check completed (${Array.isArray(p.answered) ? (p.answered as string[]).length : 0} questions answered). Answers are stored as private structured preferences — they are not shown here and never went to the group.`, state: "Feeds Around You ordering and Ready?; nothing posted to group chat." };
     case "AROUND_YOU_REFRESHED":

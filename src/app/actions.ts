@@ -29,6 +29,16 @@ export async function switchTraveller() {
 // this (quick) write completes, instead of waiting for the (slow) Gemini
 // call too. Returns the senderId so the caller can immediately kick off
 // runGroupAgentTurn without a second getCurrentUserId() round trip.
+// A message that came from a voice note carries the id of its Gnani evidence row;
+// link them so the evidence view can show which decisions that message caused.
+async function linkVoiceCall(senderId: string, formData: FormData, messageId: string) {
+  const id = String(formData.get("voiceRailCallId") ?? "").trim();
+  if (!id) return;
+  await prisma.railCall
+    .updateMany({ where: { id, userId: senderId, partner: "GNANI", relatedKind: null }, data: { relatedKind: "MESSAGE", relatedId: messageId } })
+    .catch(() => undefined);
+}
+
 export async function postGroupMessage(tripId: string, formData: FormData): Promise<{ senderId: string } | void> {
   const content = String(formData.get("content") ?? "").trim();
   const attachmentId = String(formData.get("attachmentId") ?? "").trim() || null;
@@ -53,6 +63,7 @@ export async function postGroupMessage(tripId: string, formData: FormData): Prom
   const message = await prisma.message.create({
     data: { tripId, senderId, channel: "GROUP", content: content || `📎 ${attachment!.filename}` },
   });
+  await linkVoiceCall(senderId, formData, message.id);
 
   if (attachment) {
     await prisma.attachment.update({ where: { id: attachment.id }, data: { messageId: message.id } });
@@ -163,6 +174,7 @@ export async function postPrivateMessage(tripId: string, formData: FormData): Pr
   const message = await prisma.message.create({
     data: { tripId, senderId, channel: "PRIVATE", recipientId: senderId, content: content || `📎 ${attachment!.filename}` },
   });
+  await linkVoiceCall(senderId, formData, message.id);
 
   if (attachment) {
     await prisma.attachment.update({ where: { id: attachment.id }, data: { messageId: message.id } });

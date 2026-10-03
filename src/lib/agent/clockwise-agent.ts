@@ -3,7 +3,7 @@ import { buildGroupContext, buildPrivateContext, type AgentContext } from "./con
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
 import { acknowledgeOpenReminders } from "@/lib/readiness";
-import { isObviousNonTripChatter, isDirectlyAddressed, mentionsClockwise, QUIET_CAPTURE_TOOLS } from "./intervention-gate";
+import { isObviousNonTripChatter, isDirectlyAddressed, mentionsClockwise, mentionsOwnJourneyChange, QUIET_CAPTURE_TOOLS } from "./intervention-gate";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -54,6 +54,9 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     "- You have two kinds of knowledge. TRIP KNOWLEDGE (travellers, dates, bookings, commitments, decisions — already in the structured state below) you can answer directly. LIVE WORLD KNOWLEDGE (hotels, places, addresses, distances, travel time, weather) you do NOT know yourself — you MUST call search_places/search_hotels/search_nearby/get_route/get_weather and answer only from what the tool actually returned. Never guess a hotel name, address, distance, or fare — if a live tool isn't configured or fails, say so honestly and still answer whatever part of the question trip state alone can cover.",
     "- Reply in 1-3 short, conversational sentences. No headings, no bullet lists, no markdown formatting — the tool result is already shown to the user as a card, so don't repeat it verbatim, just add the reasoning/recommendation on top of it.",
     "- Facts about the world come only from tools: never state a travel time, distance, restaurant, hotel, price or opening hour from memory. For any \"how long / how far\" question call get_route; for places call the search tools. If a tool fails or returns nothing, say you couldn't get it — do not substitute your own answer. A search request (\"find hotels in Udaipur\") is never a decision and never changes the trip route.",
+    "- update_my_arrival: when the SPEAKER says THEIR OWN arrival changed (a delay, an earlier flight — \"my flight is delayed, I'll reach around 8:15\"), call it with the new time in 24-hour form. It updates only their own journey. If it's unclear whether they mean morning or evening, or which day, ask ONE short question and do not call it. It also reports which shared commitments are now at risk.",
+    "- propose_commitment_reschedule: when update_my_arrival reports a shared commitment at risk, call this with the suggested time it gave you. Never move a commitment yourself and never state that it moved: it only posts a group proposal, and the Plan changes only after the group votes and the organiser confirms. After posting it, say so in one short line.",
+    "- Commitment times are wall-clock local to the destination, written with a trailing Z and no timezone conversion (e.g. dinner at 8 PM on 12 Dec 2026 is 2026-12-12T20:00:00Z).",
     "- propose_expense: when someone states money they spent/paid for the trip with a clear amount (\"I paid 6k for dinner, split between us\"), call it — it only posts a confirmation card; you never record or settle money yourself, and you never do arithmetic on balances (the Budget tab computes them). Do not call it for future costs, hotel/booking proposals, or private budgets (\"my budget is 20k\" is personal and stays private).",
     "- propose_itinerary_change and propose_uber_ride post a card EVERY member of the group will see, from either room. Only call one when the idea genuinely needs the group's agreement — never for something that only affects the speaker personally (a dietary restriction, a budget limit, wanting their own room — those stay in this conversation, never become a group proposal). The `summary`/`title` you write become the ENTIRE group-visible content — write them fresh, describing only the proposal itself (what, who it affects, when, cost if relevant). Never quote, paraphrase, or hint at anything else from this conversation, and never include a private reason behind a public ask (e.g. propose \"look at a cheaper hotel option\" — never \"...because Priya said she's on a tight budget\").",
   ].join("\n");
@@ -139,7 +142,7 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
   const system =
     buildSystemPrompt(ctx) +
     (quiet
-      ? "\n\nQUIET MODE: nobody addressed Clockwise in the latest message. People are talking to each other. Use a tool ONLY to capture a consequential fact that was stated as decided (route change, personal time limit, delay, money spent). Otherwise call stay_silent. Never reply with text, never propose, search or suggest."
+      ? "\n\nQUIET MODE: nobody addressed Clockwise in the latest message. People are talking to each other. Use a tool ONLY to capture a consequential fact that was stated as decided (route change, personal time limit, delay, money spent). Otherwise call stay_silent. Never reply with text, never search or suggest. The ONE exception: if the speaker says their own arrival changed but the time is unclear (morning or evening? which day?), ask ONE short clarifying question instead of guessing."
       : "");
   // Directly addressed => a reply is mandatory, so silence isn't an option.
   const tools = toolsForMode(ctx.mode)
@@ -255,7 +258,8 @@ export async function respondToGroupMessage(
   // Unaddressed group message: whatever the model said is dropped; only its
   // captures (tool effects, which post their own cards) remain.
   const unaddressed = !(lastHumanTurn && mentionsClockwise(lastHumanTurn.content));
-  const result = unaddressed && rawResult.spoke && !rawResult.failed ? { ...rawResult, spoke: false, replyText: undefined } : rawResult;
+  const allowQuestion = Boolean(lastHumanTurn && mentionsOwnJourneyChange(lastHumanTurn.content)) && /\?\s*$/.test(rawResult.replyText ?? "");
+  const result = unaddressed && rawResult.spoke && !rawResult.failed && !allowQuestion ? { ...rawResult, spoke: false, replyText: undefined } : rawResult;
   if (!result.spoke && lastHumanTurn) {
     const silent = result.toolCalls.find((c) => c.name === "stay_silent");
     await recordSilence(

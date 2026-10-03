@@ -7,10 +7,10 @@ const day = (l: string) => new Date(`${l.slice(0, 10)}T00:00:00Z`).toLocaleDateS
 // ONE TRIP, MANY CLOCKS: each person's own arrival, and what it means for the stay
 // and for shared commitments. Group-safe: arrival facts only.
 export function RendezvousSection({ view }: { view: RendezvousView }) {
-  if (view.clocks.length === 0) return null;
+  if (view.clocks.length === 0 && view.commitments.length === 0) return null;
   return (
     <section className="mt-5 rounded-2xl border border-border bg-surface p-4" data-rendezvous>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Individual clocks · Arrivals</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{view.clocks.length ? "Individual clocks · Arrivals" : "Shared commitments"}</p>
       <ul className="mt-3 space-y-3">
         {view.clocks.map((c) => (
           <li key={c.userId} className="flex items-start gap-3" data-clock={c.name}>

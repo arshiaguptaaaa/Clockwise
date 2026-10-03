@@ -16,6 +16,7 @@
 // reason until they are set. Not exercised against a live UAT here — no
 // credentials exist in this environment.
 import { randomUUID } from "crypto";
+import { logRailCall } from "@/lib/rails/evidence";
 
 // PINELABS_API_BASE_URL is the documented name; PINELABS_BASE_URL is accepted
 // as an alias because that is what the Vercel project was configured with.
@@ -88,17 +89,36 @@ let cachedToken: { value: string; expiresAt: number } | null = null;
 async function getAccessToken(): Promise<{ ok: true; token: string } | { ok: false; reason: string; status?: number }> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return { ok: true, token: cachedToken.value };
   try {
+    const tokenHeaders = requestHeaders();
+    const started = Date.now();
     const res = await fetch(`${baseUrl()}/api/auth/v1/token`, {
       method: "POST",
-      headers: requestHeaders(),
+      headers: tokenHeaders,
       body: JSON.stringify({
         client_id: process.env.PINELABS_CLIENT_ID,
         client_secret: process.env.PINELABS_CLIENT_SECRET,
         grant_type: "client_credentials",
       }),
     });
-    if (!res.ok) return { ok: false, status: res.status, reason: `Pine Labs token request failed (${res.status}): ${sanitize(await res.text().catch(() => ""))}` };
-    const data: { access_token?: string; expires_in?: number } = await res.json();
+    const tokenText = await res.text();
+    let tokenJson: unknown = tokenText;
+    try {
+      tokenJson = JSON.parse(tokenText);
+    } catch {
+      // keep raw text
+    }
+    await logRailCall({
+      partner: "PINELABS",
+      operation: "auth.token",
+      endpoint: `${baseUrl()}/api/auth/v1/token`,
+      method: "POST",
+      request: { headers: { ...tokenHeaders, "Content-Type": "application/json" }, body: { client_id: "[REDACTED]", client_secret: "[REDACTED]", grant_type: "client_credentials" } },
+      response: tokenJson,
+      httpStatus: res.status,
+      durationMs: Date.now() - started,
+    });
+    if (!res.ok) return { ok: false, status: res.status, reason: `Pine Labs token request failed (${res.status}): ${sanitize(tokenText)}` };
+    const data: { access_token?: string; expires_in?: number } = JSON.parse(tokenText);
     if (!data.access_token) return { ok: false, reason: "Pine Labs returned no access_token." };
     cachedToken = { value: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 };
     return { ok: true, token: data.access_token };
@@ -112,14 +132,33 @@ async function call(path: string, init: { method: string; body?: unknown }): Pro
   const auth = await getAccessToken();
   if (!auth.ok) return auth;
   try {
+    const callHeaders = requestHeaders({ Authorization: `Bearer ${auth.token}` });
+    const started = Date.now();
     const res = await fetch(`${baseUrl()}${path}`, {
       method: init.method,
-      headers: requestHeaders({ Authorization: `Bearer ${auth.token}` }),
+      headers: callHeaders,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
     if (res.status === 401) cachedToken = null;
-    if (!res.ok) return { ok: false, reason: `Pine Labs ${init.method} ${path.split("/").slice(0, 5).join("/")} failed (${res.status}): ${sanitize(await res.text())}` };
     const text = await res.text();
+    let json: unknown = text;
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      // keep raw text
+    }
+    await logRailCall({
+      partner: "PINELABS",
+      operation: `${init.method} ${path.replace(/\/pl-v1-[\w-]+/, "/{payment_link_id}")}`,
+      endpoint: `${baseUrl()}${path}`,
+      method: init.method,
+      request: { headers: callHeaders, body: init.body ?? null },
+      response: json,
+      httpStatus: res.status,
+      providerRequestId: callHeaders["Request-ID"],
+      durationMs: Date.now() - started,
+    });
+    if (!res.ok) return { ok: false, reason: `Pine Labs ${init.method} ${path.split("/").slice(0, 5).join("/")} failed (${res.status}): ${sanitize(text)}` };
     return { ok: true, data: text ? (JSON.parse(text) as Record<string, unknown>) : {} };
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : "Unknown Pine Labs error." };

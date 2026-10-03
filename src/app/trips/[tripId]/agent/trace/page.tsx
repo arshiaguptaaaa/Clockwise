@@ -48,6 +48,11 @@ export default async function AgentTracePage({
       >
         <ArrowLeft className="size-3.5" /> Back to Plan
       </Link>
+      {viewerId === trip.createdBy && (
+        <Link href={`/trips/${tripId}/agent/trace/evidence`} className="ml-4 text-xs font-semibold text-accent underline-offset-2 hover:underline">
+          Developer evidence (rail calls) →
+        </Link>
+      )}
 
       <p className="mt-3 text-base font-medium text-foreground">Agent trace — {trip.name}</p>
       <p className="mt-1 text-xs text-muted-foreground">
