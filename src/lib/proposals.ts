@@ -36,6 +36,21 @@ export type ProposalPayload = {
   amount?: number;
   currency?: string;
   cancellationTerms?: string;
+  // BOOKING proposals for a place to stay. Everything here came from a
+  // provider search (see travel/hotel-provider.ts); nothing is model-written.
+  // Rates are deliberately absent: Geoapify supplies none.
+  stay?: {
+    provider: string;
+    providerPlaceId: string;
+    name: string;
+    address: string | null;
+    latitude: number;
+    longitude: number;
+    retrievedAt: string;
+    checkIn?: string; // ISO date
+    checkOut?: string; // ISO date
+    travellers?: number;
+  };
 };
 
 export function encodeProposalPayload(payload: ProposalPayload): string {

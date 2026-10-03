@@ -221,3 +221,57 @@ export async function getRoute(from: LatLng, to: LatLng, mode: TravelMode): Prom
     geometry: extractRouteGeometry(feature.geometry),
   };
 }
+
+// Accommodation search across the stay types Geoapify classifies. Place data
+// only: Geoapify carries no rates or availability, and nothing here pretends
+// otherwise.
+export const STAY_CATEGORIES = "accommodation.hotel,accommodation.guest_house,accommodation.hostel,accommodation.apartment";
+
+export type GeoapifyStay = PlaceResult & { website: string | null; phone: string | null; stars: string | null };
+
+export async function searchStays(near: LatLng, radiusMeters = 6000, limit = 12): Promise<GeoapifyStay[]> {
+  const params = new URLSearchParams({
+    categories: STAY_CATEGORIES,
+    filter: `circle:${near.lng},${near.lat},${radiusMeters}`,
+    bias: `proximity:${near.lng},${near.lat}`,
+    limit: String(limit),
+  });
+  params.set("apiKey", requireApiKey());
+  const res = await fetch(`${PLACES_URL}?${params}`);
+  if (!res.ok) throw new Error(`Geoapify places search failed (${res.status})`);
+  type Props = GeoapifyPlaceFeature["properties"] & {
+    website?: string;
+    contact?: { phone?: string };
+    datasource?: { raw?: { stars?: string } };
+  };
+  const data: { features?: { properties: Props; geometry: { coordinates: [number, number] } }[] } = await res.json();
+  const retrievedAt = nowIso();
+  return (data.features ?? [])
+    // A listing with no name is not something to propose to a group.
+    .filter((f) => Boolean(f.properties.name))
+    .map((f) => ({
+      providerId: f.properties.place_id,
+      name: f.properties.name!,
+      formattedAddress: f.properties.formatted ?? null,
+      categories: f.properties.categories ?? [],
+      latitude: f.geometry.coordinates[1],
+      longitude: f.geometry.coordinates[0],
+      distanceMeters: f.properties.distance ?? null,
+      provider: "geoapify",
+      retrievedAt,
+      website: f.properties.website ?? null,
+      phone: f.properties.contact?.phone ?? null,
+      stars: f.properties.datasource?.raw?.stars ?? null,
+    }));
+}
+
+// Place Details (where Geoapify supports it for this id).
+export async function getPlaceDetails(placeId: string): Promise<Partial<GeoapifyStay> | null> {
+  const params = new URLSearchParams({ id: placeId, apiKey: requireApiKey() });
+  const res = await fetch(`https://api.geoapify.com/v2/place-details?${params}`);
+  if (!res.ok) return null;
+  const data: { features?: { properties: Record<string, unknown> }[] } = await res.json();
+  const p = data.features?.[0]?.properties as { name?: string; formatted?: string; website?: string; contact?: { phone?: string } } | undefined;
+  if (!p) return null;
+  return { name: p.name, formattedAddress: p.formatted ?? null, website: p.website ?? null, phone: p.contact?.phone ?? null, retrievedAt: nowIso() };
+}

@@ -3,7 +3,6 @@ import { postActionCard } from "@/lib/action-cards";
 import { mobilityProvider } from "@/lib/providers/mobility";
 import { getOrganiserAuth, resolveRoute, isFailure } from "@/lib/transport";
 import {
-  searchHotels as geoapifySearchHotels,
   searchNearby as geoapifySearchNearby,
   searchPlaceByText,
   getRoute as geoapifyGetRoute,
@@ -24,6 +23,8 @@ import { createExpense } from "@/lib/budget/ledger";
 import { formatMoney, parseMajorToMinor, isCategory, CATEGORY_LABEL } from "@/lib/budget/money";
 import { applyRouteChange, type RouteOp } from "@/lib/trip-route";
 import { recomputeTravellerReadiness } from "@/lib/readiness-engine";
+import { hotelProvider } from "@/lib/travel/hotel-provider";
+import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
@@ -367,7 +368,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   {
     name: "search_hotels",
     description:
-      "Read-only: find REAL hotels near a place — returns names/addresses/locations only, never a fabricated price, rating, or availability. Use for 'where should we stay' / 'hotels near X' questions.",
+      "Read-only: find REAL places to stay near a place — posts a card of names/addresses/locations with Save and Propose buttons. There is NO price, rating or availability data; never state any. Use for 'where should we stay' / 'hotels in X' questions. Never name a hotel yourself.",
     parameters: {
       type: "object",
       properties: {
@@ -1300,7 +1301,7 @@ async function searchPlacesTool(input: Record<string, unknown>, ctx: AgentContex
   const query = (input.query as string)?.trim();
   if (!query) return { output: "A place name is required." };
   if (!isGeoapifyConfigured()) {
-    return { output: "Live place search is temporarily unavailable — I can only reason from stored trip state right now." };
+    return { output: "Live place search is temporarily unavailable — I can only reason from stored trip state right now. Do not name any places from memory." };
   }
 
   const cityPoint = await resolveTripCityPoint(ctx.trip);
@@ -1355,18 +1356,19 @@ async function resolveSearchPoint(
 }
 
 async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
-  if (!isGeoapifyConfigured()) {
-    return { output: "Live hotel search is temporarily unavailable." };
+  if (!hotelProvider.isConfigured()) {
+    return { output: "Live stay search isn't connected in this environment yet, so I can't list real hotels. Don't name any hotels from memory." };
   }
   const located = await resolveSearchPoint((input.near as string | undefined)?.trim(), ctx);
   if ("error" in located) return { output: located.error };
 
   let results;
   try {
-    results = await geoapifySearchHotels(located.point);
+    results = await hotelProvider.search(located.point, { radiusMeters: 5000, limit: 8 });
   } catch (err) {
     return { output: `Live hotel search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
   }
+  const { dates, nights } = tripWindow(ctx.trip);
 
   await postActionCard({
     tripId: ctx.trip.id,
@@ -1374,32 +1376,27 @@ async function searchHotelsTool(input: Record<string, unknown>, ctx: AgentContex
     type: "PLACES",
     status: "CONFIRMED",
     data: {
-      title: `Hotels near ${located.label}`,
-      context: "Real names and locations only — live room rates/availability aren't connected yet.",
-      places: results.map((r) => ({
-        name: r.name,
-        formattedAddress: r.formattedAddress,
-        distanceMeters: r.distanceMeters,
-        latitude: r.latitude,
-        longitude: r.longitude,
-      })),
+      title: `Stays near ${located.label}`,
+      context: "Real places from Geoapify. Live rates and availability aren't connected — each stay says so.",
+      stays: results,
+      stayContext: { destination: located.label, dates, nights, travellers: ctx.trip.members.length },
       provider: results[0]?.provider,
       retrievedAt: results[0]?.retrievedAt,
     },
   });
 
   if (results.length === 0) {
-    return { output: `No hotels found near ${located.label}.`, posted: true };
+    return { output: `No stays found near ${located.label}.`, posted: true };
   }
   return {
-    output: `Found ${results.length} real hotel(s) near ${located.label} (source: Geoapify, just now) — names/locations only, no live pricing or availability.`,
+    output: `Posted ${results.length} real stay(s) near ${located.label} (source: Geoapify, just now) as a card with Save / Propose buttons. Names and locations only — NO prices, ratings or availability exist; do not state any. Do not list them again in text; just say the card is above.`,
     posted: true,
   };
 }
 
 async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
-    return { output: "Live nearby search is temporarily unavailable." };
+    return { output: "Live nearby search is temporarily unavailable. Do not name any restaurants, places or travel times from memory — tell the user live search is not connected." };
   }
   const category = (input.category as string)?.trim();
   if (!category || !(category in NEARBY_CATEGORIES)) {
@@ -1443,7 +1440,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
 
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
-    return { output: "Live routing is temporarily unavailable — I can't measure real distance/time right now." };
+    return { output: "Live routing is temporarily unavailable — I can't measure real distance/time right now. Do not estimate any travel time or distance." };
   }
   const fromText = (input.from as string)?.trim();
   const toText = (input.to as string)?.trim();

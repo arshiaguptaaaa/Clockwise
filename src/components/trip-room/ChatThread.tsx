@@ -101,6 +101,7 @@ export function ChatThread({
               cardData={message.cardData}
               roster={roster}
               currentUserId={currentUserId}
+              organiserId={organiserId}
             />
           ) : (
             <MessageRow

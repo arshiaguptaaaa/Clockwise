@@ -419,6 +419,11 @@ model Booking {
   // Pine Labs hosted checkout URL for PAYMENT_REQUEST rows, so the card can open
   // it. A link is not a payment; status is only ever set from a fetched status.
   paymentUrl     String?
+  // STAY bookings: the stay window and the provider facts the stay was chosen
+  // from (provider, providerPlaceId, retrievedAt, isLiveRate, isBookable).
+  checkIn        DateTime?
+  checkOut       DateTime?
+  detailsJson    String?
   expiresAt      DateTime?
   createdAt      DateTime  @default(now())
 
@@ -1136,4 +1141,25 @@ model TripBudget {
   // JSON: { STAYS?: minor, TRANSPORT?: minor, ... }
   categoryJson String   @default("{}")
   updatedAt    DateTime @updatedAt
+}
+
+// A traveller's private shortlist (e.g. a hotel they hearted). Private to the
+// saver until they propose it; saving never changes the Plan or tells anyone.
+model SavedPlace {
+  id              String   @id @default(cuid())
+  tripId          String
+  userId          String
+  // STAY | RESTAURANT | ATTRACTION | OTHER
+  kind            String   @default("STAY")
+  provider        String
+  providerPlaceId String
+  name            String
+  address         String?
+  latitude        Float?
+  longitude       Float?
+  retrievedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  @@unique([tripId, userId, provider, providerPlaceId])
+  @@index([tripId, userId])
 }

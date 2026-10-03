@@ -154,6 +154,12 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
           : `${str(p.provider)} could not transcribe (${str(p.reason)}${p.httpStatus ? `, HTTP ${str(p.httpStatus)}` : ""}) after ${str(p.latencyMs)} ms. No other provider was substituted.`,
         state: null,
       };
+    case "STAY_PROPOSED":
+      return { understanding: `A stay was proposed: ${str(p.name)} (${str(p.provider)} place ${str(p.providerPlaceId)}). Provider facts only — no rate or availability exists.`, state: "Opened a group vote. The Plan is unchanged." };
+    case "STAY_APPROVED":
+      return { understanding: `The group's vote and the organiser's approval chose ${str(p.name)}.`, state: "Stay is APPROVED but not booked — it is not yet the plan." };
+    case "STAY_CONFIRMED":
+      return { understanding: `${str(p.name)} was marked booked by the organiser.`, state: "Now authoritative: Plan, My Clockwise, \"our hotel\" routing and reminders read this one record." };
     case "EXPENSE_PROPOSED":
       return { understanding: `Money statement understood from chat: ${str(p.title)} — ${money(p.amountMinor, p.currency)}, paid by ${str(p.paidBy)}.`, state: "Held as a proposal. Nothing is on the ledger until the speaker confirms." };
     case "EXPENSE_ADDED": {

@@ -38,11 +38,15 @@ export type ActionCardData = {
   // A Pine Labs payment-link card: the button opens the hosted checkout for
   // this Booking and can ask Pine Labs for the current status.
   payLink?: boolean;
+  // An approved stay waiting for the organiser to mark it booked.
+  stayBooking?: boolean;
 
   // Real live-search results only (src/lib/travel/*) — every entry here
   // came from an actual provider call, never invented. `provider` +
   // `retrievedAt` are shown so old results never look like permanent
   // truth (see spec §10).
+  stays?: import("./travel/hotel-provider").HotelListing[];
+  stayContext?: { destination: string; dates: string | null; nights: number | null; travellers: number };
   places?: {
     name: string;
     formattedAddress: string | null;

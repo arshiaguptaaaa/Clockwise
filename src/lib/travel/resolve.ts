@@ -51,6 +51,21 @@ export async function resolveTripCityPoint(trip: Trip): Promise<ResolvedPlace | 
   return geocodeViaOpenMeteo(destination.name);
 }
 
+// "Our hotel" is the CONFIRMED stay when there is one. A stay that is only
+// proposed/approved is not yet the plan and must not anchor routes. Legacy
+// (non-STAY) bookings with coordinates keep working as before.
+async function findHotelAnchor(tripId: string) {
+  const stay = await prisma.booking.findFirst({
+    where: { tripId, type: "STAY", status: "CONFIRMED", latitude: { not: null }, longitude: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (stay) return stay;
+  return prisma.booking.findFirst({
+    where: { tripId, type: { not: "STAY" }, latitude: { not: null }, longitude: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 const HOTEL_PHRASE = /\b(hotel|airbnb|where we'?r?e? stay(ing)?|our (place|stay|accommodation))\b/i;
 
 // Weather-specific resolver — deliberately independent of Geoapify so
@@ -64,10 +79,7 @@ export async function resolveWeatherLocation(
   const trimmed = text.trim();
 
   if (HOTEL_PHRASE.test(trimmed)) {
-    const hotelBooking = await prisma.booking.findFirst({
-      where: { tripId, latitude: { not: null }, longitude: { not: null } },
-      orderBy: { createdAt: "desc" },
-    });
+    const hotelBooking = await findHotelAnchor(tripId);
     if (hotelBooking?.latitude != null && hotelBooking?.longitude != null) {
       return {
         point: { lat: hotelBooking.latitude, lng: hotelBooking.longitude },
@@ -123,10 +135,7 @@ export async function resolveTripLocationText(
   const trimmed = text.trim();
 
   if (HOTEL_PHRASE.test(trimmed)) {
-    const hotelBooking = await prisma.booking.findFirst({
-      where: { tripId, latitude: { not: null }, longitude: { not: null } },
-      orderBy: { createdAt: "desc" },
-    });
+    const hotelBooking = await findHotelAnchor(tripId);
     if (hotelBooking?.latitude != null && hotelBooking?.longitude != null) {
       return {
         point: { lat: hotelBooking.latitude, lng: hotelBooking.longitude },

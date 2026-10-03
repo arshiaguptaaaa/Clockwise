@@ -9,6 +9,8 @@ import { TravelResultCard } from "./TravelResultCard";
 import { ClockwiseActionCard, type CardPerson } from "./ClockwiseActionCard";
 import { ExpenseCard } from "./ExpenseCard";
 import { PaymentLinkCard } from "./PaymentLinkCard";
+import { StayBookedCard } from "./StayBookedCard";
+import { StayList } from "@/components/stays/StayList";
 import { dismissActionCard } from "@/app/card-actions";
 
 export function ActionCardMessage({
@@ -19,6 +21,7 @@ export function ActionCardMessage({
   cardData,
   roster,
   currentUserId,
+  organiserId,
 }: {
   tripId: string;
   messageId: string;
@@ -27,8 +30,23 @@ export function ActionCardMessage({
   cardData: string;
   roster: CardPerson[];
   currentUserId?: string | null;
+  organiserId?: string;
 }) {
   const data = decodeCard(cardData);
+
+  if (data.stayBooking && data.bookingId) {
+    return <StayBookedCard bookingId={data.bookingId} status={cardStatus} title={data.title} context={data.context} canMark={Boolean(currentUserId && currentUserId === organiserId)} />;
+  }
+
+  if (cardType === "PLACES" && data.stays) {
+    return (
+      <ClockwiseActionCard type="PLACES" title={data.title} context={data.context} status="CONFIRMED">
+        <div className="mt-2.5">
+          <StayList tripId={tripId} listings={data.stays} context={data.stayContext} />
+        </div>
+      </ClockwiseActionCard>
+    );
+  }
 
   if (data.payLink && data.bookingId) {
     return <PaymentLinkCard bookingId={data.bookingId} status={cardStatus} title={data.title} context={data.context} />;

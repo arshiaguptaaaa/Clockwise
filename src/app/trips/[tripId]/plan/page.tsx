@@ -12,6 +12,8 @@ import { TripMapLoader } from "@/components/map/TripMapLoader";
 import { buildDestinationMarkers, buildJourneyLine, destinationsWithoutCoordinates } from "@/components/map/buildTripMarkers";
 import { RouteTimeline } from "@/components/plan/RouteTimeline";
 import { prisma } from "@/lib/prisma";
+import { getTripStay } from "@/lib/stays";
+import { StaySection } from "@/components/plan/StaySection";
 
 export default async function PlanOverviewPage({
   params,
@@ -24,7 +26,13 @@ export default async function PlanOverviewPage({
   // The seeded demo route starts at Delhi, which its photo grid skips. Real
   // trips show every stop — a real Delhi stop must not vanish.
   const middleStops = trip.isDemo ? stops.filter((s) => s.name !== "Delhi") : stops;
-  const mapMarkers = buildDestinationMarkers(stops);
+  const stay = await getTripStay(tripId);
+  const mapMarkers = [
+    ...buildDestinationMarkers(stops),
+    ...(stay?.status === "CONFIRMED" && stay.latitude != null && stay.longitude != null
+      ? [{ id: `stay-${stay.id}`, kind: "hotel" as const, position: { lat: stay.latitude, lng: stay.longitude }, label: stay.placeName ?? "Stay", sublabel: stay.formattedAddress ?? undefined }]
+      : []),
+  ];
   const journeyLine = buildJourneyLine(stops);
   const transportPlans = await prisma.transportPlan.findMany({
     where: { tripId },
@@ -72,6 +80,8 @@ export default async function PlanOverviewPage({
           Not shown on the map (no stored location yet): {unmapped.map((d) => d.name).join(", ")}.
         </p>
       )}
+
+      {stay && <StaySection stay={stay} />}
 
       {middleStops.length > 0 && (
         <>

@@ -14,6 +14,7 @@ import { mobilityProvider } from "./providers/mobility";
 import { createTripPaymentRequest } from "./trip-payments";
 import { commitFromProposal } from "./budget/ledger";
 import { postActionCard } from "./action-cards";
+import { approveStayFromProposal } from "./stays";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -123,6 +124,26 @@ async function executeItineraryChange(proposal: Proposal): Promise<ExecutionResu
 
 async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   const payload = decodeProposalPayload(proposal.payload);
+
+  // A place to stay: the group's choice becomes APPROVED, not booked. Booking
+  // is a separate, explicit step (markStayBooked) because Clockwise has no
+  // booking inventory — it must never claim a stay is booked on a vote alone.
+  if (payload.stay) {
+    const { bookingId } = await approveStayFromProposal({ id: proposal.id, tripId: proposal.tripId, title: proposal.title }, payload.stay);
+    await postActionCard({
+      tripId: proposal.tripId,
+      channel: "GROUP",
+      type: "BOOKING",
+      status: "PENDING",
+      data: {
+        title: "EVERYONE'S ALIGNED ✦",
+        context: `${payload.stay.name} is approved. Book it with the property, then mark it booked here — only then does it become the plan.`,
+        bookingId,
+        stayBooking: true,
+      },
+    });
+    return { ok: true, summary: `Approved ${payload.stay.name} — not booked yet.` };
+  }
 
   // Real fix, not a refactor: this previously marked every booking
   // "CONFIRMED" the instant the organiser approved the PROPOSAL, even one

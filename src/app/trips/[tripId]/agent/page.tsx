@@ -9,6 +9,7 @@ import { CriticalTripAlerts } from "@/components/my-clockwise/CriticalTripAlerts
 import { liveLocationOffer } from "@/lib/readiness-engine";
 import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
+import { getTripStay } from "@/lib/stays";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -37,6 +38,7 @@ export default async function MyClockwisePage({
     getCurrentUserId(),
   ]);
 
+  const stay = await getTripStay(tripId);
   const messages = await prisma.message.findMany({
     where: { tripId: trip.id, channel: "PRIVATE", recipientId: currentUserId },
     include: {
@@ -77,6 +79,13 @@ export default async function MyClockwisePage({
           </SpeechBubble>
         </div>
       </div>
+
+      {stay && (
+        <div className="shrink-0 border-b border-border bg-surface-muted px-4 py-2 text-xs text-foreground" data-my-stay>
+          <span className="font-semibold uppercase tracking-wider text-muted-foreground">Your stay</span>{" "}
+          {stay.placeName} {stay.status === "CONFIRMED" ? "✓ booked" : "· approved, not booked yet"}
+        </div>
+      )}
 
       {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && (
         <div className="shrink-0 border-b border-border bg-surface-muted px-4 py-2 text-xs text-foreground">

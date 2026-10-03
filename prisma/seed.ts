@@ -59,6 +59,7 @@ async function main() {
     await prisma.travellerLocation.deleteMany({ where: { tripId: demoTripId } });
     await prisma.scheduledJob.deleteMany({ where: { tripId: demoTripId } });
     await prisma.emailLog.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.savedPlace.deleteMany({ where: { tripId: demoTripId } });
     await prisma.journeyParticipant.deleteMany({ where: { journey: { tripId: existingDemoTrip.id } } });
     await prisma.journey.deleteMany({ where: { tripId: existingDemoTrip.id } });
     // Uber/mobility rows, deleted child-first: TransportParticipant and

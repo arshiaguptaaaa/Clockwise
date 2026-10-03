@@ -5,6 +5,11 @@ import { useState, useTransition } from "react";
 import { ArrowUp, X } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
 import { askClockwise } from "@/app/ask-actions";
+import { findStaysAction } from "@/app/stay-actions";
+import { StayList } from "@/components/stays/StayList";
+import type { HotelListing } from "@/lib/travel/hotel-provider";
+
+const STAY_WANTS = ["Central", "Pool", "Breakfast", "Pretty", "Budget", "Flexible"];
 
 const TOPICS: { label: string; icon: string; prompt: string }[] = [
   { label: "Get there", icon: "✈", prompt: "Help me figure out how to get there." },
@@ -25,6 +30,22 @@ export function AskClockwise({ tripId }: { tripId: string }) {
   const [busy, start] = useTransition();
   const [answer, setAnswer] = useState<{ q: string; reply: string | null; hasCard: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Find a stay" is a deterministic flow, not a chat: the trip already knows
+  // where/when/how many, so it asks only what matters, then lists provider results.
+  const [stayStep, setStayStep] = useState<null | "wants" | "results">(null);
+  const [wants, setWants] = useState<string[]>([]);
+  const [stays, setStays] = useState<{ listings: HotelListing[]; context: { destination: string; dates: string | null; nights: number | null; travellers: number }; notes: string[]; saved: string[] } | null>(null);
+
+  function searchStays() {
+    setError(null);
+    start(async () => {
+      const r = await findStaysAction(tripId, wants);
+      if (r.ok) {
+        setStays({ listings: r.listings, context: { destination: r.destination, dates: r.dates, nights: r.nights, travellers: r.travellers }, notes: r.notes, saved: r.saved ?? [] });
+        setStayStep("results");
+      } else setError(r.error);
+    });
+  }
 
   function ask(q: string) {
     if (!q.trim() || busy) return;
@@ -68,7 +89,7 @@ export function AskClockwise({ tripId }: { tripId: string }) {
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-4">
               <div className="flex flex-col items-center text-center text-accent-strong">
                 <ClockwiseMark size={44} working={busy} />
-                {!busy && !answer && (
+                {!busy && !answer && !stayStep && (
                   <h2 className="mt-3 font-display text-[28px] leading-[1.05] tracking-tight text-foreground">
                     WHAT ARE WE
                     <br />
@@ -77,13 +98,37 @@ export function AskClockwise({ tripId }: { tripId: string }) {
                 )}
               </div>
 
-              {!busy && !answer && (
+              {stayStep === "wants" && !busy && (
+                <div className="mt-5 text-center">
+                  <h2 className="font-display text-[26px] leading-[1.05] tracking-tight text-foreground">WHAT MATTERS?</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">I already know where, when and how many of you.</p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    {STAY_WANTS.map((w) => (
+                      <button key={w} type="button" onClick={() => setWants((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))} className={`cursor-pointer rounded-full border px-4 py-2 text-sm font-medium ${wants.includes(w) ? "border-accent bg-pop-pink-tint text-accent-strong" : "border-border bg-page"}`}>
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={searchStays} className="mt-5 cursor-pointer rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-accent-foreground">
+                    Find stays
+                  </button>
+                </div>
+              )}
+
+              {stayStep === "results" && stays && (
+                <div className="mt-5">
+                  <h2 className="mb-3 text-center font-display text-[26px] leading-[1.05] tracking-tight text-foreground">STAYS CLOCKWISE FOUND ✦</h2>
+                  <StayList tripId={tripId} listings={stays.listings} context={stays.context} notes={stays.notes} initialSaved={stays.saved} />
+                </div>
+              )}
+
+              {!busy && !answer && !stayStep && (
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   {TOPICS.map((t) => (
                     <button
                       key={t.label}
                       type="button"
-                      onClick={() => ask(t.prompt)}
+                      onClick={() => (t.label === "Find a stay" ? setStayStep("wants") : ask(t.prompt))}
                       className="cursor-pointer rounded-full border border-border bg-page px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent"
                     >
                       <span className="mr-1.5">{t.icon}</span>
