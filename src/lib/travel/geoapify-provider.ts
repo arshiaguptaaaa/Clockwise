@@ -104,13 +104,25 @@ async function resolveAirport(text: string, near?: LatLng): Promise<CanonicalPla
 
 async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
   const key = requireApiKey();
-  const params = new URLSearchParams({ text, apiKey: key, limit: "1", format: "json" });
+  const params = new URLSearchParams({ text, apiKey: key, limit: "5", format: "json" });
   if (near) params.set("bias", `proximity:${near.lng},${near.lat}`);
 
   const res = await fetch(`${GEOCODE_URL}?${params}`);
   if (!res.ok) throw new Error(`Geoapify geocoding failed (${res.status})`);
-  const data: { results?: GeoapifyGeocodeResult[] } = await res.json();
-  const first = data.results?.[0];
+  const data: { results?: (GeoapifyGeocodeResult & { rank?: { importance?: number } })[] } = await res.json();
+  const results = data.results ?? [];
+  // Many Indian place names exist several times over ("Udaipur" is in Rajasthan,
+  // Himachal, Tripura…). A local bias is only trusted when it actually lands
+  // near one candidate (<300 km); otherwise take the provider's most important match
+  // instead of whichever one the bias happened to drag toward.
+  const km = (a: LatLng, b: LatLng) => {
+    const r = (d: number) => (d * Math.PI) / 180;
+    const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(h));
+  };
+  const local = near ? results.find((x) => km(near, { lat: x.lat, lng: x.lon }) < 300) : undefined;
+  const byImportance = [...results].sort((a, b) => (b.rank?.importance ?? 0) - (a.rank?.importance ?? 0))[0];
+  const first = local ?? byImportance ?? results[0];
   if (!first) return null;
 
   return {
