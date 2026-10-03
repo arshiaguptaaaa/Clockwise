@@ -3,8 +3,9 @@
 import assert from "node:assert/strict";
 import { checkRoutePlausibility } from "../../src/lib/location/plausibility";
 import { questionsToAsk, QUESTIONS } from "../../src/lib/traveller/vibe";
+import type { Anchor } from "../../src/lib/travel/resolve";
 
-const anchors: any = [
+const anchors: Anchor[] = [
   { label: "Hotel Trident", point: { lat: 24.5896, lng: 73.7027 }, kind: "stay" },
   { label: "Udaipur, Rajasthan", point: { lat: 24.5787, lng: 73.6863 }, kind: "destination" },
 ];

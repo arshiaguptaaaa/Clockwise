@@ -132,8 +132,17 @@ export async function tripAnchors(tripId: string): Promise<Anchor[]> {
     prisma.destination.findMany({ where: { tripId, latitude: { not: null }, longitude: { not: null } }, orderBy: { order: "asc" } }),
   ]);
   const out: Anchor[] = [];
+  // Destinations saved before place search existed have a name but no coordinates:
+  // resolve those by name (Open-Meteo, the same provider the wizard uses), never guess.
+  const missing = (await prisma.destination.findMany({ where: { tripId, OR: [{ latitude: null }, { longitude: null }] }, orderBy: { order: "asc" }, take: 3 })).filter((d) => d.name);
+  const resolvedMissing: Anchor[] = [];
+  for (const d of missing) {
+    const g = await geocodeViaOpenMeteo(d.name);
+    if (g) resolvedMissing.push({ label: g.label, point: g.point, kind: "destination" });
+  }
   if (stay?.latitude != null && stay.longitude != null) out.push({ label: stay.placeName ?? "your stay", point: { lat: stay.latitude, lng: stay.longitude }, kind: "stay" });
   for (const d of destinations) out.push({ label: d.displayName ?? d.name, point: { lat: d.latitude!, lng: d.longitude! }, kind: "destination" });
+  out.push(...resolvedMissing);
   return out;
 }
 

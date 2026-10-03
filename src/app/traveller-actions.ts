@@ -40,6 +40,9 @@ export async function saveVibeAnswerAction(tripId: string, id: QuestionId, value
 export async function deferVibeAction(tripId: string): Promise<void> {
   const userId = await member(tripId);
   if (!userId) return;
+  // "Later" never downgrades a completed vibe check.
+  const existing = await prisma.vibeCheck.findUnique({ where: { tripId_userId: { tripId, userId } } });
+  if (existing?.status === "COMPLETED") return;
   await prisma.vibeCheck.upsert({ where: { tripId_userId: { tripId, userId } }, create: { tripId, userId, status: "DEFERRED" }, update: { status: "DEFERRED" } });
 }
 
@@ -62,7 +65,8 @@ export async function completeVibeAction(tripId: string): Promise<{ ok: boolean 
       propagation: JSON.stringify(["my-clockwise", "around-you", "ready"]),
     },
   });
-  for (const p of ["agent", "agent/ready", "agent/around"]) revalidatePath(`/trips/${tripId}/${p}`);
+  // Deliberately NOT revalidating here: that would re-render the trip layout and unmount
+  // the vibe check before the "GOT YOUR VIBE." screen is seen. The client refreshes on exit.
   return { ok: true };
 }
 

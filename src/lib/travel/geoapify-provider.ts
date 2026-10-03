@@ -191,7 +191,8 @@ async function placesSearch(params: URLSearchParams): Promise<PlaceResult[]> {
 
   return (data.features ?? []).map((f) => ({
     providerId: f.properties.place_id,
-    name: f.properties.name ?? f.properties.address_line1 ?? "Unnamed place",
+    // An unnamed POI must not borrow its street name ("Bada Bazar Road" is not a store).
+    name: f.properties.name ?? "Unnamed place",
     formattedAddress: f.properties.formatted ?? null,
     categories: f.properties.categories ?? [],
     latitude: f.geometry.coordinates[1],

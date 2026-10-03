@@ -51,7 +51,7 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
 
   const later = () =>
     start(async () => {
-      await deferVibeAction(tripId);
+      if (stage !== "done") await deferVibeAction(tripId);
       setOpen(false);
       router.refresh();
     });
