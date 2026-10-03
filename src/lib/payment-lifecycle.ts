@@ -98,6 +98,16 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
     });
   }
 
+  // Close the "Pay securely" card(s) for this booking once the link is terminal.
+  if (TERMINAL.has(liveStatus)) {
+    const cards = await prisma.message.findMany({ where: { tripId: booking.tripId, cardType: "BOOKING", cardStatus: "PENDING", cardData: { contains: booking.id } }, select: { id: true, cardData: true } });
+    for (const c of cards) {
+      if (c.cardData?.includes('"payLink":true')) {
+        await prisma.message.update({ where: { id: c.id }, data: { cardStatus: liveStatus === "PROCESSED" ? "CONFIRMED" : "DISMISSED" } });
+      }
+    }
+  }
+
   try {
     revalidatePath(`/trips/${booking.tripId}/room`);
   } catch {

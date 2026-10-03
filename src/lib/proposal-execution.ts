@@ -13,6 +13,7 @@ import { getOrganiserAuth, resolveRoute, isFailure } from "./transport";
 import { mobilityProvider } from "./providers/mobility";
 import { createTripPaymentRequest } from "./trip-payments";
 import { commitFromProposal } from "./budget/ledger";
+import { postActionCard } from "./action-cards";
 
 export type ExecutionResult = { ok: true; summary: string } | { ok: false; error: string };
 
@@ -156,6 +157,18 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
       currency: payload.currency ?? "INR",
       actorUserId: proposal.organiserConfirmedBy ?? proposal.createdBy ?? "",
     }).catch((err) => console.error("[budget] commit failed:", err instanceof Error ? err.message : err));
+    await postActionCard({
+      tripId: proposal.tripId,
+      channel: "GROUP",
+      type: "BOOKING",
+      status: "PENDING",
+      data: {
+        title: `Pay ${payload.currency === "EUR" ? "€" : "₹"}${payload.amount} — ${proposal.title.replace(/^Payment needed:\s*/i, "")}`,
+        context: "Opens Pine Labs' hosted checkout. Nothing is marked paid until Pine Labs itself confirms it.",
+        bookingId: result.bookingId,
+        payLink: true,
+      },
+    }).catch((err) => console.error("[payments] pay card failed:", err instanceof Error ? err.message : err));
     return { ok: true, summary: `Payment request created for "${proposal.title}" — ${result.status}.` };
   }
 

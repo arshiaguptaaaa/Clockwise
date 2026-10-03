@@ -8,6 +8,7 @@ import { PaymentCard } from "./PaymentCard";
 import { TravelResultCard } from "./TravelResultCard";
 import { ClockwiseActionCard, type CardPerson } from "./ClockwiseActionCard";
 import { ExpenseCard } from "./ExpenseCard";
+import { PaymentLinkCard } from "./PaymentLinkCard";
 import { dismissActionCard } from "@/app/card-actions";
 
 export function ActionCardMessage({
@@ -28,6 +29,10 @@ export function ActionCardMessage({
   currentUserId?: string | null;
 }) {
   const data = decodeCard(cardData);
+
+  if (data.payLink && data.bookingId) {
+    return <PaymentLinkCard bookingId={data.bookingId} status={cardStatus} title={data.title} context={data.context} />;
+  }
 
   if (data.expenseId) {
     return (

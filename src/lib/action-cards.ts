@@ -35,6 +35,9 @@ export type ActionCardData = {
   // this Expense; nothing is recorded until then. proposerId = who may act on it.
   expenseId?: string;
   proposerId?: string;
+  // A Pine Labs payment-link card: the button opens the hosted checkout for
+  // this Booking and can ask Pine Labs for the current status.
+  payLink?: boolean;
 
   // Real live-search results only (src/lib/travel/*) — every entry here
   // came from an actual provider call, never invented. `provider` +

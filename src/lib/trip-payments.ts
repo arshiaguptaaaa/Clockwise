@@ -92,7 +92,7 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
 
   await prisma.booking.update({
     where: { id: booking.id },
-    data: { status: result.status, confirmationId: result.paymentLinkId },
+    data: { status: result.status, confirmationId: result.paymentLinkId, paymentUrl: result.paymentLinkUrl },
   });
   // Creating the link is recorded as exactly that — a link, not a payment.
   await prisma.tripEvent.create({

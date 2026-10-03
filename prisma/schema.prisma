@@ -416,6 +416,9 @@ model Booking {
   currency       String?
   provider       String
   confirmationId String?
+  // Pine Labs hosted checkout URL for PAYMENT_REQUEST rows, so the card can open
+  // it. A link is not a payment; status is only ever set from a fetched status.
+  paymentUrl     String?
   expiresAt      DateTime?
   createdAt      DateTime  @default(now())
 
