@@ -113,7 +113,7 @@ async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace 
 
   const res = await fetch(`${GEOCODE_URL}?${params}`);
   if (!res.ok) throw new Error(`Geoapify geocoding failed (${res.status})`);
-  const data: { results?: (GeoapifyGeocodeResult & { rank?: { importance?: number } })[] } = await res.json();
+  const data: { results?: (GeoapifyGeocodeResult & { rank?: { importance?: number }; result_type?: string })[] } = await res.json();
   const results = data.results ?? [];
   // Many Indian place names exist several times over ("Udaipur" is in Rajasthan,
   // Himachal, Tripura…). A local bias is only trusted when it actually lands
@@ -128,7 +128,11 @@ async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace 
   const topImportance = byImportance?.rank?.importance ?? 0;
   // The local candidate must also be a plausibly important match: a tiny village sharing
   // the name that happens to sit near the trip's anchor city is not what a traveller meant.
-  const local = near
+  // City-level names are the ambiguous ones ("Udaipur" exists in many states), and a
+  // trip's anchor city says nothing about which one a traveller means — so for those
+  // the provider's most important match wins outright. Bias only helps streets/POIs.
+  const cityLevel = ["city", "county", "state", "locality", "district", "postcode", "country"].includes(byImportance?.result_type ?? "");
+  const local = near && !cityLevel
     ? results.find((x) => km(near, { lat: x.lat, lng: x.lon }) < 300 && (topImportance === 0 || (x.rank?.importance ?? 0) >= 0.75 * topImportance))
     : undefined;
   const first = local ?? byImportance ?? results[0];

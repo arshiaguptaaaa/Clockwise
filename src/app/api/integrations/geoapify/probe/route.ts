@@ -11,6 +11,8 @@ export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams;
   const fromText = q.get("from") ?? "Udaipur Airport";
   const toText = q.get("to") ?? "Lake Pichola, Udaipur";
+  const bias = (q.get("bias") ?? "").split(",").map(Number);
+  const near = bias.length === 2 && bias.every(Number.isFinite) ? { lat: bias[0], lng: bias[1] } : undefined;
   const mode = (q.get("mode") ?? "drive") as "walk" | "drive" | "transit" | "bicycle";
   const out: Record<string, unknown> = { configured: true };
   const step = async (name: string, fn: () => Promise<unknown>) => {
@@ -23,12 +25,12 @@ export async function GET(request: NextRequest) {
   let from: { lat: number; lng: number } | null = null;
   let to: { lat: number; lng: number } | null = null;
   await step("geocodeFrom", async () => {
-    const r = await resolveLocationText(fromText);
+    const r = await resolveLocationText(fromText, near);
     if (r) from = { lat: r.latitude, lng: r.longitude };
     return { query: fromText, result: r ? { label: r.displayName, lat: r.latitude, lng: r.longitude } : null };
   });
   await step("geocodeTo", async () => {
-    const r = await resolveLocationText(toText);
+    const r = await resolveLocationText(toText, near);
     if (r) to = { lat: r.latitude, lng: r.longitude };
     return { query: toText, result: r ? { label: r.displayName, lat: r.latitude, lng: r.longitude } : null };
   });
