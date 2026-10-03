@@ -61,6 +61,48 @@ type GeoapifyGeocodeResult = {
 // the Open-Meteo destination resolver (Stage 3 consolidation) so routing/
 // map/weather code never has to branch on which provider produced a point.
 export async function resolveLocationText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
+  // Text geocoding is unreliable for airports ("Maharana Pratap Airport" came back as
+  // a ground in the same city; "Udaipur Airport" as another state's Udaipur). Resolve the
+  // city first, then take the provider's own airport POI near it.
+  if (/\bairport\b/i.test(text)) {
+    const airport = await resolveAirport(text, near);
+    if (airport) return airport;
+  }
+  return geocodeText(text, near);
+}
+
+async function resolveAirport(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
+  const area = text.replace(/\b(international|domestic)?\s*airport\b/gi, "").replace(/\s+/g, " ").trim();
+  const anchor = area ? await geocodeText(area, near) : null;
+  const centre = anchor ? { lat: anchor.latitude, lng: anchor.longitude } : near;
+  if (!centre) return null;
+  const params = new URLSearchParams({
+    categories: "airport",
+    filter: `circle:${centre.lng},${centre.lat},40000`,
+    bias: `proximity:${centre.lng},${centre.lat}`,
+    limit: "5",
+    apiKey: requireApiKey(),
+  });
+  const res = await fetch(`${PLACES_URL}?${params}`);
+  if (!res.ok) return null;
+  const data: { features?: GeoapifyPlaceFeature[] } = await res.json();
+  const best = (data.features ?? []).find((f) => /airport|airfield/i.test(f.properties.name ?? "")) ?? data.features?.[0];
+  if (!best) return null;
+  return {
+    displayName: best.properties.formatted ?? best.properties.name ?? text,
+    name: best.properties.name ?? text,
+    city: anchor?.city ?? null,
+    region: anchor?.region ?? null,
+    country: anchor?.country ?? null,
+    countryCode: anchor?.countryCode ?? null,
+    latitude: best.geometry.coordinates[1],
+    longitude: best.geometry.coordinates[0],
+    provider: "geoapify",
+    providerPlaceId: best.properties.place_id,
+  };
+}
+
+async function geocodeText(text: string, near?: LatLng): Promise<CanonicalPlace | null> {
   const key = requireApiKey();
   const params = new URLSearchParams({ text, apiKey: key, limit: "1", format: "json" });
   if (near) params.set("bias", `proximity:${near.lng},${near.lat}`);
