@@ -132,12 +132,17 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   // once Pine Labs reports PROCESSED (see the webhook,
   // /api/integrations/pinelabs/webhook).
   if (payload.amount != null && payload.amount > 0) {
+    const payerId = proposal.organiserConfirmedBy ?? proposal.createdBy ?? undefined;
+    const payer = payerId ? await prisma.user.findUnique({ where: { id: payerId }, select: { name: true, email: true, phone: true } }) : null;
     const result = await createTripPaymentRequest({
       tripId: proposal.tripId,
       purpose: proposal.title,
       amountMinorUnits: Math.round(payload.amount * 100),
       currency: payload.currency ?? "INR",
       sourceProposalId: proposal.id,
+      payerId,
+      payerName: payer?.name,
+      payerContact: payer?.email ?? payer?.phone ?? undefined,
     });
     if (!result.ok) {
       return { ok: false, error: `Couldn't create the payment request: ${result.reason}` };

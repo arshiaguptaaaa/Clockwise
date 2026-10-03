@@ -6,7 +6,7 @@ Status: code complete against Pine Labs' published docs; **not yet run against a
 
 | Item | Where it comes from | Env var (Vercel → Production) |
 |---|---|---|
-| UAT base URL | Docs: `https://pluraluat.v2.pinepg.in` (production host comes from Pine Labs at go-live) | `PINELABS_API_BASE_URL` |
+| UAT base URL | Docs: `https://pluraluat.v2.pinepg.in` (production host comes from Pine Labs at go-live) | `PINELABS_API_BASE_URL` (canonical; `PINELABS_BASE_URL` still accepted as a legacy alias — delete it once the canonical one is set) |
 | Client ID | Pine Labs Online dashboard → Settings → API Keys (test mode) | `PINELABS_CLIENT_ID` |
 | Client secret | same | `PINELABS_CLIENT_SECRET` |
 | Webhook secret | Dashboard → Settings (the signing secret; base64) | `PINELABS_WEBHOOK_SECRET` |

@@ -6,6 +6,7 @@ import { MessageRow, type MessageAttachment } from "./MessageRow";
 import { FailedClockwiseMessage } from "./FailedClockwiseMessage";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { Composer } from "./Composer";
+import { AskClockwise } from "./AskClockwise";
 import { ProposalCard, type ProposalCardData } from "./ProposalCard";
 import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
@@ -113,12 +114,15 @@ export function ChatThread({
             />
           )
         )}
-        {messages.length === 0 && !isThinking && (
+        {messages.length === 0 && !(isThinking && channel === "PRIVATE") && (
           <p className="pt-12 text-center text-sm text-muted-foreground">{emptyText}</p>
         )}
-        {isThinking && <ThinkingIndicator />}
+        {/* Group chat is human-first: Clockwise works silently there. A working
+            state belongs only to the private Clockwise conversation. */}
+        {isThinking && channel === "PRIVATE" && <ThinkingIndicator />}
       </div>
 
+      {channel === "GROUP" && <AskClockwise tripId={tripId} />}
       <Composer
         tripId={tripId}
         channel={channel}

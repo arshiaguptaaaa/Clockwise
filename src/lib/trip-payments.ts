@@ -30,6 +30,9 @@ export type CreateTripPaymentRequestInput = {
   currency: string;
   payerName?: string;
   payerContact?: string;
+  // The traveller who will settle this link (the organiser who confirmed it).
+  // Used as the Budget payer once Pine Labs reports PROCESSED.
+  payerId?: string;
   sourceProposalId?: string;
 };
 
@@ -56,16 +59,27 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
       amount: input.amountMinorUnits,
       currency: input.currency,
       sourceProposalId: input.sourceProposalId,
+      payerId: input.payerId,
     },
   });
+
+  // Pine Labs rejects a link with no customer (400 "Customer Information is
+  // required"). Real travellers' own email/phone are used; only against the UAT
+  // host, where no real payment can happen, a clearly fake test customer stands in.
+  const isUat = /uat/i.test(process.env.PINELABS_API_BASE_URL || process.env.PINELABS_BASE_URL || "");
+  const contact = input.payerContact || (isUat ? "uat-test@example.com" : undefined);
+  if (!contact) {
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: "FAILED" } });
+    return { ok: false, reason: "The payer has no email or phone on file, which Pine Labs requires.", bookingId: booking.id };
+  }
 
   const result = await createPaymentLink({
     merchantReference: booking.id,
     amountMinorUnits: input.amountMinorUnits,
     currency: input.currency,
     purpose: input.purpose,
-    customerName: input.payerName,
-    ...(input.payerContact?.includes("@") ? { customerEmail: input.payerContact } : { customerMobile: input.payerContact }),
+    customerName: input.payerName ?? (isUat ? "Clockwise UAT Test" : undefined),
+    ...(contact.includes("@") ? { customerEmail: contact } : { customerMobile: contact }),
     // Where the payer is sent after the hosted page: our own landing route,
     // which re-fetches the real status. Not the webhook endpoint.
     callbackUrl: `${getAppBaseUrl()}/api/payments/return?booking=${booking.id}`,
