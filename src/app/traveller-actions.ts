@@ -6,7 +6,10 @@ import { getCurrentUserId } from "@/lib/session";
 import { destinationSearchProvider } from "@/lib/destination-search/open-meteo-provider";
 import { QUESTIONS, setPref, getPrefs, type QuestionId } from "@/lib/traveller/vibe";
 import { confirmJourney, discardJourney, createPendingJourney, type JourneyFacts } from "@/lib/traveller/journey";
-import { searchAround, brandSearch, type AroundPlace } from "@/lib/travel/around";
+import { searchAroundPoint, brandSearch, resolveAnchor, anchorsFor, whyPicked, type AroundPlace, type AnchorType } from "@/lib/travel/around";
+import { getRoute } from "@/lib/travel/geoapify-provider";
+import { savedOverlaps } from "@/lib/travel/saved-overlap";
+import type { TravelMode } from "@/lib/travel/types";
 import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
 
 async function member(tripId: string) {
@@ -104,43 +107,109 @@ export async function toggleChecklistAction(tripId: string, key: string, done: b
 }
 
 // ---- Around You ----------------------------------------------------------------
+// Current location is PRIVATE traveller state: it arrives with a request the
+// traveller explicitly made, is used for that one search, and is never stored,
+// logged or shown to the group. Trace events record THAT a search happened and
+// from which kind of anchor, never the coordinates.
 
-async function recordAround(tripId: string, userId: string, payload: Record<string, unknown>) {
+export type Me = { lat: number; lng: number } | null;
+
+async function personalEvent(tripId: string, userId: string, kind: string, payload: Record<string, unknown>) {
   await prisma.tripEvent
     .create({
-      data: { tripId, kind: "AROUND_YOU_REFRESHED", scope: "PERSONAL", actorUserId: userId, subjectUserId: userId, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify(payload), propagation: JSON.stringify(["around-you"]) },
+      data: { tripId, kind, scope: "PERSONAL", actorUserId: userId, subjectUserId: userId, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify(payload), propagation: JSON.stringify(["around-you"]) },
     })
     .catch(() => undefined);
 }
 
+export async function locationEventAction(tripId: string, step: "requested" | "granted" | "denied"): Promise<void> {
+  const userId = await member(tripId);
+  if (!userId) return;
+  const kind = step === "requested" ? "LOCATION_REQUESTED" : step === "granted" ? "LOCATION_PERMISSION_GRANTED" : "LOCATION_PERMISSION_DENIED";
+  await personalEvent(tripId, userId, kind, { source: "browser-geolocation", at: new Date().toISOString(), stored: false });
+}
+
 export type AroundResponse =
-  | { ok: true; anchorKind: "stay" | "destination"; anchorLabel: string; category: string; places: AroundPlace[]; retrievedAt: string; note?: string; saved: string[] }
+  | { ok: true; anchorType: AnchorType; anchorLabel: string; category: string; places: AroundPlace[]; why: Record<string, string>; retrievedAt: string; note?: string; saved: string[] }
   | { ok: false; error: string };
 
-export async function aroundSearchAction(tripId: string, category: string, diet?: "vegetarian" | "vegan" | "halal"): Promise<AroundResponse> {
+export type AnchorStatus = Record<"stay" | "arrival" | "destination", { available: boolean; label?: string }>;
+
+export async function anchorStatusAction(tripId: string): Promise<AnchorStatus | null> {
+  const userId = await member(tripId);
+  if (!userId) return null;
+  const a = await anchorsFor(tripId, userId);
+  return {
+    stay: { available: Boolean(a.stay), label: a.stay?.label },
+    arrival: { available: Boolean(a.arrival), label: a.arrival?.label },
+    destination: { available: Boolean(a.destination), label: a.destination?.label },
+  };
+}
+
+async function savedIds(tripId: string, userId: string) {
+  return (await prisma.savedPlace.findMany({ where: { tripId, userId }, select: { providerPlaceId: true } })).map((s) => s.providerPlaceId);
+}
+
+export async function aroundSearchAction(tripId: string, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; anchor: AnchorType; me?: Me }): Promise<AroundResponse> {
   const userId = await member(tripId);
   if (!userId) return { ok: false, error: "Sign in first." };
   if (!(category in AROUND_CATEGORIES)) return { ok: false, error: "Unknown category." };
-  const r = await searchAround(tripId, category, { diet });
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  const r = await searchAroundPoint(a.anchor, category, { diet: opts.diet });
   if (!r.ok) return r;
-  await recordAround(tripId, userId, { provider: "geoapify", category, diet: diet ?? null, anchorType: r.anchor.kind, anchor: r.anchor.label, resultCount: r.places.length, walkMinutesFromProvider: r.places.filter((p) => p.walkMinutes != null).length, retrievedAt: r.retrievedAt });
-  const saved = (await prisma.savedPlace.findMany({ where: { tripId, userId }, select: { providerPlaceId: true } })).map((s) => s.providerPlaceId);
-  return { ok: true, anchorKind: r.anchor.kind, anchorLabel: r.anchor.label, category, places: r.places, retrievedAt: r.retrievedAt, note: diet ? `Found using Geoapify's ${diet} search — a provider filter, not a check of each place.` : undefined, saved };
+  const base = { provider: "geoapify", category, diet: opts.diet ?? null, anchorType: a.anchor.kind, resultCount: r.places.length, walkMinutesFromProvider: r.places.filter((p) => p.walkMinutes != null).length, retrievedAt: r.retrievedAt };
+  // Hotel / destination / arrival anchors name a place; ME is recorded only as "current location".
+  await personalEvent(tripId, userId, "PLACES_SEARCH_COMPLETED", { ...base, anchor: a.anchor.kind === "me" ? "current location (user-authorised)" : a.anchor.label, tool: "around-you" });
+  if (a.anchor.kind === "me") await personalEvent(tripId, userId, "LOCATION_SEARCH_COMPLETED", { provider: "geoapify", category, resultCount: r.places.length, retrievedAt: r.retrievedAt, coordinatesStored: false });
+  const prefs = await getPrefs(tripId, userId);
+  const why: Record<string, string> = {};
+  for (const p of r.places) {
+    const w = whyPicked(category, { energy: prefs.energy, nearby: prefs.nearby, food: prefs.food }, opts.diet);
+    if (w) why[p.providerPlaceId] = w;
+  }
+  return { ok: true, anchorType: a.anchor.kind, anchorLabel: a.anchor.label, category, places: r.places, why, retrievedAt: r.retrievedAt, note: opts.diet ? `Found using Geoapify's ${opts.diet} search. That's a provider filter, not a check of each place.` : undefined, saved: await savedIds(tripId, userId) };
 }
 
-export async function brandSearchAction(tripId: string, brand: string): Promise<AroundResponse> {
+export async function brandSearchAction(tripId: string, brand: string, opts: { anchor: AnchorType; me?: Me }): Promise<AroundResponse> {
   const userId = await member(tripId);
   if (!userId) return { ok: false, error: "Sign in first." };
   const q = brand.trim().slice(0, 60);
   if (!q) return { ok: false, error: "Type a store name." };
-  const r = await brandSearch(tripId, q);
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  const r = await brandSearch(tripId, q, a.anchor);
   if (!r.ok) return r;
-  await recordAround(tripId, userId, { provider: "geoapify", category: "brand", brand: q, anchorType: r.anchor.kind, anchor: r.anchor.label, found: r.found.length, alternatives: r.alternatives.length, retrievedAt: r.retrievedAt });
-  const saved = (await prisma.savedPlace.findMany({ where: { tripId, userId }, select: { providerPlaceId: true } })).map((s) => s.providerPlaceId);
-  return { ok: true, anchorKind: r.anchor.kind, anchorLabel: r.anchor.label, category: "convenience", places: r.places, retrievedAt: r.retrievedAt, note: r.note, saved };
+  await personalEvent(tripId, userId, "PLACES_SEARCH_COMPLETED", { provider: "geoapify", category: "brand", brand: q, anchorType: a.anchor.kind, anchor: a.anchor.kind === "me" ? "current location (user-authorised)" : a.anchor.label, resultCount: r.places.length, matchedBrand: r.found.length > 0, retrievedAt: r.retrievedAt, tool: "around-you" });
+  if (a.anchor.kind === "me") await personalEvent(tripId, userId, "LOCATION_SEARCH_COMPLETED", { provider: "geoapify", category: "brand", resultCount: r.places.length, retrievedAt: r.retrievedAt, coordinatesStored: false });
+  return { ok: true, anchorType: a.anchor.kind, anchorLabel: a.anchor.label, category: "convenience", places: r.places, why: {}, retrievedAt: r.retrievedAt, note: r.note, saved: await savedIds(tripId, userId) };
 }
 
-export async function toggleSavePlaceAction(tripId: string, place: AroundPlace, kind: string): Promise<{ ok: boolean; saved?: boolean }> {
+export type RouteLeg = { mode: TravelMode; distanceMeters: number; durationMinutes: number };
+export type RouteResponse =
+  | { ok: true; fromLabel: string; toLabel: string; legs: RouteLeg[]; geometry: { lat: number; lng: number }[] | null; retrievedAt: string }
+  | { ok: false; error: string };
+
+// ROUTE: anchor -> chosen place, every number from Geoapify routing. Only modes the
+// provider actually returned are shown (walking and driving; a mode that errors is omitted).
+export async function routeToPlaceAction(tripId: string, place: { name: string; lat: number; lng: number }, opts: { anchor: AnchorType; me?: Me }): Promise<RouteResponse> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  const modes: TravelMode[] = ["walk", "drive"];
+  const results = await Promise.all(modes.map((m) => getRoute(a.anchor.point, { lat: place.lat, lng: place.lng }, m).catch(() => null)));
+  const legs: RouteLeg[] = [];
+  results.forEach((r, i) => {
+    if (r) legs.push({ mode: modes[i], distanceMeters: r.distanceMeters, durationMinutes: Math.max(1, Math.round(r.durationSeconds / 60)) });
+  });
+  if (legs.length === 0) return { ok: false, error: "Geoapify couldn't route to this place from here. I won't estimate it." };
+  const retrievedAt = results.find(Boolean)!.retrievedAt;
+  await personalEvent(tripId, userId, "ROUTE_COMPLETED", { provider: "geoapify", anchorType: a.anchor.kind, from: a.anchor.kind === "me" ? "current location (user-authorised)" : a.anchor.label, to: place.name, modes: legs.map((l) => ({ mode: l.mode, distanceMeters: Math.round(l.distanceMeters), durationMinutes: l.durationMinutes })), retrievedAt, tool: "around-you" });
+  return { ok: true, fromLabel: a.anchor.kind === "me" ? "Where you are" : a.anchor.label, toLabel: place.name, legs, geometry: results[0]?.geometry ?? null, retrievedAt };
+}
+
+export async function toggleSavePlaceAction(tripId: string, place: AroundPlace, kind: string): Promise<{ ok: boolean; saved?: boolean; overlap?: number }> {
   const userId = await member(tripId);
   if (!userId) return { ok: false };
   const key = { tripId_userId_provider_providerPlaceId: { tripId, userId, provider: place.provider, providerPlaceId: place.providerPlaceId } };
@@ -152,6 +221,11 @@ export async function toggleSavePlaceAction(tripId: string, place: AroundPlace, 
   }
   await prisma.savedPlace.create({ data: { tripId, userId, kind: kind.toUpperCase().slice(0, 20), provider: place.provider, providerPlaceId: place.providerPlaceId, name: place.name, address: place.address, latitude: place.lat, longitude: place.lng, retrievedAt: new Date(place.retrievedAt) } });
   await prisma.tripEvent.create({ data: { tripId, kind: "SAVED_PLACE_ADDED", scope: "PERSONAL", actorUserId: userId, subjectUserId: userId, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify({ provider: place.provider, providerPlaceId: place.providerPlaceId, kind }), propagation: "[]" } }).catch(() => undefined);
+  // Overlap is a COUNT, never names: it only exists once at least two travellers saved the same real place.
+  const overlap = (await savedOverlaps(tripId, userId)).find((o) => o.providerPlaceId === place.providerPlaceId);
+  if (overlap) {
+    await prisma.tripEvent.create({ data: { tripId, kind: "PLACE_OVERLAP_DETECTED", scope: "PERSONAL", actorUserId: userId, subjectUserId: userId, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify({ provider: place.provider, providerPlaceId: place.providerPlaceId, name: place.name, savedBy: overlap.count, members: overlap.members }), propagation: JSON.stringify(["saved"]) } }).catch(() => undefined);
+  }
   revalidatePath(`/trips/${tripId}/agent/saved`);
-  return { ok: true, saved: true };
+  return { ok: true, saved: true, overlap: overlap?.count };
 }

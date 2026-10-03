@@ -3,37 +3,173 @@
 import { useEffect, useState, useTransition } from "react";
 import { Heart } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
-import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, type AroundResponse } from "@/app/traveller-actions";
-import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
+import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import { AROUND_CATEGORIES, countWord } from "@/lib/travel/around-categories";
 
 type Ok = Extract<AroundResponse, { ok: true }>;
+type RouteOk = Extract<RouteResponse, { ok: true }>;
+type Anchor = "me" | "stay" | "arrival" | "destination";
+// Current location lives ONLY in this component's memory: never stored, never sent to the group.
+type Fix = { lat: number; lng: number; at: number };
 
-export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCategory }: { tripId: string; anchorKind: "stay" | "destination"; anchorLabel: string; ordered: string[]; initialCategory?: string }) {
+const FRESH_MS = 10 * 60 * 1000;
+const MODE_LABEL: Record<string, string> = { walk: "Walking", drive: "Driving", bicycle: "Cycling", transit: "Transit" };
+
+function minutesAgo(at: number, now: number) {
+  const m = Math.max(0, Math.round((now - at) / 60000));
+  return m < 1 ? "just now" : `${m} min ago`;
+}
+
+function RouteMap({ geometry }: { geometry: { lat: number; lng: number }[] }) {
+  const W = 280;
+  const H = 120;
+  const lats = geometry.map((p) => p.lat);
+  const lngs = geometry.map((p) => p.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const sx = (maxLng - minLng) || 1e-6;
+  const sy = (maxLat - minLat) || 1e-6;
+  const pad = 10;
+  const pt = (p: { lat: number; lng: number }) => [pad + ((p.lng - minLng) / sx) * (W - 2 * pad), H - pad - ((p.lat - minLat) / sy) * (H - 2 * pad)] as const;
+  const pts = geometry.map(pt);
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-28 w-full rounded-lg bg-surface" role="img" aria-label="Provider route geometry">
+      <polyline points={pts.map((p) => p.join(",")).join(" ")} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-accent-strong" />
+      <circle cx={first[0]} cy={first[1]} r="5" className="fill-foreground" />
+      <circle cx={last[0]} cy={last[1]} r="5" className="fill-accent-strong" />
+    </svg>
+  );
+}
+
+export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe }: { tripId: string; ordered: string[]; initialCategory?: string; anchors: AnchorStatus; wantsMe?: boolean }) {
   const [cat, setCat] = useState<string>(initialCategory && ordered.includes(initialCategory) ? initialCategory : ordered[0]);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [fix, setFix] = useState<Fix | null>(null);
+  const [loc, setLoc] = useState<"idle" | "asking" | "denied" | "failed">("idle");
   const [res, setRes] = useState<Ok | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [veg, setVeg] = useState(false);
   const [maxWalk, setMaxWalk] = useState<number | null>(null);
   const [brand, setBrand] = useState("");
   const [saved, setSaved] = useState<string[]>([]);
+  const [overlap, setOverlap] = useState<{ id: string; name: string; count: number } | null>(null);
+  const [routeFor, setRouteFor] = useState<string | null>(null);
+  const [route, setRoute] = useState<RouteOk | null>(null);
+  const [routeErr, setRouteErr] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [busy, start] = useTransition();
 
-  const run = (c: string, diet?: "vegetarian") =>
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fallback: Anchor | null = anchors.stay.available ? "stay" : anchors.destination.available ? "destination" : null;
+
+  // Asks the browser for permission ONLY when the traveller pressed a button.
+  const requestMyLocation = () => {
+    setErr(null);
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLoc("failed");
+      return;
+    }
+    setLoc("asking");
+    void locationEventAction(tripId, "requested");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const f = { lat: pos.coords.latitude, lng: pos.coords.longitude, at: Date.now() };
+        setFix(f);
+        setLoc("idle");
+        setAnchor("me");
+        void locationEventAction(tripId, "granted");
+      },
+      (e) => {
+        setFix(null);
+        setLoc(e.code === 1 ? "denied" : "failed");
+        if (e.code === 1) void locationEventAction(tripId, "denied");
+      },
+      { enableHighAccuracy: false, timeout: 12_000, maximumAge: 0 }
+    );
+  };
+
+  const pickAnchor = (a: Anchor) => {
+    if (a === "me") {
+      // A fix older than 10 minutes is re-requested rather than silently reused.
+      if (!fix || now - fix.at > FRESH_MS) requestMyLocation();
+      else setAnchor("me");
+      return;
+    }
+    setAnchor(a);
+  };
+
+  const me = anchor === "me" && fix ? { lat: fix.lat, lng: fix.lng } : null;
+
+  const run = (c: string, a: Anchor, diet?: "vegetarian") =>
     start(async () => {
       setErr(null);
-      const r = await aroundSearchAction(tripId, c, diet);
+      setRouteFor(null);
+      const r = await aroundSearchAction(tripId, c, { diet, anchor: a, me });
       if (r.ok) {
         setRes(r);
         setSaved(r.saved);
-      } else setErr(r.error);
+      } else {
+        setRes(null);
+        setErr(r.error);
+      }
     });
 
   useEffect(() => {
-    run(cat, veg && (cat === "restaurant" || cat === "cafe") ? "vegetarian" : undefined);
+    if (!anchor) return;
+    run(cat, anchor, veg && (cat === "restaurant" || cat === "cafe") ? "vegetarian" : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cat, veg]);
+  }, [cat, veg, anchor, fix?.at]);
 
   const shown = res?.places.filter((p) => maxWalk == null || (p.walkMinutes != null && p.walkMinutes <= maxWalk)) ?? [];
+  const anchorChips: { id: Anchor; icon: string; label: string; ok: boolean; why?: string }[] = [
+    { id: "me", icon: "📍", label: "ME", ok: true },
+    { id: "stay", icon: "🏨", label: "HOTEL", ok: anchors.stay.available, why: "No confirmed stay yet" },
+    { id: "arrival", icon: "✈", label: "ARRIVAL", ok: anchors.arrival.available, why: "Confirm your journey first" },
+    { id: "destination", icon: "◎", label: "DESTINATION", ok: anchors.destination.available, why: "No destination yet" },
+  ];
+  const where =
+    anchor === "me" ? "WHERE YOU ARE" : anchor === "stay" ? "YOUR HOTEL" : anchor === "arrival" ? "YOUR ARRIVAL POINT" : anchor === "destination" ? (anchors.destination.label ?? "THE DESTINATION").split(",")[0].toUpperCase() : "";
+
+  // ---- Step 1: nothing is known about where the traveller is until they say so.
+  if (!anchor) {
+    return (
+      <div className="space-y-5" data-around-intro>
+        <header className="flex items-start gap-3">
+          <span className="mt-1 text-accent-strong">
+            <ClockwiseMark size={28} working={loc === "asking"} />
+          </span>
+          <div>
+            <h1 className="font-display text-[28px] leading-[1.05]">WHAT&apos;S AROUND YOU RIGHT NOW?</h1>
+            <p className="mt-1 text-xs text-muted-foreground">{wantsMe ? "To search around where you are, I need your location. Tap the button." : "Your location is private. It's used for one search, never stored, never shown to the group."}</p>
+          </div>
+        </header>
+        <div className="flex flex-col gap-2">
+          <button type="button" onClick={requestMyLocation} disabled={loc === "asking"} data-use-my-location className="cursor-pointer rounded-full bg-accent px-5 py-3 text-sm font-semibold text-accent-foreground disabled:opacity-60">
+            {loc === "asking" ? "ASKING YOUR BROWSER…" : "USE MY LOCATION"}
+          </button>
+          {fallback && (
+            <button type="button" onClick={() => setAnchor(fallback)} data-around-fallback className="cursor-pointer rounded-full border border-border px-5 py-3 text-sm font-semibold">
+              {fallback === "stay" ? "AROUND OUR HOTEL" : `AROUND ${(anchors.destination.label ?? "THE DESTINATION").split(",")[0].toUpperCase()}`}
+            </button>
+          )}
+        </div>
+        {(loc === "denied" || loc === "failed") && (
+          <p className="rounded-xl bg-pop-yellow-tint px-3 py-2 text-sm" data-location-off>
+            {loc === "denied" ? "Location's off." : "I couldn't get a fix on your location."} {fallback === "stay" ? "I can search around your hotel instead." : fallback ? "I can search around the destination instead." : "Add a destination and I can search around that."}
+          </p>
+        )}
+        {!fallback && loc === "idle" && <p className="text-sm text-muted-foreground">Add a destination first. Without your location, there&apos;s nothing to centre on yet.</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -42,10 +178,53 @@ export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCat
           <ClockwiseMark size={28} working={busy} />
         </span>
         <div>
-          <h1 className="font-display text-[26px] leading-[1.05]">{anchorKind === "stay" ? "AROUND YOUR STAY" : `AROUND ${anchorLabel.split(",")[0].toUpperCase()}`}</h1>
-          <p className="text-xs text-muted-foreground">{anchorKind === "stay" ? anchorLabel : "Based around the destination for now. Once your stay is confirmed, I'll centre this around your hotel."}</p>
+          <h1 className="font-display text-[26px] leading-[1.05]">AROUND {where}</h1>
+          <p className="text-xs text-muted-foreground" data-anchor-note>
+            {anchor === "me" && fix
+              ? `Location from ${minutesAgo(fix.at, now)}. Private to you.`
+              : anchor === "stay"
+                ? anchors.stay.label
+                : anchor === "arrival"
+                  ? anchors.arrival.label
+                  : "Based around the destination. It isn't your hotel or where you are."}
+            {anchor === "me" && fix && (
+              <button type="button" onClick={requestMyLocation} className="ml-2 cursor-pointer font-semibold text-accent">
+                REFRESH
+              </button>
+            )}
+          </p>
         </div>
       </header>
+
+      <div>
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Searching around</p>
+        <div className="flex flex-wrap gap-2">
+          {anchorChips.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              disabled={!c.ok || loc === "asking"}
+              title={c.ok ? undefined : c.why}
+              onClick={() => pickAnchor(c.id)}
+              data-anchor={c.id}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold ${anchor === c.id ? "border-accent bg-pop-pink-tint text-accent-strong" : "border-border bg-page"} ${c.ok ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}
+            >
+              <span className="mr-1">{c.icon}</span>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        {(loc === "denied" || loc === "failed") && (
+          <p className="mt-2 rounded-xl bg-pop-yellow-tint px-3 py-2 text-sm" data-location-off>
+            {loc === "denied" ? "Location's off." : "I couldn't get a fix on your location."} {anchors.stay.available ? "I can search around your hotel instead." : "Pick another anchor above."}
+            {anchors.stay.available && (
+              <button type="button" onClick={() => setAnchor("stay")} className="ml-2 cursor-pointer font-semibold text-accent">
+                AROUND OUR HOTEL
+              </button>
+            )}
+          </p>
+        )}
+      </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
         {ordered.map((c) => (
@@ -57,12 +236,11 @@ export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCat
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        {anchorKind === "stay" &&
-          [5, 10].map((m) => (
-            <button key={m} type="button" onClick={() => setMaxWalk(maxWalk === m ? null : m)} className={`cursor-pointer rounded-full border px-3 py-1 font-semibold ${maxWalk === m ? "border-accent bg-accent-tint" : "border-border"}`}>
-              {m} MIN WALK
-            </button>
-          ))}
+        {[5, 10].map((m) => (
+          <button key={m} type="button" onClick={() => setMaxWalk(maxWalk === m ? null : m)} className={`cursor-pointer rounded-full border px-3 py-1 font-semibold ${maxWalk === m ? "border-accent bg-accent-tint" : "border-border"}`}>
+            {m} MIN WALK
+          </button>
+        ))}
         {(cat === "restaurant" || cat === "cafe") && (
           <button type="button" onClick={() => setVeg((v) => !v)} className={`cursor-pointer rounded-full border px-3 py-1 font-semibold ${veg ? "border-accent bg-accent-tint" : "border-border"}`}>
             VEGETARIAN SEARCH
@@ -77,7 +255,7 @@ export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCat
           if (!brand.trim()) return;
           start(async () => {
             setErr(null);
-            const r = await brandSearchAction(tripId, brand);
+            const r = await brandSearchAction(tripId, brand, { anchor, me });
             if (r.ok) {
               setRes(r);
               setSaved(r.saved);
@@ -91,41 +269,101 @@ export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCat
         </button>
       </form>
 
-      {err && <p className="text-sm text-danger">{err}</p>}
-      {res?.note && <p className="rounded-xl bg-pop-yellow-tint px-3 py-2 text-xs text-foreground">{res.note}</p>}
+      {err && <p className="text-sm text-danger" data-around-error>{err}</p>}
+      {res?.note && <p className="rounded-xl bg-pop-yellow-tint px-3 py-2 text-xs text-foreground" data-around-note>{res.note}</p>}
+      {overlap && (
+        <div className="rounded-xl border border-accent bg-pop-pink-tint px-3 py-2" data-overlap>
+          <p className="font-display text-lg leading-tight">◷ WAIT. {countWord(overlap.count)} OF YOU SAVED THIS.</p>
+          <p className="text-sm font-semibold">{overlap.name.toUpperCase()}</p>
+          <p className="text-xs text-muted-foreground">Nobody is told who. See it under Saved.</p>
+        </div>
+      )}
 
       <ul className="space-y-2">
         {shown.map((p) => {
           const on = saved.includes(p.providerPlaceId);
+          const open = routeFor === p.providerPlaceId;
+          const cc = AROUND_CATEGORIES[res?.category ?? cat] ?? AROUND_CATEGORIES[cat];
           return (
             <li key={p.providerPlaceId} className="rounded-xl border border-border p-3" data-around-place={p.name}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{p.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {p.walkMinutes != null ? `${p.walkMinutes} min walk` : p.distanceMeters != null ? `${p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) + " km" : Math.round(p.distanceMeters) + " m"} away` : ""}
-                    {p.address ? ` · ${p.address}` : ""}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-accent">
-                    MAP
-                  </a>
-                  <button
-                    type="button"
-                    aria-label="Save"
-                    onClick={() =>
-                      start(async () => {
-                        const r = await toggleSavePlaceAction(tripId, p, cat);
-                        if (r.ok) setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
-                      })
-                    }
-                    className={`cursor-pointer ${on ? "text-accent-strong" : "text-muted-foreground"}`}
-                  >
-                    <Heart className="size-4" fill={on ? "currentColor" : "none"} />
-                  </button>
-                </div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {cc.icon} {cc.label}
+              </p>
+              <p className="mt-0.5 text-sm font-bold uppercase tracking-wide">{p.name}</p>
+              <p className="mt-1 text-xs">
+                {p.walkMinutes != null ? <span className="font-semibold">{p.walkMinutes} min walk</span> : p.distanceMeters != null ? `${p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) + " km" : Math.round(p.distanceMeters) + " m"} away` : null}
+                {p.address ? <span className="text-muted-foreground">{p.walkMinutes != null || p.distanceMeters != null ? " · " : ""}{p.address}</span> : null}
+              </p>
+              <p className="text-xs text-muted-foreground" data-hours>
+                {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
+              </p>
+              {res?.why[p.providerPlaceId] && (
+                <p className="mt-1.5 text-xs" data-why>
+                  <span className="font-semibold">Why Clockwise picked it:</span> {res.why[p.providerPlaceId]}
+                </p>
+              )}
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  data-route
+                  onClick={() => {
+                    if (open) return setRouteFor(null);
+                    setRouteFor(p.providerPlaceId);
+                    setRoute(null);
+                    setRouteErr(null);
+                    start(async () => {
+                      const r = await routeToPlaceAction(tripId, { name: p.name, lat: p.lat, lng: p.lng }, { anchor, me });
+                      if (r.ok) setRoute(r);
+                      else setRouteErr(r.error);
+                    });
+                  }}
+                  className="cursor-pointer text-xs font-semibold text-accent"
+                >
+                  {open ? "HIDE ROUTE" : "ROUTE"}
+                </button>
+                <button
+                  type="button"
+                  data-save
+                  onClick={() =>
+                    start(async () => {
+                      const r = await toggleSavePlaceAction(tripId, p, cat);
+                      if (r.ok) {
+                        setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
+                        setOverlap(r.saved && r.overlap ? { id: p.providerPlaceId, name: p.name, count: r.overlap } : null);
+                      }
+                    })
+                  }
+                  className={`flex cursor-pointer items-center gap-1 text-xs font-semibold ${on ? "text-accent-strong" : "text-muted-foreground"}`}
+                >
+                  <Heart className="size-3.5" fill={on ? "currentColor" : "none"} />
+                  {on ? "SAVED" : "SAVE"}
+                </button>
+                <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-muted-foreground underline">
+                  Open in Maps
+                </a>
               </div>
+              {open && (
+                <div className="mt-3 space-y-2 rounded-lg border border-border p-3" data-route-panel>
+                  {routeErr && <p className="text-xs text-danger">{routeErr}</p>}
+                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Asking Geoapify for the route…</p>}
+                  {route && (
+                    <>
+                      <p className="text-xs">
+                        <span className="font-semibold">{route.fromLabel}</span> → <span className="font-semibold">{route.toLabel}</span>
+                      </p>
+                      {route.geometry && route.geometry.length > 1 && <RouteMap geometry={route.geometry} />}
+                      <ul className="space-y-0.5 text-xs">
+                        {route.legs.map((l) => (
+                          <li key={l.mode} data-route-leg={l.mode}>
+                            <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-muted-foreground">Geoapify routing, {new Date(route.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Only modes the provider returned are shown.</p>
+                    </>
+                  )}
+                </div>
+              )}
             </li>
           );
         })}
@@ -133,7 +371,7 @@ export function AroundYou({ tripId, anchorKind, anchorLabel, ordered, initialCat
       </ul>
       {res && (
         <p className="text-[11px] text-muted-foreground">
-          Geoapify · {new Date(res.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · A place being nearby doesn&apos;t mean it stocks a particular product. Walking times are provider routes.
+          Geoapify · {new Date(res.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · A place being nearby doesn&apos;t mean it stocks a particular product. Walking times are provider routes. Hours appear only when the provider supplies them.
         </p>
       )}
     </div>

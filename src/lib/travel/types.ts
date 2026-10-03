@@ -16,6 +16,10 @@ export type PlaceResult = {
   distanceMeters: number | null;
   provider: string;
   retrievedAt: string; // ISO timestamp
+  // Present ONLY when the provider returned them. Never inferred or filled in.
+  openingHours?: string | null;
+  website?: string | null;
+  phone?: string | null;
 };
 
 export type TravelMode = "walk" | "drive" | "transit" | "bicycle";

@@ -178,6 +178,10 @@ type GeoapifyPlaceFeature = {
     formatted?: string;
     categories?: string[];
     distance?: number;
+    opening_hours?: string;
+    website?: string;
+    contact?: { phone?: string };
+    datasource?: { raw?: { opening_hours?: string; website?: string; phone?: string } };
   };
   geometry: { coordinates: [number, number] };
 };
@@ -200,6 +204,9 @@ async function placesSearch(params: URLSearchParams): Promise<PlaceResult[]> {
     distanceMeters: f.properties.distance ?? null,
     provider: "geoapify",
     retrievedAt,
+    openingHours: f.properties.opening_hours ?? f.properties.datasource?.raw?.opening_hours ?? null,
+    website: f.properties.website ?? f.properties.datasource?.raw?.website ?? null,
+    phone: f.properties.contact?.phone ?? f.properties.datasource?.raw?.phone ?? null,
   }));
 }
 

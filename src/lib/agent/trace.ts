@@ -164,17 +164,31 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
     case "PLACES_SEARCH_COMPLETED": {
       const when = p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().replace("T", " ").slice(0, 19) + " UTC" : "n/a";
       return {
-        understanding: `PLACES_SEARCH_COMPLETED — provider ${str(p.provider)}, query ${str(p.category ?? p.tool)}${p.diet ? ` (provider ${str(p.diet)} search)` : ""}, anchor ${str(p.near)}, ${str(p.resultCount)} result(s), retrieved ${when}.`,
+        understanding: `PLACES_SEARCH_COMPLETED — provider ${str(p.provider)}, query ${str(p.category ?? p.tool)}${p.diet ? ` (provider ${str(p.diet)} search)` : ""}, anchor ${p.anchorType ? `${str(p.anchorType)} (${str(p.anchor)})` : str(p.near)}, ${str(p.resultCount)} result(s), retrieved ${when}.`,
         state: "Places and ids come from the provider; the model only narrated them.",
       };
     }
     case "ROUTE_COMPLETED": {
+      if (Array.isArray(p.modes)) {
+        const legs = (p.modes as { mode: string; distanceMeters: number; durationMinutes: number }[]).map((m) => `${m.mode} ${m.durationMinutes} min / ${(m.distanceMeters / 1000).toFixed(1)} km`).join(", ");
+        return { understanding: `ROUTE_COMPLETED — provider ${str(p.provider)}: ${str(p.from)} → ${str(p.to)} (anchor ${str(p.anchorType)}): ${legs}. Provider-returned numbers.`, state: "Shown in Around You; no model estimate involved. No exact user coordinates are recorded." };
+      }
       const snapped = Array.isArray(p.snapped) && p.snapped.length ? ` (${(p.snapped as string[]).join("; ")})` : "";
       return {
         understanding: `ROUTE_COMPLETED — provider ${str(p.provider)}: ${str(p.from)} → ${str(p.to)} by ${str(p.mode)}, ${(Number(p.distanceMeters) / 1000).toFixed(1)} km, ${Math.round(Number(p.durationSeconds) / 60)} min${snapped}. Provider-returned numbers.`,
         state: "Shown as a route card; no model estimate involved.",
       };
     }
+    case "LOCATION_REQUESTED":
+      return { understanding: "A traveller pressed USE MY LOCATION; the browser was asked for permission.", state: "Private. Nothing is tracked in the background and no coordinates are recorded here." };
+    case "LOCATION_PERMISSION_GRANTED":
+      return { understanding: "The browser granted location for one search.", state: "The position stays in the traveller's own session memory; it is not stored, logged or shown to the group." };
+    case "LOCATION_PERMISSION_DENIED":
+      return { understanding: "The traveller declined (or the browser blocked) location.", state: "Clockwise offered hotel/destination search instead; nothing else changed." };
+    case "LOCATION_SEARCH_COMPLETED":
+      return { understanding: `A location-anchored place search finished — provider ${str(p.provider)}, ${str(p.category)}, ${str(p.resultCount)} result(s), retrieved ${p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().slice(0, 19).replace("T", " ") + " UTC" : "n/a"}.`, state: "Coordinates were used for the request only (not stored)." };
+    case "PLACE_OVERLAP_DETECTED":
+      return { understanding: `${str(p.savedBy)} of ${str(p.members)} travellers saved the same real place (${str(p.name)}, ${str(p.provider)} id ${str(p.providerPlaceId)}).`, state: "A count only: who saved it is not recorded here and is not shown to anyone." };
     case "ROUTE_PLAUSIBILITY_FAILED":
       return { understanding: `ROUTE_PLAUSIBILITY_FAILED — ${str(p.from)} → ${str(p.to)} (provider measured ${(Number(p.distanceMeters) / 1000).toFixed(0)} km): ${str(p.reason)}.`, state: "Route withheld; the user was asked to confirm the places. No substitute number was produced." };
     case "TRAVELLER_ARRIVAL_UPDATED": {

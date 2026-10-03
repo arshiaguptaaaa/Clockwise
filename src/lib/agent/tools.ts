@@ -30,7 +30,8 @@ import { updateMyArrival } from "@/lib/traveller/arrival";
 import { ceilToQuarter } from "@/lib/traveller/arrival-rules";
 import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
 import { timeLabel } from "@/lib/traveller/journey";
-import { brandSearch } from "@/lib/travel/around";
+import { brandSearch, anchorsFor } from "@/lib/travel/around";
+import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
@@ -426,7 +427,12 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         },
         near: {
           type: "string",
-          description: "Area/landmark/'our hotel' to search near; omit to use the trip's current destination",
+          description: "A NAMED area or landmark to search near (e.g. 'Stephansplatz'). Do not put 'me' or 'our hotel' here; use `anchor`. Omit only when the user named no place and no anchor applies (the card then says it is centred on the destination).",
+        },
+        anchor: {
+          type: "string",
+          enum: ["user_location", "hotel", "arrival"],
+          description: "user_location = 'near me / what's open near me / pharmacy near me' (the traveller's CURRENT location, which Clockwise only has when they press USE MY LOCATION in Around You, so this never returns places). hotel = 'our hotel / around the hotel' (the CONFIRMED stay only; never substituted by the destination centre). arrival = 'near the airport/station' for the speaker's own confirmed arrival point.",
         },
         brand: {
           type: "string",
@@ -440,6 +446,12 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
       },
       required: ["category"],
     },
+  },
+  {
+    name: "find_saved_overlap",
+    description:
+      "Read-only: 'find somewhere all of us saved'. Looks at places travellers saved PRIVATELY in Around You and reports overlap as a COUNT only. In the group chat it returns only places EVERY traveller saved; never who saved what.",
+    parameters: { type: "object", properties: {} },
   },
   {
     name: "get_route",
@@ -527,6 +539,8 @@ export async function executeTool(
       return searchHotelsTool(input, ctx);
     case "search_nearby":
       return searchNearbyTool(input, ctx);
+    case "find_saved_overlap":
+      return findSavedOverlapTool(ctx);
     case "get_route":
       return getRouteTool(input, ctx);
     case "get_weather":
@@ -1553,7 +1567,22 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     return { output: `Unrecognised place category "${category}".` };
   }
 
-  const located = await resolveSearchPoint((input.near as string | undefined)?.trim(), ctx);
+  // Current location, confirmed stay and arrival point are DIFFERENT anchors; none stands in for another.
+  const nearText = ((input.near as string | undefined) ?? "").trim();
+  let anchorKind = (["user_location", "hotel", "arrival"] as const).find((a) => a === input.anchor);
+  if (!anchorKind && /^(me|my location|where i am|here|near me|my place)$/i.test(nearText)) anchorKind = "user_location";
+  if (!anchorKind && /^(our|the|my) (hotel|stay)$|^hotel$/i.test(nearText)) anchorKind = "hotel";
+  if (anchorKind === "user_location") {
+    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION themselves (the browser asks permission; it stays private to them). Do NOT search, name any place, or guess where they are. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION. It stays private to you. Or I can search around your hotel instead."` };
+  }
+  let located: { point: LatLng; label: string } | { error: string };
+  if (anchorKind === "hotel" || anchorKind === "arrival") {
+    const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
+    const picked = anchorKind === "hotel" ? a.stay : a.arrival;
+    located = picked ? { point: picked.point, label: picked.label } : { error: anchorKind === "hotel" ? "There's no confirmed stay yet, so there's no hotel to search around. Say so; do not search the destination centre instead unless the user asks for that." : "This traveller hasn't confirmed an arrival point yet. Say so and ask which airport or station, or offer the hotel." };
+  } else {
+    located = await resolveSearchPoint(nearText || undefined, ctx);
+  }
   if ("error" in located) return { output: located.error };
 
   const brandText = typeof input.brand === "string" ? input.brand.trim().slice(0, 60) : "";
@@ -1620,6 +1649,19 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.${diet ? ` Reply with this sentence only: "I ran Geoapify's ${diet} search near ${located.label} — the card shows what it returned." Do NOT call the places ${diet}, ${diet}-friendly or similar.` : ""}`,
     posted: true,
   };
+}
+
+async function findSavedOverlapTool(ctx: AgentContext): Promise<ToolExecutionResult> {
+  // GROUP chat: only a place every member saved may be named (nothing is leaked by naming it).
+  // PRIVATE chat: overlap of two or more including this traveller, as a count.
+  if (ctx.mode === "GROUP") {
+    const all = await savedByEveryone(ctx.trip.id);
+    if (all.length === 0) return { output: "No place has been saved by every traveller yet. Say only that; do not hint at who saved anything or how many saved what." };
+    return { output: `Places every traveller saved (provider ids from Geoapify): ${all.map((p) => `${p.name}${p.address ? ` (${p.address})` : ""}`).join("; ")}. Name them; say nothing about who saved them first or when.` };
+  }
+  const mine = await savedOverlaps(ctx.trip.id, ctx.actingUserId);
+  if (mine.length === 0) return { output: "None of this traveller's saved places has been saved by anyone else yet. Do not say who else saved anything." };
+  return { output: `Overlap with this traveller's own saves (counts only, never names of people): ${mine.map((o) => `${o.name} - ${o.count} of ${o.members} travellers saved it`).join("; ")}. Offer nothing about who. Proposing to the group isn't available yet.` };
 }
 
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
