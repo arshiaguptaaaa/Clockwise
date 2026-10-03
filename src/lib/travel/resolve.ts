@@ -111,10 +111,9 @@ async function findStoredDestinationPoint(tripId: string, text: string): Promise
 
   const match = destinations.find((d) => {
     const candidates = [d.name, d.displayName, d.city].filter((v): v is string => Boolean(v));
-    return candidates.some((c) => {
-      const lower = c.toLowerCase();
-      return lower === normalized || lower.includes(normalized) || normalized.includes(lower);
-    });
+    // Exact match only. A looser "contains" match turned "Udaipur Airport" into
+    // the Udaipur city point, silently producing wrong routes and distances.
+    return candidates.some((c) => c.toLowerCase() === normalized);
   });
 
   if (!match || match.latitude == null || match.longitude == null) return null;

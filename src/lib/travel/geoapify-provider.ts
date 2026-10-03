@@ -123,12 +123,14 @@ export async function searchNearby(
   category: string,
   near: LatLng,
   radiusMeters = 1500,
-  limit = 8
+  limit = 8,
+  diet?: "vegetarian" | "vegan" | "halal"
 ): Promise<PlaceResult[]> {
   const mapped = NEARBY_CATEGORIES[category];
   if (!mapped) throw new Error(`Unknown place category "${category}"`);
   const params = new URLSearchParams({
     categories: mapped,
+    ...(diet ? { conditions: diet } : {}),
     filter: `circle:${near.lng},${near.lat},${radiusMeters}`,
     bias: `proximity:${near.lng},${near.lat}`,
     limit: String(limit),
@@ -248,7 +250,7 @@ export async function searchStays(near: LatLng, radiusMeters = 6000, limit = 12)
   const retrievedAt = nowIso();
   return (data.features ?? [])
     // A listing with no name is not something to propose to a group.
-    .filter((f) => Boolean(f.properties.name))
+    .filter((f) => Boolean(f.properties.name) && !/\b(college|school|university|institute|restaurant|canteen|mess)\b/i.test(f.properties.name!))
     .map((f) => ({
       providerId: f.properties.place_id,
       name: f.properties.name!,

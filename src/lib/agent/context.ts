@@ -1,3 +1,4 @@
+import { getTripStay } from "@/lib/stays";
 import { prisma } from "@/lib/prisma";
 import { getTripById, type Trip } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
@@ -38,7 +39,8 @@ function buildSharedStateSummary(
   trip: Trip,
   pendingCardTitles: string[],
   pendingDocCount: number,
-  decisions: { type: string; value: string; status: string; affectedUserIds: string }[]
+  decisions: { type: string; value: string; status: string; affectedUserIds: string }[],
+  stay: { status: string; placeName: string | null } | null = null
 ) {
   const nameByUserId = new Map(trip.members.map((m) => [m.userId, m.user.name]));
   const route = [...trip.destinations]
@@ -64,6 +66,14 @@ function buildSharedStateSummary(
       : "Core dates: not decided yet",
     `Travellers (${trip.members.length}): ${members || "none yet"}`,
   ];
+
+  if (stay?.placeName) {
+    lines.push(
+      stay.status === "CONFIRMED"
+        ? `Stay (booked, authoritative): ${stay.placeName}. "our hotel" / "the hotel" means this place — use get_route with from or to "our hotel"; do not search for hotels.`
+        : `Stay: ${stay.placeName} is APPROVED by the group but NOT booked yet — it is not "our hotel" until the organiser marks it booked.`
+    );
+  }
 
   if (pendingDocCount > 0) {
     lines.push(
@@ -182,7 +192,7 @@ export async function buildGroupContext(
     clockwiseUserId,
     actingUserId,
     actingUserName: actingUser?.user.name ?? "Unknown",
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions),
+    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId)),
     history,
   };
 }
@@ -280,7 +290,7 @@ export async function buildPrivateContext(
     clockwiseUserId,
     actingUserId,
     actingUserName,
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions),
+    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId)),
     history,
     privateProfileSummary: profileLines.join("\n"),
   };

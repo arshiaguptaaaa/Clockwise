@@ -395,6 +395,11 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
           type: "string",
           description: "Area/landmark/'our hotel' to search near; omit to use the trip's current destination",
         },
+        diet: {
+          type: "string",
+          enum: ["vegetarian", "vegan", "halal"],
+          description: "Set when the user asks for vegetarian/vegan/halal places — filters on the provider's own dietary tags. Without it, never describe results as vegetarian.",
+        },
       },
       required: ["category"],
     },
@@ -1019,6 +1024,12 @@ async function updateTripRoute(input: Record<string, unknown>, ctx: AgentContext
         "Refused: the shared route can only be changed from Trip Room, where the group can see it. If this came up privately and needs the group's agreement, use propose_itinerary_change.",
     };
   }
+  // A request for information is never a decision. Enforced in code: "Clockwise
+  // find hotels in Udaipur" once added Udaipur to the saved route.
+  const lastHumanText = [...ctx.history].reverse().find((h) => !h.isClockwise)?.content ?? "";
+  if (/^\s*@?(clockwise[,:]?\s*)?(please\s+)?(find|search|show|look|get|suggest|recommend|list|give|tell|how|what|where|which|can you|could you|any)\b/i.test(lastHumanText) || /\?\s*$/.test(lastHumanText)) {
+    return { output: "Refused: that message is a request or a question, not a decision to change the route. Answer it (search/lookup tools) instead." };
+  }
   const operation = input.operation;
   let place = (input.place as string | undefined)?.trim();
   const replaceWith = (input.replaceWith as string | undefined)?.trim();
@@ -1406,9 +1417,10 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   const located = await resolveSearchPoint((input.near as string | undefined)?.trim(), ctx);
   if ("error" in located) return { output: located.error };
 
+  const diet = (["vegetarian", "vegan", "halal"] as const).find((d) => d === input.diet);
   let results;
   try {
-    results = await geoapifySearchNearby(category, located.point);
+    results = await geoapifySearchNearby(category, located.point, 1500, 8, diet);
   } catch (err) {
     return { output: `Live nearby search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
   }
@@ -1419,7 +1431,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     type: "PLACES",
     status: "CONFIRMED",
     data: {
-      title: `${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
+      title: `${diet ? `${diet[0].toUpperCase()}${diet.slice(1)} ` : ""}${category[0].toUpperCase()}${category.slice(1)} near ${located.label}`,
       places: results.map((r) => ({
         name: r.name,
         formattedAddress: r.formattedAddress,
@@ -1435,7 +1447,10 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   if (results.length === 0) {
     return { output: `No ${category} found near ${located.label}.`, posted: true };
   }
-  return { output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now).`, posted: true };
+  return {
+    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, filtered by the provider's own "${diet}" tag` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.`,
+    posted: true,
+  };
 }
 
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
