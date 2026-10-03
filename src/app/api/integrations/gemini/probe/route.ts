@@ -3,12 +3,23 @@ import { getCurrentUserId } from "@/lib/session";
 import { GeminiAgentProvider } from "@/lib/agent/providers/gemini";
 import { AGENT_TOOLS } from "@/lib/agent/tools";
 import type { AgentMessage } from "@/lib/agent/provider";
+import { toAgentMessages } from "@/lib/agent/clockwise-agent";
 
 // Signed-in only. Sends tiny SYNTHETIC conversations to Gemini to find out which
 // request structures it rejects (400). No user data is involved. Reports status,
 // category and Google's own error text per case — never keys or contents.
 const U = (content: string): AgentMessage => ({ role: "user", content });
 const A = (content: string | null): AgentMessage => ({ role: "assistant", content });
+
+// The real converter fed a history that ENDS on a Clockwise message — the shape
+// that caused the production 400. It must now produce a request Gemini accepts.
+const REAL_HISTORY_ENDING_ON_CLOCKWISE = toAgentMessages([
+  { id: "1", senderName: "Arshia", content: "Clockwise, find restaurants in Aurangabad.", isClockwise: false },
+  { id: "2", senderName: "Clockwise", content: "I've found a few restaurants.", isClockwise: true },
+  { id: "3", senderName: "Arshia", content: "Clockwise, what is 2+2?", isClockwise: false },
+  { id: "4", senderName: "Clockwise", content: "EVERYONE'S ALIGNED", isClockwise: true },
+  { id: "5", senderName: "Clockwise", content: "", isClockwise: true },
+] as never);
 
 const CASES: Record<string, { messages: AgentMessage[]; withTools: boolean }> = {
   control_alternating: { messages: [U("Arshia: hi"), A("Hello"), U("Arshia: what is 2+2?")], withTools: false },
@@ -18,6 +29,7 @@ const CASES: Record<string, { messages: AgentMessage[]; withTools: boolean }> = 
   empty_user_text: { messages: [U("Arshia: hi"), A("Hello"), U("")], withTools: false },
   consecutive_user: { messages: [U("Arshia: hi"), U("Arshia: what is 2+2?")], withTools: false },
   consecutive_model: { messages: [U("Arshia: hi"), A("Hello"), A("Again"), U("Arshia: what is 2+2?")], withTools: false },
+  real_converter_history_ending_on_clockwise: { messages: REAL_HISTORY_ENDING_ON_CLOCKWISE, withTools: false },
   control_with_real_tools: { messages: [U("Arshia: hi"), A("Hello"), U("Arshia: what is 2+2?")], withTools: true },
 };
 

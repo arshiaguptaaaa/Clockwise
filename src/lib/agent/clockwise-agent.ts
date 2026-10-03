@@ -79,9 +79,16 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   return [shared, modeBlock, `Structured trip state:\n${ctx.stateSummary}`].join("\n\n");
 }
 
-function toAgentMessages(history: AgentContext["history"]): AgentMessage[] {
+// Gemini rejects any request that ENDS on a model turn ("Requests ending with a
+// model turn are not supported", HTTP 400 — reproduced with synthetic
+// conversations in /api/integrations/gemini/probe). Group chat can legitimately
+// end on a Clockwise message: a card or notice posted just after the human
+// message that triggered this turn. So the converted history is guaranteed to end
+// on a user turn, and turns with no text (card-only rows) are dropped.
+export function toAgentMessages(history: AgentContext["history"]): AgentMessage[] {
   const merged: { role: "user" | "assistant"; lines: string[] }[] = [];
   for (const turn of history) {
+    if (!turn.content || !turn.content.trim()) continue;
     const role: "user" | "assistant" = turn.isClockwise ? "assistant" : "user";
     const text = turn.isClockwise ? turn.content : `${turn.senderName}: ${turn.content}`;
     const last = merged[merged.length - 1];
@@ -93,6 +100,9 @@ function toAgentMessages(history: AgentContext["history"]): AgentMessage[] {
   }
   if (merged.length > 0 && merged[0].role !== "user") {
     merged.unshift({ role: "user", lines: ["(conversation continues)"] });
+  }
+  if (merged.length > 0 && merged[merged.length - 1].role !== "user") {
+    merged.push({ role: "user", lines: ["(Respond to the most recent human message above.)"] });
   }
   return merged.map((m) => ({ role: m.role, content: m.lines.join("\n") }));
 }
