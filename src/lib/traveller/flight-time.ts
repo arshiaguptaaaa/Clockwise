@@ -60,5 +60,5 @@ export async function resolveFlightMinutes(j: { originName: string | null; depar
   if (!origin) return { ok: false, reason: `I couldn't place "${j.originName}" on the map` };
   const [departTz, arriveTz] = await Promise.all([flightDeps.timezoneAt(origin), flightDeps.timezoneAt({ lat: j.arrivalLat, lng: j.arrivalLng })]);
   const r = flightMinutes({ departLocal: j.departLocal, departTz, arriveLocal: ticketArrive, arriveTz });
-  return r.ok ? { ...r, basis: `the departure and arrival times on your journey, read in ${departTz} and ${arriveTz}` } : r;
+  return r.ok ? { ...r, basis: departTz === arriveTz ? `the departure and arrival times on your journey (both in ${departTz})` : `the departure and arrival times on your journey, read in ${departTz} and ${arriveTz} and converted to the same clock` } : r;
 }

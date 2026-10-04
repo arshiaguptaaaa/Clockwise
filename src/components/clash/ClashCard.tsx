@@ -20,6 +20,8 @@ export type ClashView = {
   suggestedLabel: string | null;
   options: { local: string; label: string }[];
   affected: string[];
+  // No routing data was available: the conflict is only that the plan starts before they even land.
+  unknownTravel?: boolean;
 };
 
 // CLOCKWISE CAUGHT A CLASH. LANDS AT is not AVAILABLE AT: the card shows both, and the three numbers between them.
@@ -55,22 +57,39 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
         {clash.traveller} won&apos;t make the {clash.targetLabel} {clash.commitmentName}.
       </p>
 
-      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13.5px]" data-clash-math>
-        <dt className="text-muted-foreground">Lands</dt>
-        <dd className="font-semibold">{clash.landsLabel}</dd>
-        <dt className="text-muted-foreground">Bags &amp; exits</dt>
-        <dd>+ {clash.allowanceMin} min <span className="text-muted-foreground">(an assumption)</span></dd>
-        <dt className="text-muted-foreground">To {clash.anchorLabel}</dt>
-        <dd>+ {clash.routeMinutes} min <span className="text-muted-foreground">· {clash.providerLabel}</span></dd>
-        <dt className="text-muted-foreground">Available at</dt>
-        <dd className="font-semibold text-danger">≈ {clash.readyLabel}</dd>
-      </dl>
-      <p className="mt-1.5 text-[11.5px] text-muted-foreground">Lands at ≠ available at.</p>
-
-      {clash.suggestedLabel ? (
-        <p className="mt-3 text-[14.5px] leading-snug">I can move {clash.commitmentName} to <span className="font-semibold">{clash.suggestedLabel}</span>, which works for everyone I can measure. Should I propose that?</p>
+      {clash.unknownTravel ? (
+        <>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13.5px]" data-clash-math data-unknown-travel>
+            <dt className="text-muted-foreground">Lands</dt>
+            <dd className="font-semibold">{clash.landsLabel}</dd>
+            <dt className="text-muted-foreground">Starts</dt>
+            <dd className="font-semibold text-danger">{clash.targetLabel}</dd>
+            <dt className="text-muted-foreground">Travel time</dt>
+            <dd>unknown <span className="text-muted-foreground">· no routing data right now</span></dd>
+          </dl>
+          <p className="mt-1.5 text-[11.5px] text-muted-foreground">It starts before they land, so it can&apos;t work however the roads are.</p>
+          <p className="mt-3 text-[14.5px] leading-snug">Without travel data I can&apos;t suggest another time. You can tell the others, cancel it, or leave it.</p>
+        </>
       ) : (
-        <p className="mt-3 text-[14.5px] leading-snug">I couldn&apos;t find a time that fits everyone&apos;s stated limits. What should I do?</p>
+        <>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13.5px]" data-clash-math>
+            <dt className="text-muted-foreground">Lands</dt>
+            <dd className="font-semibold">{clash.landsLabel}</dd>
+            <dt className="text-muted-foreground">Bags &amp; exits</dt>
+            <dd>+ {clash.allowanceMin} min <span className="text-muted-foreground">(an assumption)</span></dd>
+            <dt className="text-muted-foreground">To {clash.anchorLabel}</dt>
+            <dd>+ {clash.routeMinutes} min <span className="text-muted-foreground">· {clash.providerLabel}</span></dd>
+            <dt className="text-muted-foreground">Available at</dt>
+            <dd className="font-semibold text-danger">≈ {clash.readyLabel}</dd>
+          </dl>
+          <p className="mt-1.5 text-[11.5px] text-muted-foreground">Lands at ≠ available at.</p>
+
+          {clash.suggestedLabel ? (
+            <p className="mt-3 text-[14.5px] leading-snug">I can move {clash.commitmentName} to <span className="font-semibold">{clash.suggestedLabel}</span>, which works for everyone I can measure. Should I propose that?</p>
+          ) : (
+            <p className="mt-3 text-[14.5px] leading-snug">I couldn&apos;t find a time that fits everyone&apos;s stated limits. What should I do?</p>
+          )}
+        </>
       )}
 
       {clash.status === "PROPOSED" && <p className="mt-3 text-[12.5px] font-medium">Proposed to {clash.affected.join(", ")} ✓ <span className="font-normal text-muted-foreground">· votes are in the card below. The Plan hasn&apos;t changed.</span></p>}

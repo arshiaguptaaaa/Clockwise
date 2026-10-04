@@ -137,6 +137,7 @@ export default async function TripRoomChatPage({
       landsLabel: timeLabel(c.landsAt),
       readyLabel: timeLabel(c.readyAt),
       allowanceMin: c.allowanceMin,
+      unknownTravel: c.anchorKind === "unknown-route",
       routeMinutes: c.routeMinutes,
       providerLabel: c.routeProvider === "delhivery" ? "Delhivery" : c.routeProvider === "geoapify" ? "Geoapify" : "provider route",
       anchorLabel: c.anchorKind === "stay" ? "the stay" : c.anchorLabel,

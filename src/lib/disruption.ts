@@ -205,7 +205,7 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
         allowanceMin: lowerBound ? 0 : Math.round(((clock.outAtLocal ? toMs(clock.outAtLocal) : toMs(clock.arriveLocal ?? readyHere)) - toMs(clock.arriveLocal ?? readyHere)) / 60_000),
         routeMinutes: viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes ?? 0,
         routeProvider: viaDirect ? null : clock.routeProvider,
-        anchorKind: viaDirect ? "venue" : view.anchorKind ?? "stay",
+        anchorKind: lowerBound ? "unknown-route" : viaDirect ? "venue" : view.anchorKind ?? "stay",
         anchorLabel: viaDirect ? whereLabel : view.stayName ?? "the stay",
         readyAt: readyHere,
         suggestedLocal: suggested,
