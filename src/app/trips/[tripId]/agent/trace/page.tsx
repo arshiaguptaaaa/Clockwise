@@ -18,6 +18,18 @@ const KIND_LABEL: Record<TraceEntry["kind"], string> = {
   AUDIT: "AUDIT",
 };
 
+// The causal chain the product is built to show, in order. Each row is the latest REAL event of that kind;
+// a step that hasn't happened yet shows as pending, never as made up.
+const CHAIN: { kind: string; label: string }[] = [
+  { kind: "GNANI_STT_COMPLETED", label: "Voice → words" },
+  { kind: "TRAVELLER_ARRIVAL_UPDATED", label: "Arrival updated" },
+  { kind: "DELHIVERY_ROUTE_COMPLETED", label: "Route measured" },
+  { kind: "RENDEZVOUS_CONFLICT_DETECTED", label: "Conflict detected" },
+  { kind: "COMMITMENT_RESCHEDULE_PROPOSED", label: "Change proposed" },
+  { kind: "GROUP_APPROVED", label: "Group approved" },
+  { kind: "COMMITMENT_RESCHEDULED", label: "Plan updated" },
+];
+
 function formatTimestamp(date: Date): string {
   return date.toLocaleString("en-GB", {
     day: "numeric",
@@ -57,10 +69,35 @@ export default async function AgentTracePage({
         Every tool call, understanding, reminder, escalation and audited action, in the order it actually happened. Real rows only. Nothing here is reconstructed or invented.
       </p>
 
+      {entries.length > 0 && (
+        <section className="mt-8" data-chain>
+          <p className="eyebrow">The chain</p>
+          <ol className="mt-3">
+            {CHAIN.map((step, i) => {
+              const hit = [...entries].reverse().find((e) => e.title.startsWith(step.kind));
+              return (
+                <li key={step.kind} className="relative grid grid-cols-[1.5rem_1fr] gap-x-3 pb-5 last:pb-0">
+                  {i < CHAIN.length - 1 && <span aria-hidden className="absolute bottom-0 left-[0.55rem] top-5 w-px bg-border" />}
+                  <span aria-hidden className={`mt-1 flex size-[1.1rem] items-center justify-center rounded-full text-[10px] ${hit ? "bg-accent text-accent-foreground" : "border border-border text-transparent"}`}>✓</span>
+                  <div className={hit ? "" : "opacity-45"}>
+                    <p className="font-display text-[19px] leading-tight tracking-[-0.01em]">{step.label}</p>
+                    <p className="mt-0.5 font-mono text-[11px] tracking-tight text-muted-foreground">{step.kind}{hit ? ` · ${formatTimestamp(hit.timestamp)}` : " · not yet"}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
+
       {entries.length === 0 ? (
         <p className="mt-10 text-center text-sm text-muted-foreground">No agent activity recorded yet for this trip.</p>
       ) : (
-        <ol className="mt-8 border-l border-border">
+        <details className="mt-10 border-t border-border pt-2">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-[12px] uppercase tracking-[0.14em] text-muted-foreground [&::-webkit-details-marker]:hidden">
+          Full trace · {entries.length} events <span aria-hidden>▾</span>
+        </summary>
+        <ol className="mt-6 border-l border-border">
           {entries.map((entry, i) => (
             <li key={i} className="relative pb-7 pl-5">
               <span className="absolute -left-[4.5px] top-1.5 size-2 rounded-full bg-accent" />
@@ -84,6 +121,7 @@ export default async function AgentTracePage({
             </li>
           ))}
         </ol>
+        </details>
       )}
     </div>
   );

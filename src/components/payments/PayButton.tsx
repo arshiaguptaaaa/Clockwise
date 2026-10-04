@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { payObligationAction } from "@/app/payment-actions";
 
-// PAY MY SHARE. The server opens THIS signed-in traveller's own Pine Labs link (it refuses anyone else's), and
+// PAY MY SHARE. The server opens THIS signed-in traveller's own payment link (it refuses anyone else's), and
 // the browser goes to Pine's hosted checkout in the same tab, which is more reliable on a phone than a pop-up.
 // A failure shows a plain sentence and TRY AGAIN: never a provider message.
 export function PayButton({ obligationId, label, className = "" }: { obligationId: string; label: string; className?: string }) {

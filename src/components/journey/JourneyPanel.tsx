@@ -11,9 +11,9 @@ type Pending = { id: string; mode: string; carrier: string | null; originName: s
 const label = "eyebrow";
 const input = "w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-accent";
 const MODES = [
-  ["FLIGHT", "✈ Flight"],
-  ["TRAIN", "🚆 Train"],
-  ["BUS", "🚌 Bus"],
+  ["FLIGHT", "Flight"],
+  ["TRAIN", "Train"],
+  ["BUS", "Bus"],
 ];
 
 export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string; pending: Pending | null; hasConfirmed: boolean }) {
@@ -106,8 +106,8 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
       )}
 
       <div>
-        <p className={label}>{hasConfirmed ? "Replace my journey" : "My journey"}</p>
-        <div className="mt-2 grid grid-cols-3 gap-2">
+        <p className={label}>{hasConfirmed ? "Changed plans? Upload a new ticket" : "Upload your ticket"}</p>
+        <div className="mt-3 grid grid-cols-3 gap-2">
           {MODES.map(([m, l]) => (
             <button
               key={m}
@@ -116,10 +116,10 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
                 setMode(m);
                 fileRef.current?.click();
               }}
-              className="cursor-pointer rounded-full border border-foreground/20 px-2 py-3 text-[11px] font-semibold tracking-[0.1em]"
+              className="btn btn-ghost !px-2 !text-[11px] !tracking-[0.08em]"
               data-upload-mode={m}
             >
-              {uploading && mode === m ? <Loader2 className="mx-auto size-4 animate-spin" /> : `UPLOAD ${l.toUpperCase()}`}
+              {uploading && mode === m ? <Loader2 className="mx-auto size-4 animate-spin" /> : l.toUpperCase()}
             </button>
           ))}
         </div>

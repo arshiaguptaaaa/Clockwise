@@ -16,7 +16,7 @@ export function PaymentLinkCard({ bookingId, status, title, context }: { booking
     <ClockwiseActionCard
       type="PAYMENT"
       title={title}
-      context={status === "CONFIRMED" ? "Pine Labs confirmed this payment." : status === "DISMISSED" ? "This payment link is no longer payable." : (note ?? context)}
+      context={status === "CONFIRMED" ? "Payment confirmed." : status === "DISMISSED" ? "This payment link is no longer payable." : (note ?? context)}
       status={status}
       primaryAction={
         status === "PENDING"
@@ -35,11 +35,11 @@ export function PaymentLinkCard({ bookingId, status, title, context }: { booking
         status === "PENDING"
           ? {
               label: "I've paid — check status",
-              pendingLabel: "Asking Pine Labs…",
+              pendingLabel: "Checking…",
               run: async () => {
                 const r = await checkPaymentStatus(bookingId);
                 if (r.error) return { error: r.error };
-                setNote(`Pine Labs says: ${r.status}.`);
+                setNote(r.status === "PROCESSED" ? "Paid ✓" : r.status === "CANCELLED" || r.status === "EXPIRED" ? "That payment link has expired." : "Not paid yet.");
                 router.refresh();
               },
             }

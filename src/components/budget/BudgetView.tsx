@@ -109,7 +109,7 @@ export function BudgetView({ data, owe = [] }: { data: BudgetViewData; owe?: { o
                   <p className="font-display text-[22px] leading-tight tracking-[-0.01em]">{o.title}</p>
                   <p className="mt-0.5 font-display text-[34px] leading-[1.05] tracking-[-0.02em]">{formatMoney(o.amountMinor, o.currency)}</p>
                   <PayButton obligationId={o.obligationId} label={o.paying ? "FINISH PAYING SECURELY" : "PAY SECURELY"} className="mt-2" />
-                  <p className="mt-1.5 text-[11.5px] text-muted-foreground">You pay on Pine Labs&apos; secure page. Nothing counts as paid until Pine Labs confirms it.</p>
+                  <p className="mt-1.5 text-[11.5px] text-muted-foreground">You&apos;ll pay on a secure checkout page. It counts as paid once the payment is confirmed.</p>
                 </li>
               ))}
             </ul>

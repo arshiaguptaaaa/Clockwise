@@ -162,7 +162,7 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   // A split payment: ONE collection, one obligation per traveller. No Pine Labs call happens here; each
   // traveller's own link is created when they press PAY.
   if (payload.split) {
-    const collection = await createCollection({
+    await createCollection({
       tripId: proposal.tripId,
       title: proposal.title.replace(/^Payment needed:\s*/i, "").trim() || "Payment",
       totalMinor: payload.split.totalMinor,
@@ -171,7 +171,7 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
       sourceProposalId: proposal.id,
       lines: payload.split.lines,
     });
-    return { ok: true, summary: `Payment created: ${payload.split.lines.length} traveller${payload.split.lines.length === 1 ? "" : "s"} can now pay their own share (collection ${collection.id.slice(-6)}).` };
+    return { ok: true, summary: `Payment created: ${payload.split.lines.length} traveller${payload.split.lines.length === 1 ? "" : "s"} can now pay their own share.` };
   }
 
   if (payload.amount != null && payload.amount > 0) {
@@ -208,7 +208,7 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
       status: "PENDING",
       data: {
         title: `Pay ${payload.currency === "EUR" ? "€" : "₹"}${payload.amount} — ${proposal.title.replace(/^Payment needed:\s*/i, "")}`,
-        context: "Opens Pine Labs' hosted checkout. Nothing is marked paid until Pine Labs itself confirms it.",
+        context: "Opens a secure checkout. It only counts as paid once the payment is confirmed.",
         bookingId: result.bookingId,
         payLink: true,
       },

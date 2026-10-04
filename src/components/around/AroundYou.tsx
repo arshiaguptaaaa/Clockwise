@@ -765,7 +765,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           )}
         </div>
       )}
-      {searching && !res && !err && (
+      {!res && !err && (
         <div className="space-y-6 py-2" aria-hidden data-skeleton>
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-2.5">

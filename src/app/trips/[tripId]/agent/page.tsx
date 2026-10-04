@@ -9,6 +9,10 @@ import { CriticalTripAlerts } from "@/components/my-clockwise/CriticalTripAlerts
 import { liveLocationOffer } from "@/lib/readiness-engine";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 import { getTripStay } from "@/lib/stays";
+import Link from "next/link";
+import { owedBy } from "@/lib/payments/obligations";
+import { formatMoney } from "@/lib/budget/money";
+import { timeLabel } from "@/lib/traveller/journey";
 import { VibeCheck } from "@/components/vibe/VibeCheck";
 import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
 
@@ -74,38 +78,45 @@ export default async function MyClockwisePage({
       ]
     : undefined;
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
+  const me = trip.members.find((m) => m.userId === currentUserId)?.user;
+  const [journey, savedCount, owed] = await Promise.all([
+    currentUserId ? prisma.travellerJourney.findFirst({ where: { tripId, userId: currentUserId, status: "CONFIRMED" }, orderBy: { createdAt: "desc" } }) : null,
+    currentUserId ? prisma.savedPlace.count({ where: { tripId, userId: currentUserId } }) : 0,
+    currentUserId ? owedBy(tripId, currentUserId) : [],
+  ]);
+  const owedTotal = owed.reduce((n, o) => n + o.amountMinor, 0);
+  const rows: { href: string; label: string; value: string; hot?: boolean }[] = [
+    { href: `/trips/${tripId}/agent/journey`, label: "Journey", value: journey ? `${journey.originName ?? "?"} → ${journey.destinationName ?? "?"}${journey.arriveLocal ? ` · lands ${timeLabel(journey.arriveLocal)}` : ""}` : "Add your ticket or flight" },
+    { href: `/trips/${tripId}/agent/ready`, label: "Before you go", value: "Weather, packing, what to sort" },
+    { href: `/trips/${tripId}/agent/saved`, label: "Saved", value: savedCount ? `${savedCount} place${savedCount === 1 ? "" : "s"}, just yours` : "Nothing yet" },
+    { href: `/trips/${tripId}/budget`, label: "Budget", value: owed.length ? `You owe ${formatMoney(owedTotal, owed[0].currency)}` : "No one owes anyone", hot: owed.length > 0 },
+  ];
+  const youHeader = (
+    <div data-you-hub>
       {vibeGate}
-      <div className="shrink-0 px-5 pb-3 pt-5">
-        <p className="eyebrow">My Clockwise · Private</p>
-        <p className="headline headline-lg mt-1.5">Just between us.</p>
-      </div>
+      <header className="px-5 pb-1 pt-5">
+        <p className="eyebrow">You · private</p>
+        <h1 className="t-display mt-2 text-[clamp(38px,12vw,52px)] break-words">Hi, {(me?.name ?? "there").split(" ")[0]}.</h1>
+        <p className="t-voice mt-2 text-[15px]">Only you and Clockwise see this.</p>
+      </header>
 
-      {stay && (
-        <div className="shrink-0 border-y border-border px-5 py-2.5 text-[12.5px] text-foreground" data-my-stay>
-          <span className="eyebrow mr-2">Your stay</span>
-          {stay.placeName} {stay.status === "CONFIRMED" ? "✓ booked" : "· approved, not booked yet"}
-        </div>
-      )}
+      <nav aria-label="Your things" className="mx-5 mt-4 row-rule border-y border-border">
+        {stay && (
+          <div className="flex items-baseline justify-between gap-4 py-3.5" data-my-stay>
+            <span className="eyebrow">Stay</span>
+            <span className="min-w-0 truncate text-right text-[14px]">{stay.placeName} {stay.status === "CONFIRMED" ? "✓" : "· not booked yet"}</span>
+          </div>
+        )}
+        {rows.map((r) => (
+          <Link key={r.href} href={r.href} className="group flex min-h-[56px] items-center justify-between gap-4 py-3">
+            <span className="eyebrow shrink-0">{r.label}</span>
+            <span className={`min-w-0 flex-1 truncate text-right text-[14px] ${r.hot ? "font-semibold text-danger" : ""}`}>{r.value}</span>
+            <span aria-hidden className="text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5">→</span>
+          </Link>
+        ))}
+      </nav>
 
-      {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && (
-        <div className="shrink-0 border-b border-border px-5 py-2 text-xs text-foreground">
-          {UBER_STATUS_MESSAGES[uberStatus]}
-        </div>
-      )}
-
-      {currentUserId && <ConnectedServices tripId={tripId} viewerId={currentUserId} />}
-      {currentUserId &&
-        (() => {
-          const self = trip.members.find((m) => m.userId === currentUserId)?.user;
-          return (
-            <CriticalTripAlerts
-              initialOptIn={self?.voiceEscalationOptIn ?? false}
-              initialPhone={self?.phone ?? null}
-            />
-          );
-        })()}
+      {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && <p className="mx-5 mt-3 text-[13px]">{UBER_STATUS_MESSAGES[uberStatus]}</p>}
 
       {offer?.commitment && (
         <LiveLocationCard
@@ -116,7 +127,22 @@ export default async function MyClockwisePage({
         />
       )}
 
+      <details className="mx-5 mt-3 border-b border-border pb-1" data-settings>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-[12px] uppercase tracking-[0.14em] text-muted-foreground [&::-webkit-details-marker]:hidden">
+          Settings <span aria-hidden>▾</span>
+        </summary>
+        {currentUserId && <ConnectedServices tripId={tripId} viewerId={currentUserId} />}
+        {currentUserId && <CriticalTripAlerts initialOptIn={me?.voiceEscalationOptIn ?? false} initialPhone={me?.phone ?? null} />}
+      </details>
+
+      <p className="eyebrow mx-5 mt-6">Ask Clockwise anything</p>
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
       <ChatThread
+        header={youHeader}
         tripId={tripId}
         channel="PRIVATE"
         messages={messages.map((m) => ({

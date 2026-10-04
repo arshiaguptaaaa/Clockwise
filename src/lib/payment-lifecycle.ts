@@ -86,7 +86,7 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
       channel: "GROUP",
       type: "BOOKING",
       status: "CONFIRMED",
-      data: { title: `Payment received — ${money(booking.amount, booking.currency)}`, values: [{ label: "Status", value: "Confirmed by Pine Labs" }] },
+      data: { title: `Payment received — ${money(booking.amount, booking.currency)}`, values: [{ label: "Status", value: "Payment confirmed" }] },
     });
     await notify({
       tripId: booking.tripId,
@@ -94,7 +94,7 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
       severity: "HIGH",
       kind: "PAYMENT_CONFIRMED",
       title: "Payment confirmed",
-      body: `Pine Labs confirmed a payment of ${money(booking.amount, booking.currency)}.`,
+      body: `A payment of ${money(booking.amount, booking.currency)} was confirmed.`,
       href,
       eventId: confirmed.id,
     });
