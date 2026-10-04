@@ -31,7 +31,7 @@ import { updateMyArrival } from "@/lib/traveller/arrival";
 import { ceilToQuarter } from "@/lib/traveller/arrival-rules";
 import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
 import { timeLabel } from "@/lib/traveller/journey";
-import { brandSearch, anchorsFor, orderCategories } from "@/lib/travel/around";
+import { brandSearch, anchorsFor, orderCategories, ladderSearch } from "@/lib/travel/around";
 import { freeTimeOptions } from "@/lib/travel/window";
 import { doesThisFit } from "@/lib/travel/fit";
 import { resolvedMoment } from "@/lib/dates";
@@ -759,6 +759,8 @@ async function getTransportStatus(ctx: AgentContext): Promise<ToolExecutionResul
   return { output: summaries.join("; ") };
 }
 
+const currencySymbol = (c: string) => (c === "INR" ? "₹" : c === "EUR" ? "€" : c === "USD" ? "$" : `${c} `);
+
 async function preparePayment(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   const payerName = input.payerName as string;
   const payer = ctx.trip.members.find((m) => m.user.name.toLowerCase() === payerName?.toLowerCase());
@@ -780,7 +782,7 @@ async function preparePayment(input: Record<string, unknown>, ctx: AgentContext)
     data: {
       title: `${purpose} is ready to confirm.`,
       context: `${payer.user.name} has offered to pay for this booking.`,
-      values: [{ label: "Total", value: `${currency === "EUR" ? "€" : currency}${amount}` }],
+      values: [{ label: "Total", value: `${currencySymbol(currency)}${amount}` }],
       payerId: payer.userId,
       amount,
       currency,
@@ -794,7 +796,7 @@ async function preparePayment(input: Record<string, unknown>, ctx: AgentContext)
     type: "PAYMENT",
     status: "PENDING",
     data: {
-      title: `${purpose} — ${currency === "EUR" ? "€" : currency}${amount}`,
+      title: `${purpose} — ${currencySymbol(currency)}${amount}`,
       context: "Authorisation applies only to this transaction.",
       values: [{ label: "Paying as", value: payer.user.name }],
       payerId: payer.userId,
@@ -1725,9 +1727,17 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   const diet = (["vegetarian", "vegan", "halal"] as const).find((d) => d === input.diet);
   const maxMinutes = typeof input.maxMinutes === "number" && input.maxMinutes > 0 ? Math.min(60, Math.round(input.maxMinutes)) : null;
   let results;
+  let widenedNote = "";
   let walkById = new Map<string, number>();
   try {
-    results = await geoapifySearchNearby(category, located.point, maxMinutes ? Math.min(5000, Math.max(800, maxMinutes * 110)) : 1500, maxMinutes ? 15 : 8, diet);
+    if (maxMinutes) {
+      results = await geoapifySearchNearby(category, located.point, Math.min(5000, Math.max(800, maxMinutes * 110)), 15, diet);
+    } else {
+      // Same widening as Around You: a city name must not return nothing just because the centre has few cafés within 1.5 km.
+      const ladder = await ladderSearch(category, located.point, { diet, limit: 10 });
+      results = ladder.raw;
+      widenedNote = ladder.broadened || ladder.usedRadius > 1500 ? ` The search was widened to ${ladder.usedRadius / 1000} km${ladder.broadened ? " and to related place types" : ""} to find real places; say so briefly.` : "";
+    }
     if (maxMinutes) {
       // Real routes, then filter on the provider's own duration; no straight-line conversion.
       const timed = await Promise.all(
@@ -1779,7 +1789,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
     return { output: maxMinutes ? `No ${category} within a ${maxMinutes}-minute walk of ${located.label} in the provider's data (real walking routes checked). Say so; offer a longer time. Never name one from memory.` : `No ${category} found near ${located.label}.`, posted: true };
   }
   return {
-    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.${diet ? ` Reply with this sentence only: "I ran Geoapify's ${diet} search near ${located.label} — the card shows what it returned." Do NOT call the places ${diet}, ${diet}-friendly or similar.` : ""}`,
+    output: `Found ${results.length} ${category}(s) near ${located.label} (source: Geoapify, just now)${diet ? `, found using the provider's ${diet} search — a filter only: do NOT say any individual place IS ${diet}, never infer it from names or cuisine, and say "found using Geoapify's ${diet} search"` : ". NOT filtered by diet — do not call any of them vegetarian/vegan/halal"}. The card shows them; don't list them again.${widenedNote}${diet ? ` Reply with this sentence only: "I ran Geoapify's ${diet} search near ${located.label} — the card shows what it returned." Do NOT call the places ${diet}, ${diet}-friendly or similar.` : ""}`,
     posted: true,
   };
 }

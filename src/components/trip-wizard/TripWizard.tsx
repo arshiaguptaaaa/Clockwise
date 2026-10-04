@@ -75,7 +75,7 @@ export function TripWizard() {
 
   const [destinations, setDestinations] = useState<SelectedDestination[]>([]);
 
-  const [dateMode, setDateMode] = useState<DateMode>("unsure");
+  const [dateMode, setDateMode] = useState<DateMode>("exact");
   const [exactStart, setExactStart] = useState("");
   const [exactEnd, setExactEnd] = useState("");
   const [month, setMonth] = useState("");
@@ -315,7 +315,7 @@ export function TripWizard() {
         {step === "dates" && (
           <div className="flex flex-1 flex-col">
             <h1 className="font-serif text-2xl font-medium text-foreground">
-              When are you thinking?
+              When are you going?
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Exact dates aren&apos;t required — Clockwise works fine before the group agrees.
@@ -331,7 +331,7 @@ export function TripWizard() {
                     example:
                       exactStart && exactEnd && !isExactRangeInvalid
                         ? dateSummary
-                        : "12 Dec → 20 Dec",
+                        : "Pick on a calendar",
                   },
                   { mode: "approximate" as const, label: "Approximate", icon: Calendar, example: "December 2026" },
                   { mode: "unsure" as const, label: "Not sure yet", icon: CalendarOff, example: "Decide later" },
@@ -378,9 +378,7 @@ export function TripWizard() {
                     End date can&apos;t be before the start date.
                   </p>
                 )}
-                {exactStart && exactEnd && !isExactRangeInvalid && (
-                  <p className="mt-2 text-xs text-muted-foreground">{dateSummary}</p>
-                )}
+
               </div>
             )}
 

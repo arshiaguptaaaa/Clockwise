@@ -118,29 +118,40 @@ async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<Aroun
   return [...timed, ...places.slice(12)];
 }
 
-export async function searchAroundPoint(anchor: AroundAnchor, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}): Promise<AroundResult> {
-  if (!isGeoapifyConfigured()) return { ok: false, error: "Place search isn't connected in this environment." };
-  if (!(category in NEARBY_CATEGORIES)) return { ok: false, error: `Unknown category "${category}".` };
-  // Close first; if little comes back, widen the radius, then widen the category within the same intent.
-  // An empty answer is only given when the widest search genuinely found nothing.
+// ONE place that decides how a place search widens: close first; if little comes back, a bigger radius; then the SAME
+// intent in wider provider categories. Used by Around You and the chat agent so they can never disagree.
+export async function ladderSearch(category: string, point: LatLng, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}) {
   const radii = opts.radiusM ? [opts.radiusM] : [1500, 4000, 10000];
   const usable = (r: { name: string }[]) => r.filter((x) => x.name !== "Unnamed place").length;
   let raw: Awaited<ReturnType<typeof searchNearby>> = [];
   let usedRadius = radii[0];
   let broadened = false;
+  for (const radius of radii) {
+    raw = await searchNearby(category, point, radius, opts.limit ?? 15, opts.diet);
+    usedRadius = radius;
+    if (usable(raw) >= 3) break;
+  }
+  if (usable(raw) < 3 && BROAD_CATEGORIES[category] && !opts.diet) {
+    const wide = await searchNearbyRaw(BROAD_CATEGORIES[category], point, radii[radii.length - 1], opts.limit ?? 15);
+    const seen = new Set(raw.map((r) => r.providerId));
+    raw = [...raw, ...wide.filter((w) => !seen.has(w.providerId))];
+    broadened = wide.length > 0;
+    usedRadius = radii[radii.length - 1];
+  }
+  // Attractions: transit gates and bare junctions are real map objects but not things to do.
+  if (category === "attraction") raw = raw.filter((r) => /[A-Za-z]/.test(r.name) && !/\b(gate|chowk|metro|station|bus stop|junction)\b/i.test(r.name));
+  return { raw, usedRadius, broadened };
+}
+
+export async function searchAroundPoint(anchor: AroundAnchor, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}): Promise<AroundResult> {
+  if (!isGeoapifyConfigured()) return { ok: false, error: "Place search isn't connected in this environment." };
+  if (!(category in NEARBY_CATEGORIES)) return { ok: false, error: `Unknown category "${category}".` };
+  // An empty answer is only given when the widest search genuinely found nothing.
+  let raw: Awaited<ReturnType<typeof searchNearby>>;
+  let usedRadius: number;
+  let broadened: boolean;
   try {
-    for (const radius of radii) {
-      raw = await searchNearby(category, anchor.point, radius, opts.limit ?? 15, opts.diet);
-      usedRadius = radius;
-      if (usable(raw) >= 3) break;
-    }
-    if (usable(raw) < 3 && BROAD_CATEGORIES[category] && !opts.diet) {
-      const wide = await searchNearbyRaw(BROAD_CATEGORIES[category], anchor.point, radii[radii.length - 1], opts.limit ?? 15);
-      const seen = new Set(raw.map((r) => r.providerId));
-      raw = [...raw, ...wide.filter((w) => !seen.has(w.providerId))];
-      broadened = wide.length > 0;
-      usedRadius = radii[radii.length - 1];
-    }
+    ({ raw, usedRadius, broadened } = await ladderSearch(category, anchor.point, opts));
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Place search failed." };
   }

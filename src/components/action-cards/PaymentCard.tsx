@@ -23,7 +23,7 @@ export function PaymentCard({
   amount,
   currency,
 }: Props) {
-  const amountLabel = amount ? `${currency === "EUR" ? "€" : (currency ?? "")}${amount}` : "";
+  const amountLabel = amount ? `${currency === "EUR" ? "€" : currency === "INR" || !currency ? "₹" : `${currency} `}${amount}` : "";
 
   return (
     <ClockwiseActionCard

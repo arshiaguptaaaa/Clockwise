@@ -11,7 +11,7 @@ export function SubTabs({
   const pathname = usePathname();
 
   return (
-    <div className="flex gap-6 overflow-x-auto border-b border-border px-5 [scrollbar-width:none]">
+    <div className="flex gap-4 overflow-x-auto border-b border-border px-5 sm:gap-6 [scrollbar-width:none]">
       {tabs.map((tab) => {
         const active = pathname === tab.href;
         return (
@@ -19,7 +19,7 @@ export function SubTabs({
             key={tab.href}
             href={tab.href}
             aria-current={active ? "page" : undefined}
-            className={`relative shrink-0 cursor-pointer py-3 text-[13.5px] tracking-wide transition-colors ${
+            className={`relative shrink-0 cursor-pointer py-3 text-[13px] tracking-wide sm:text-[13.5px] transition-colors ${
               active ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >

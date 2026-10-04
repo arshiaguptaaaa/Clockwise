@@ -6,11 +6,11 @@ export function MyClockwiseTabs({ tripId }: { tripId: string }) {
   return (
     <SubTabs
       tabs={[
-        { href: base, label: "Clockwise" },
-        { href: `${base}/journey`, label: "✈ Journey" },
+        { href: base, label: "Home" },
+        { href: `${base}/journey`, label: "Journey" },
         { href: `${base}/ready`, label: "Ready?" },
-        { href: `${base}/around`, label: "◎ Around you" },
-        { href: `${base}/saved`, label: "♡ Saved" },
+        { href: `${base}/around`, label: "Around" },
+        { href: `${base}/saved`, label: "Saved" },
         { href: `/trips/${tripId}/budget`, label: "Budget" },
       ]}
     />
