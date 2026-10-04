@@ -8,7 +8,7 @@ import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
 import { prisma } from "@/lib/prisma";
 import { LiveSync } from "@/components/LiveSync";
 import { DecisionStrip } from "@/components/decisions/DecisionStrip";
-import { getOpenDecisions } from "@/lib/decisions";
+import { getOpenDecisions, waitingOn } from "@/lib/decisions";
 
 export default async function TripShellLayout({
   children,
@@ -57,7 +57,7 @@ export default async function TripShellLayout({
         {children}
       </div>
       <LiveSync tripId={tripId} />
-      <BottomNav tripId={tripId} />
+      <BottomNav tripId={tripId} waiting={waitingOn(decisions).length + (member.userId === trip.createdBy ? decisions.filter((d) => d.stage === "AGREED").length : 0)} />
       {vibe}
     </div>
   );

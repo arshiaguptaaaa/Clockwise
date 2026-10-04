@@ -8,7 +8,7 @@ import { HUMAN } from "@/lib/copy";
 import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
 import type { NextUp, FreeTime } from "@/lib/travel/window";
 import type { AroundPlace } from "@/lib/travel/around";
-import { AROUND_CATEGORIES, countWordTitle } from "@/lib/travel/around-categories";
+import { AROUND_CATEGORIES, CATEGORY_HEADLINE, countWordTitle } from "@/lib/travel/around-categories";
 
 type Ok = Extract<AroundResponse, { ok: true }>;
 type RouteOk = Extract<RouteResponse, { ok: true }>;
@@ -20,6 +20,14 @@ const FRESH_MS = 10 * 60 * 1000;
 const MODE_LABEL: Record<string, string> = { walk: "Walking", drive: "Driving", bicycle: "Cycling", transit: "Transit" };
 
 
+// "Two hours", "45 minutes", "1 hour 30 minutes": read aloud, not as a timer.
+const killWords = (m: number) => {
+  if (m < 60) return `${m} minutes`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  const hw = h <= 8 ? countWordTitle(h) : String(h);
+  return `${hw} ${h === 1 ? "hour" : "hours"}${mm ? ` ${mm} minutes` : ""}`;
+};
 const fmtDur = (m: number) => (m >= 2880 ? `${Math.round(m / 1440)} DAYS` : m < 60 ? `${m} MIN` : `${Math.floor(m / 60)} H${m % 60 ? ` ${m % 60} MIN` : ""}`);
 const hhmm = (iso: string) => iso.slice(11, 16);
 
@@ -444,7 +452,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
         {freeErr && <p className="text-xs text-danger" data-free-error>{freeErr}</p>}
         {free && free.anchorType === anchor && (
           <div className="space-y-2 pt-1" data-free-time>
-            <p className="headline headline-md">You&apos;ve got {fmtDur(free.windowMinutes).toLowerCase()}.</p>
+            <p className="eyebrow">If you have</p>
+            <p className="headline headline-lg uppercase">{killWords(free.windowMinutes)} to kill.</p>
             {free.next && free.windowSource === "next-commitment" && <p className="text-xs text-muted-foreground">Until {free.next.name} at {hhmm(free.next.targetLocal)}, {free.next.pointLabel ?? "location not on the map"}.</p>}
             {free.rainyMode && free.rain && <p className="flex items-center gap-3 text-[13px]" data-rainy><BengaluruArt scene="rain" className="w-16 shrink-0" />RAINY WINDOW. Rain is likely around {hhmm(free.rain.atLocal)} ({free.rain.probability}%). Indoor-type places only.</p>}
             {free.options.length === 0 && <p className="text-sm text-muted-foreground">Nothing I checked fits that window (I routed {free.considered} real places{free.closedDropped ? `, ${free.closedDropped} dropped because their hours say closed` : ""}). Try a longer window or a different anchor.</p>}
@@ -529,6 +538,9 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
         </div>
       )}
 
+      {res && shown.length > 0 && CATEGORY_HEADLINE[res.category] && (
+        <h2 className="headline headline-lg mt-2" data-around-headline>{CATEGORY_HEADLINE[res.category]}</h2>
+      )}
       <ul className="row-rule">
         {shown.map((p) => renderCard(p, res?.category ?? cat, res?.why[p.providerPlaceId]))}
         {res && shown.length === 0 && !busy && <li className="text-sm text-muted-foreground">Nothing found{maxWalk ? ` within a ${maxWalk}-minute walk` : " here"} in the provider&apos;s data.</li>}

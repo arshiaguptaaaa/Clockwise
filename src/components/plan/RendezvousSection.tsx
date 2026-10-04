@@ -1,6 +1,5 @@
 import { MODE_ICON, timeLabel } from "@/lib/traveller/journey";
 import type { RendezvousView } from "@/lib/rendezvous";
-import { HUMAN } from "@/lib/copy";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 
 const hhmm = (local: string) => timeLabel(local);
@@ -12,9 +11,9 @@ const basis = (p: string | null) => (p === "delhivery" ? "Delhivery · traffic-a
 // for the plan everyone agreed. Group-safe: arrival facts only, no ticket details.
 export type PendingMove = { to: string; proposalId: string; stage: string };
 
-export function RendezvousSection({ view, pending = {}, organiserName = "the organiser" }: { view: RendezvousView; pending?: Record<string, PendingMove>; organiserName?: string }) {
-  if (view.clocks.length === 0 && view.commitments.length === 0) return null;
-  const atRisk = view.commitments.filter((c) => c.late.length > 0);
+// The detail behind the timeline: each person's route and the provider that measured it.
+export function RendezvousSection({ view }: { view: RendezvousView }) {
+  if (view.clocks.length === 0) return null;
   return (
     <>
       {view.clocks.length > 0 && (
@@ -61,38 +60,6 @@ export function RendezvousSection({ view, pending = {}, organiserName = "the org
         </section>
       )}
 
-      {view.commitments.length > 0 && (
-        <section className="section" data-shared-plan>
-          <p className="eyebrow">Shared plan</p>
-          <ul className="row-rule mt-3">
-            {view.commitments.map((c) => {
-              const late = c.late.length > 0;
-              return (
-                <li key={c.id} className="grid grid-cols-[4.75rem_1fr] gap-x-3 py-3.5" data-commitment={c.name}>
-                  <p className={`font-display text-[19px] leading-[1.15] tracking-[-0.01em] ${late ? "text-danger" : ""}`}>{hhmm(c.target)}</p>
-                  <div>
-                    <p className="text-[15px] font-semibold leading-snug">
-                      {c.name} <span className="font-normal text-muted-foreground">· {day(c.target)}</span>
-                    </p>
-                    <p className={`mt-1 text-[12.5px] leading-snug ${late ? "font-semibold text-danger" : "text-muted-foreground"}`}>
-                      {late ? <><span className="mr-1.5 rounded-full bg-danger-tint px-2 py-0.5 text-[10px] tracking-[0.14em]">AT RISK</span>{c.late.map((l) => `${l.name} can't be at the stay before ${hhmm(l.hotelBy)}`).join("; ")}</> : c.allAtHotelBy ? "Everyone can be at the stay in time ✓" : "Can't tell yet: someone's clock is unknown"}
-                    </p>
-                    {pending[c.id] && (
-                      <p className="mt-1.5 text-[12.5px] leading-snug" data-pending-move>
-                        <span className="mr-1.5 rounded-full border border-dashed border-foreground/40 px-2 py-0.5 text-[10px] tracking-[0.14em]">{pending[c.id].stage === "AGREED" ? "AGREED" : "PROPOSED"}</span>
-                        <span className="font-display text-[15px]">{hhmm(pending[c.id].to)} ?</span>{" "}
-                        <span className="text-muted-foreground">{pending[c.id].stage === "AGREED" ? `Everyone accepted · the Plan changes when ${organiserName.split(" ")[0]} confirms.` : "Not in the Plan yet · waiting for the group."}</span>
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          {atRisk.length === 0 && view.commitments.every((c) => c.allAtHotelBy) && <p className="mt-3 font-display text-[18px] italic text-muted-foreground" data-clocks-agree>{HUMAN.clocksAgree}</p>}
-          {atRisk.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Clockwise suggests the smallest change that works; the plan only moves after the group agrees.</p>}
-        </section>
-      )}
     </>
   );
 }

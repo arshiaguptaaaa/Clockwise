@@ -66,17 +66,24 @@ function Decision({ d, viewerId, organiserId, organiserName, compact, index }: {
   const [declinedClosed, setDeclinedClosed] = useState(false);
   const [inSeen, setInSeen] = useState(true);
 
+  // Session flags live in the browser only, so they are read after mount.
   useEffect(() => {
-    setDeclinedClosed(readFlag(declKey));
-    const seen = readFlag(inKey);
-    setInSeen(seen);
-    if (d.mine === "APPROVED" && d.stage === "PROPOSED" && !seen) {
-      const t = setTimeout(() => {
-        setFlag(inKey);
-        setInSeen(true);
-      }, 6000);
-      return () => clearTimeout(t);
-    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const t0 = setTimeout(() => {
+      setDeclinedClosed(readFlag(declKey));
+      const seen = readFlag(inKey);
+      setInSeen(seen);
+      if (d.mine === "APPROVED" && d.stage === "PROPOSED" && !seen) {
+        timer = setTimeout(() => {
+          setFlag(inKey);
+          setInSeen(true);
+        }, 6000);
+      }
+    }, 0);
+    return () => {
+      clearTimeout(t0);
+      if (timer) clearTimeout(timer);
+    };
   }, [d.id, d.mine, d.stage, declKey, inKey]);
 
   function vote(decision: "APPROVED" | "REJECTED") {

@@ -14,6 +14,7 @@ import { RouteTimeline } from "@/components/plan/RouteTimeline";
 import { prisma } from "@/lib/prisma";
 import { getTripStay } from "@/lib/stays";
 import { StaySection } from "@/components/plan/StaySection";
+import { DayTimeline } from "@/components/plan/DayTimeline";
 import { RendezvousSection } from "@/components/plan/RendezvousSection";
 import { AgreedPlacesSection } from "@/components/plan/AgreedPlacesSection";
 import { agreedPlaces } from "@/lib/places/place-proposals";
@@ -101,7 +102,8 @@ export default async function PlanOverviewPage({
       {stay && <StaySection stay={stay} />}
       <Interlude {...(/bengaluru|bangalore/i.test(heroStop?.name ?? trip.name) ? INTERLUDES.bengaluru : INTERLUDES.impossible)} />
       <AgreedPlacesSection places={agreed} />
-      <RendezvousSection view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />
+      <DayTimeline view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />
+      <RendezvousSection view={rendezvous} />
 
       <section className="section">
         <p className="eyebrow">Where</p>

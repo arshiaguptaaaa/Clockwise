@@ -127,7 +127,7 @@ function Reactions({ messageId, reactions, viewerId }: { messageId: string; reac
           ))}
         </span>
       ) : (
-        <button type="button" aria-label="Add a reaction" onClick={() => setPicking(true)} className="cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/60 transition-colors hover:text-foreground">☺</button>
+        <button type="button" aria-label="Add a reaction" onClick={() => setPicking(true)} className="cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-40">☺</button>
       )}
     </div>
   );
@@ -158,7 +158,7 @@ export function MessageRow({ messageId, reactions = [], reactable = false, viewe
   const key = senderId ?? senderName;
 
   return (
-    <div className={`flex items-start gap-3 ${grouped ? "-mt-2.5" : ""}`}>
+    <div tabIndex={reactable ? 0 : undefined} className={`group flex items-start gap-3 outline-none ${grouped ? "-mt-2.5" : ""}`}>
       {grouped ? <span className="size-9 shrink-0" /> : <Face index={faceIndexForId(key)} className="mt-0.5 size-9" />}
       <div className="min-w-0 flex-1">
         {!grouped && (

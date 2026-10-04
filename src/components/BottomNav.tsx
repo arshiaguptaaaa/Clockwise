@@ -11,7 +11,7 @@ const TABS = [
   { segment: "agent", also: ["budget"], label: "My Clockwise", icon: User },
 ] as const;
 
-export function BottomNav({ tripId }: { tripId: string }) {
+export function BottomNav({ tripId, waiting = 0 }: { tripId: string; waiting?: number }) {
   const pathname = usePathname();
 
   return (
@@ -29,7 +29,12 @@ export function BottomNav({ tripId }: { tripId: string }) {
               className={`relative flex flex-1 cursor-pointer flex-col items-center gap-0.5 px-2 pb-2 pt-2.5 text-center transition-colors ${active ? "text-accent" : "text-muted-foreground hover:text-foreground"}`}
             >
               <span className={`absolute inset-x-5 top-0 h-[2px] rounded-full transition-colors ${active ? "bg-accent" : "bg-transparent"}`} />
-              <Icon className="size-[20px]" strokeWidth={active ? 2 : 1.6} />
+              <span className="relative">
+                <Icon className="size-[20px]" strokeWidth={active ? 2 : 1.6} />
+                {tab.segment === "room" && waiting > 0 && (
+                  <span aria-label={`${waiting} decision${waiting === 1 ? "" : "s"} waiting`} className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">{waiting}</span>
+                )}
+              </span>
               <span className={`text-[10.5px] tracking-wide ${active ? "font-semibold" : "font-medium"}`}>{tab.label}</span>
             </Link>
           );
