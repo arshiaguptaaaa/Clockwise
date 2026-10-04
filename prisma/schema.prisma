@@ -167,7 +167,7 @@ model Trip {
   coreEndDate   DateTime?
   status        String    @default("PLANNING")
   createdBy     String
-  // True only for the one seeded Central Europe trip. This is how
+  // True only for the one seeded demo trip. This is how
   // getDemoTrip() finds "the" demo trip reliably regardless of how many
   // real trips exist — never inferred from name or creation order.
   isDemo        Boolean   @default(false)

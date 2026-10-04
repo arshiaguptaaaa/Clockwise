@@ -7,8 +7,8 @@
 // provider actually produced it. Never re-derive a second shape per
 // feature.
 export type CanonicalPlace = {
-  displayName: string; // human-readable, e.g. "Vienna, Austria"
-  name: string; // short/primary name, e.g. "Vienna"
+  displayName: string; // human-readable, e.g. "Bengaluru, India"
+  name: string; // short/primary name, e.g. "Bengaluru"
   city: string | null;
   region: string | null; // state/province/admin1
   country: string | null;

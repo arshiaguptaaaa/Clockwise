@@ -59,9 +59,9 @@ async function checkOpenMeteoWeather(): Promise<IntegrationStatus> {
 async function checkGeoapify(): Promise<IntegrationStatus> {
   if (!isGeoapifyConfigured()) return result("Geoapify", "NOT_CONFIGURED", "GEOAPIFY_API_KEY is missing.");
   try {
-    const resolved = await resolveLocationText("Vienna, Austria");
+    const resolved = await resolveLocationText("Bengaluru, India");
     if (resolved) {
-      return result("Geoapify", "LIVE", `Resolved "Vienna, Austria" → ${resolved.displayName}.`);
+      return result("Geoapify", "LIVE", `Resolved "Bengaluru, India" → ${resolved.displayName}.`);
     }
     return result("Geoapify", "ERROR", "Request succeeded but returned no results for a known query.");
   } catch (err) {

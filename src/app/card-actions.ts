@@ -17,7 +17,7 @@ export async function dismissActionCard(messageId: string) {
 
 // Real fix, not a refactor: this used to call a mock payment provider
 // that always "succeeds" instantly, write a CONFIRMED Booking regardless,
-// and post a hardcoded "Vienna hotel confirmed ✓" group card no matter
+// and post a hardcoded "hotel confirmed ✓" group card no matter
 // what the actual purpose was (a leftover from the original seeded demo).
 // A Pine Labs Payment Link is inherently asynchronous — creating it only
 // means the payer now HAS somewhere to pay, not that they have. The real

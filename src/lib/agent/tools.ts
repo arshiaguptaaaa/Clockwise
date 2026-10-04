@@ -109,7 +109,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         payerName: { type: "string", description: "Name of the traveller paying, from the known traveller list" },
         amount: { type: "number" },
         currency: { type: "string", description: "e.g. EUR" },
-        purpose: { type: "string", description: "What this payment is for, e.g. 'Vienna hotel'" },
+        purpose: { type: "string", description: "What this payment is for, e.g. 'the hotel'" },
       },
       required: ["payerName", "amount", "currency", "purpose"],
     },
@@ -396,7 +396,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "The place name to look up, e.g. 'Stephansplatz'" },
+        query: { type: "string", description: "The place name to look up, e.g. 'Indiranagar'" },
       },
       required: ["query"],
     },
@@ -410,7 +410,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
       properties: {
         near: {
           type: "string",
-          description: "Area/landmark to search near, e.g. 'Stephansplatz' or 'our hotel'; omit to use the trip's current destination",
+          description: "Area/landmark to search near, e.g. 'Indiranagar' or 'our hotel'; omit to use the trip's current destination",
         },
       },
     },
@@ -418,7 +418,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   {
     name: "search_nearby",
     description:
-      "Read-only: find real places of a given category near a location — e.g. 'coffee near us', 'pharmacy near the hotel', 'restaurants near Stephansplatz'.",
+      "Read-only: find real places of a given category near a location — e.g. 'coffee near us', 'pharmacy near the hotel', 'restaurants near Indiranagar'.",
     parameters: {
       type: "object",
       properties: {
@@ -429,7 +429,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         },
         near: {
           type: "string",
-          description: "A NAMED area or landmark to search near (e.g. 'Stephansplatz'). Do not put 'me' or 'our hotel' here; use `anchor`. Omit only when the user named no place and no anchor applies (the card then says it is centred on the destination).",
+          description: "A NAMED area or landmark to search near (e.g. 'Indiranagar'). Do not put 'me' or 'our hotel' here; use `anchor`. Omit only when the user named no place and no anchor applies (the card then says it is centred on the destination).",
         },
         anchor: {
           type: "string",

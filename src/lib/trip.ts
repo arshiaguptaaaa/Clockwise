@@ -20,7 +20,7 @@ export async function getTripById(tripId: string) {
   return trip;
 }
 
-// The one seeded Central Europe trip, found via the isDemo flag rather
+// The one seeded demo trip, found via the isDemo flag rather
 // than "the first trip" or a name match — reliable regardless of how many
 // real trips exist alongside it.
 export async function getDemoTrip() {

@@ -57,7 +57,7 @@ type GeoapifyGeocodeResult = {
   country_code?: string;
 };
 
-// Resolves a place NAME/address (e.g. "Stephansplatz, Vienna") to a full
+// Resolves a place NAME/address (e.g. "Indiranagar, Bengaluru") to a full
 // canonical place via Geoapify's Geocoding API — distinct from the Places
 // API, needed because a "near <landmark>" question requires a coordinate
 // before a nearby/category search can run. Same CanonicalPlace shape as
@@ -235,7 +235,7 @@ export function searchHotels(near: LatLng, radiusMeters = 2500, limit = 8): Prom
   return searchNearby("hotel", near, radiusMeters, limit);
 }
 
-// Free-text lookup for a single named place (e.g. "Stephansplatz", "our
+// Free-text lookup for a single named place (e.g. "Indiranagar", "our
 // hotel's street"), used by search_places when the question is really
 // "where is X" rather than "what's near me."
 export async function searchPlaceByText(query: string, near?: LatLng): Promise<PlaceResult[]> {

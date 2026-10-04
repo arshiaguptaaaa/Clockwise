@@ -8,7 +8,7 @@ export type MapMarker = {
   id: string;
   kind: MapMarkerKind;
   position: { lat: number; lng: number };
-  label: string; // human-readable name, e.g. "Vienna, Austria"
+  label: string; // human-readable name, e.g. "Bengaluru, India"
   sublabel?: string; // e.g. dates, "320 m away", a category
   // True for markers from a live agent search (hotels/nearby/route
   // endpoints) that aren't part of the trip's own persisted destinations —

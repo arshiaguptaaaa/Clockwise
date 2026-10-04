@@ -8,6 +8,7 @@ import { getTripById } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { respondToGroupMessage, respondToPrivateMessage } from "@/lib/agent/clockwise-agent";
 import { withAgentLock, conversationLockKey } from "@/lib/agent-lock";
+import { ensureDemoScenario } from "@/lib/demo/bengaluru-scenario";
 
 export async function joinAsUser(tripId: string, userId: string) {
   const trip = await getTripById(tripId);
@@ -16,6 +17,8 @@ export async function joinAsUser(tripId: string, userId: string) {
     throw new Error("That traveller is not part of this trip.");
   }
   await setCurrentUserId(userId);
+  // First sign-in after a deploy sets the demo scenario up through the real product paths (idempotent).
+  if (trip.isDemo) await ensureDemoScenario(tripId).catch((err) => console.error("[demo] scenario setup failed:", err instanceof Error ? err.message : err));
   redirect(`/trips/${tripId}/room`);
 }
 

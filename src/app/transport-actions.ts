@@ -23,7 +23,7 @@ async function getPlanOrThrow(planId: string) {
 }
 
 function cityHintFor(destination: string) {
-  // The demo's Vienna leg locations already include the city name; for
+  // The demo trip's locations already include the city name; for
   // free-text real usage this is a no-op (geocodeLocation just appends it).
   return destination.includes(",") ? undefined : destination;
 }

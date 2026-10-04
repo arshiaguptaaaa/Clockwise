@@ -3,23 +3,12 @@ import {
   TRIP_NAME,
   CORE_START_DATE,
   CORE_END_DATE,
-  ROUTE,
+  DESTINATION,
   TRAVELLERS,
   ROOM_PAIRS,
-  SINGLE_ROOMS,
-  PRIVATE_BUDGETS,
-  DOCUMENT_STATUS,
   SEED_MESSAGES,
   CLOCKWISE_SENDER_NAME,
-  DINNER_DEPARTURE_TRAVELLERS,
-  VIENNA_HOTEL_PAYER,
-  VIENNA_HOTEL_AMOUNT,
-  VIENNA_HOTEL_CURRENCY,
-  VIENNA_HOTEL_ROOMS,
-  VIENNA_HOTEL_NIGHTS,
 } from "../src/lib/demo-data";
-import { encodeCard } from "../src/lib/action-cards";
-import { getPendingDocumentTravellers } from "../src/lib/document-readiness";
 
 const prisma = new PrismaClient();
 
@@ -121,18 +110,19 @@ async function main() {
     },
   });
 
-  for (const dest of ROUTE) {
-    await prisma.destination.create({
-      data: {
-        tripId: trip.id,
-        name: dest.name,
-        country: dest.country,
-        order: dest.order,
-        startDate: dest.startDate ? new Date(dest.startDate) : null,
-        endDate: dest.endDate ? new Date(dest.endDate) : null,
-      },
-    });
-  }
+  // The destination is created by NAME only. Its coordinates, region and provider id are
+  // resolved from the real provider when the scenario is set up (never typed in here).
+  await prisma.destination.create({
+    data: {
+      tripId: trip.id,
+      name: DESTINATION.name,
+      displayName: DESTINATION.displayName,
+      country: DESTINATION.country,
+      order: 0,
+      startDate: new Date(DESTINATION.startDate),
+      endDate: new Date(DESTINATION.endDate),
+    },
+  });
 
   const roomFor: Record<string, string | undefined> = {};
   for (const [a, b] of ROOM_PAIRS) {
@@ -147,28 +137,22 @@ async function main() {
       data: {
         tripId: trip.id,
         userId: user.id,
-        participationStart: new Date(traveller.participationStart),
-        participationEnd: new Date(traveller.participationEnd),
+        participationStart: new Date(CORE_START_DATE),
+        participationEnd: new Date(CORE_END_DATE),
         departureCity: traveller.departureCity,
         role: traveller.role,
       },
     });
 
-    const isSingle = SINGLE_ROOMS.includes(traveller.name);
     const roomSharingWith = roomFor[traveller.name];
-    const budgetCeiling = PRIVATE_BUDGETS[traveller.name];
-    const doc = DOCUMENT_STATUS[traveller.name];
 
     await prisma.privateProfile.create({
       data: {
         tripId: trip.id,
         userId: user.id,
-        budgetCeiling: budgetCeiling ?? null,
         budgetVisibility: "AGENT_ONLY",
-        roomPreference: isSingle ? "SINGLE" : "TWIN",
+        roomPreference: "TWIN",
         roomSharingWith: roomSharingWith ?? null,
-        passportStatus: doc?.passportStatus ?? null,
-        visaStatus: doc?.visaStatus ?? null,
       },
     });
 
@@ -230,196 +214,6 @@ async function main() {
         timestamp: ts,
       },
     });
-  }
-
-  // Clockwise's transport action card — real TransportPlan/Commitment rows
-  // back it (not baked-in mock numbers), so "Check rides"/"Confirm &
-  // request rides" on this card make genuine Uber Sandbox API calls once
-  // the organiser (Arshia) connects Uber. Everything from here on is live,
-  // not scripted.
-  const departureIds = DINNER_DEPARTURE_TRAVELLERS.map((name) => users.get(name)!.id);
-  const laterIds = TRAVELLERS.map((t) => users.get(t.name)!.id).filter(
-    (id) => !departureIds.includes(id)
-  );
-
-  const dinnerTargetTime = new Date(CORE_START_DATE);
-  dinnerTargetTime.setUTCDate(dinnerTargetTime.getUTCDate() + 1); // an evening during the Vienna leg
-  dinnerTargetTime.setUTCHours(20, 0, 0, 0);
-
-  const dinnerCommitment = await prisma.commitment.create({
-    data: {
-      tripId: trip.id,
-      name: "Dinner",
-      targetTime: dinnerTargetTime,
-      location: "Mariahilf, Vienna",
-      participantIds: JSON.stringify([...departureIds, ...laterIds]),
-    },
-  });
-
-  const transportPlan = await prisma.transportPlan.create({
-    data: {
-      tripId: trip.id,
-      commitmentId: dinnerCommitment.id,
-      createdBy: clockwiseUser.id,
-      pickup: "Innere Stadt, Vienna",
-      destination: "Mariahilf, Vienna",
-      partySize: departureIds.length,
-      status: "DRAFT",
-    },
-  });
-
-  const demoTripMembers = await prisma.tripMember.findMany({ where: { tripId: trip.id } });
-  const tripMemberIdByUserId = new Map(demoTripMembers.map((m) => [m.userId, m.id]));
-
-  await prisma.transportParticipant.createMany({
-    data: [
-      ...departureIds.map((userId) => ({
-        transportPlanId: transportPlan.id,
-        tripMemberId: tripMemberIdByUserId.get(userId)!,
-        status: "CONFIRMED",
-      })),
-      ...laterIds.map((userId) => ({
-        transportPlanId: transportPlan.id,
-        tripMemberId: tripMemberIdByUserId.get(userId)!,
-        status: "LEAVING_LATER",
-      })),
-    ],
-  });
-
-  ts = new Date(ts.getTime() + 60_000);
-  await prisma.message.create({
-    data: {
-      tripId: trip.id,
-      senderId: clockwiseUser.id,
-      channel: "GROUP",
-      content: `${departureIds.length} of ${TRAVELLERS.length} are leaving at 7:15 for dinner. Who's leaving together?`,
-      timestamp: ts,
-      cardType: "TRANSPORT",
-      cardStatus: "PENDING",
-      cardData: encodeCard({
-        title: `${departureIds.length} of ${TRAVELLERS.length} travellers are leaving at 7:15.`,
-        context: "Confirm who's leaving together, then I can check real Uber rides.",
-        affectedTravellerIds: departureIds,
-        transportPlanId: transportPlan.id,
-      }),
-    },
-  });
-
-  // Vienna hotel payment scenario — GROUP-visible booking card plus the
-  // linked PRIVATE authorisation card in the payer's My Agent inbox. Only
-  // Arshia (the payer) can act on the private card; the group card is
-  // informational for everyone else. See spec correction on consequential
-  // authorisation routing.
-  const payerId = users.get(VIENNA_HOTEL_PAYER)!.id;
-  ts = new Date(ts.getTime() + 60_000);
-  const groupBookingCard = await prisma.message.create({
-    data: {
-      tripId: trip.id,
-      senderId: clockwiseUser.id,
-      channel: "GROUP",
-      content: "Vienna hotel is ready to confirm.",
-      timestamp: ts,
-      cardType: "BOOKING",
-      cardStatus: "PENDING",
-      cardData: encodeCard({
-        title: "Vienna hotel is ready to confirm.",
-        context: `${VIENNA_HOTEL_PAYER} has offered to pay for this booking.`,
-        values: [
-          { label: "Rooms", value: String(VIENNA_HOTEL_ROOMS) },
-          { label: "Nights", value: String(VIENNA_HOTEL_NIGHTS) },
-          { label: "Total", value: `€${VIENNA_HOTEL_AMOUNT}` },
-        ],
-        payerId,
-        amount: VIENNA_HOTEL_AMOUNT,
-        currency: VIENNA_HOTEL_CURRENCY,
-      }),
-    },
-  });
-
-  ts = new Date(ts.getTime() + 30_000);
-  const privatePaymentCard = await prisma.message.create({
-    data: {
-      tripId: trip.id,
-      senderId: clockwiseUser.id,
-      channel: "PRIVATE",
-      recipientId: payerId,
-      content: "Vienna Hotel — €" + VIENNA_HOTEL_AMOUNT,
-      timestamp: ts,
-      cardType: "PAYMENT",
-      cardStatus: "PENDING",
-      cardData: encodeCard({
-        title: `Vienna Hotel — €${VIENNA_HOTEL_AMOUNT}`,
-        context: "Authorisation applies only to this transaction.",
-        values: [{ label: "Paying as", value: VIENNA_HOTEL_PAYER }],
-        payerId,
-        amount: VIENNA_HOTEL_AMOUNT,
-        currency: VIENNA_HOTEL_CURRENCY,
-        linkedMessageId: groupBookingCard.id,
-      }),
-    },
-  });
-
-  await prisma.message.update({
-    where: { id: groupBookingCard.id },
-    data: {
-      cardData: encodeCard({
-        title: "Vienna hotel is ready to confirm.",
-        context: `${VIENNA_HOTEL_PAYER} has offered to pay for this booking.`,
-        values: [
-          { label: "Rooms", value: String(VIENNA_HOTEL_ROOMS) },
-          { label: "Nights", value: String(VIENNA_HOTEL_NIGHTS) },
-          { label: "Total", value: `€${VIENNA_HOTEL_AMOUNT}` },
-        ],
-        payerId,
-        amount: VIENNA_HOTEL_AMOUNT,
-        currency: VIENNA_HOTEL_CURRENCY,
-        linkedMessageId: privatePaymentCard.id,
-      }),
-    },
-  });
-
-  // Travel-document dependency card — derived from real PrivateProfile
-  // data (whoever has visaStatus PENDING), not a hardcoded name. The group
-  // never learns who; the affected traveller gets the real detail privately.
-  const pendingDocTravellers = await getPendingDocumentTravellers(trip.id);
-  if (pendingDocTravellers.length > 0) {
-    ts = new Date(ts.getTime() + 60_000);
-    await prisma.message.create({
-      data: {
-        tripId: trip.id,
-        senderId: clockwiseUser.id,
-        channel: "GROUP",
-        content: "One traveller still has a travel-document dependency that affects the flight booking.",
-        timestamp: ts,
-        cardType: "DOCUMENT",
-        cardStatus: "PENDING",
-        cardData: encodeCard({
-          title: "One traveller still has a travel-document dependency that affects the flight booking.",
-          context: "I'll follow up with them privately.",
-          informational: true,
-        }),
-      },
-    });
-
-    for (const traveller of pendingDocTravellers) {
-      ts = new Date(ts.getTime() + 10_000);
-      await prisma.message.create({
-        data: {
-          tripId: trip.id,
-          senderId: clockwiseUser.id,
-          channel: "PRIVATE",
-          recipientId: traveller.userId,
-          content: "Your visa application is still pending.",
-          timestamp: ts,
-          cardType: "DOCUMENT",
-          cardStatus: "PENDING",
-          cardData: encodeCard({
-            title: "Your visa application is still pending.",
-            context: "This may affect the current travel-document requirement for the flight booking.",
-          }),
-        },
-      });
-    }
   }
 
   console.log(`Seeded trip "${trip.name}" (${trip.id}) with ${TRAVELLERS.length} travellers.`);
