@@ -187,6 +187,15 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
       return { understanding: "The traveller declined (or the browser blocked) location.", state: "Clockwise offered hotel/destination search instead; nothing else changed." };
     case "LOCATION_SEARCH_COMPLETED":
       return { understanding: `A location-anchored place search finished — provider ${str(p.provider)}, ${str(p.category)}, ${str(p.resultCount)} result(s), retrieved ${p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().slice(0, 19).replace("T", " ") + " UTC" : "n/a"}.`, state: "Coordinates were used for the request only (not stored)." };
+    case "DEMO_SCENARIO_READY": {
+      const steps = (Array.isArray(p.steps) ? p.steps : []) as { step: string; ok: boolean; detail?: string }[];
+      return {
+        understanding: `Demo scenario background set up before the demo started. ${steps.map((x) => `${x.step}: ${x.ok ? "ok" : "FAILED"}${x.detail ? ` (${x.detail})` : ""}`).join("; ")}.`,
+        state: "Provider facts (destination, stay, airport, routes) were fetched from Open-Meteo and Geoapify at setup time; the travellers' choices (dinner at 8 PM, arrival times, vibes) are scripted background, not provider data.",
+      };
+    }
+    case "DEMO_SCENARIO_STARTED":
+      return { understanding: "Demo scenario setup started.", state: null };
     case "FREE_TIME_COMPUTED":
       return { understanding: `Free-time options computed: ${str(p.windowMinutes)}-minute window (${str(p.windowSource)}), anchor ${str(p.anchorType)}; ${str(p.considered)} real Geoapify places routed on foot, ${str(p.fitting)} fit${p.rainyMode ? "; rain in the window (Open-Meteo), so indoor-type categories only" : ""}.`, state: "Deterministic: provider places + provider walking routes + a stated time-at-place assumption. The model did not decide what fits." };
     case "PLACE_PROPOSED":

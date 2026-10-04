@@ -18,7 +18,7 @@ const FRESH_MS = 10 * 60 * 1000;
 const MODE_LABEL: Record<string, string> = { walk: "Walking", drive: "Driving", bicycle: "Cycling", transit: "Transit" };
 
 
-const fmtDur = (m: number) => (m < 60 ? `${m} MIN` : `${Math.floor(m / 60)} H${m % 60 ? ` ${m % 60} MIN` : ""}`);
+const fmtDur = (m: number) => (m >= 2880 ? `${Math.round(m / 1440)} DAYS` : m < 60 ? `${m} MIN` : `${Math.floor(m / 60)} H${m % 60 ? ` ${m % 60} MIN` : ""}`);
 const hhmm = (iso: string) => iso.slice(11, 16);
 
 function minutesAgo(at: number, now: number) {

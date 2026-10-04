@@ -434,7 +434,7 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
         anchor: {
           type: "string",
           enum: ["user_location", "hotel", "arrival"],
-          description: "user_location = 'near me / what's open near me / pharmacy near me' (the traveller's CURRENT location, which Clockwise only has when they press USE MY LOCATION in Around You, so this never returns places). hotel = 'our hotel / around the hotel' (the CONFIRMED stay only; never substituted by the destination centre). arrival = 'near the airport/station' for the speaker's own confirmed arrival point.",
+          description: "user_location = 'near me / what's open near me / pharmacy near me' (the traveller's CURRENT location, which Clockwise only has when they press USE MY LOCATION in Around You, so this never returns places). hotel = 'our hotel / around the hotel / near us / around us / pharmacy near us' (the group's CONFIRMED stay only; never substituted by the destination centre). arrival = 'near the airport/station' for the speaker's own confirmed arrival point.",
         },
         maxMinutes: {
           type: "number",
@@ -1591,7 +1591,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   const nearText = ((input.near as string | undefined) ?? "").trim();
   let anchorKind = (["user_location", "hotel", "arrival"] as const).find((a) => a === input.anchor);
   if (!anchorKind && /^(me|my location|where i am|here|near me|my place)$/i.test(nearText)) anchorKind = "user_location";
-  if (!anchorKind && /^(our|the|my) (hotel|stay)$|^hotel$/i.test(nearText)) anchorKind = "hotel";
+  if (!anchorKind && /^(our|the|my) (hotel|stay)$|^hotel$|^(us|around us|near us)$/i.test(nearText)) anchorKind = "hotel";
   if (anchorKind === "user_location") {
     return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION themselves (the browser asks permission; it stays private to them). Do NOT search, name any place, or guess where they are. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION. It stays private to you. Or name a place or area and I'll search around that."` };
   }
@@ -1656,6 +1656,9 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   } catch (err) {
     return { output: `Live nearby search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
   }
+  // A street-only POI with no name is real but not useful; drop those unless little else came back.
+  const namedResults = results.filter((r) => r.name !== "Unnamed place");
+  if (namedResults.length >= 3) results = namedResults;
 
   await postActionCard({
     tripId: ctx.trip.id,

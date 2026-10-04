@@ -154,6 +154,10 @@ export async function freeTimeOptions(tripId: string, userId: string, anchor: Ar
   } else if (next) {
     windowMinutes = minutesBetween(nowLocal, next.targetLocal);
     source = "next-commitment";
+    if (windowMinutes > 12 * 60) {
+      const days = Math.round(windowMinutes / 1440);
+      return { ok: false, error: `Your next plan, ${next.name}, is ${days >= 2 ? `${days} days` : "more than 12 hours"} away, so "before ${next.name.toLowerCase()}" isn't a free window yet. Tell me how long you have (30, 60, 90 or 120 minutes).` };
+    }
   } else return { ok: false, error: "Nothing is coming up in the Plan, so there's no window to fill. Tell me how long you have." };
 
   const endLocal = addMinutes(nowLocal, windowMinutes);
@@ -196,6 +200,8 @@ export async function freeTimeOptions(tripId: string, userId: string, anchor: Ar
   }
   // Vibe Check order first, then places whose hours are confirmed open, then the most spare time.
   options.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || Number(a.hours.state === "unknown") - Number(b.hours.state === "unknown") || b.spareMin - a.spareMin);
+  const perCat: Record<string, number> = {};
+  const diverse = options.filter((o) => (perCat[o.category] = (perCat[o.category] ?? 0) + 1) <= 2);
   return {
     ok: true,
     windowMinutes,
@@ -205,7 +211,7 @@ export async function freeTimeOptions(tripId: string, userId: string, anchor: Ar
     nextPointKnown: source === "next-commitment" ? Boolean(next?.point) : true,
     rain,
     rainyMode,
-    options: options.slice(0, 6),
+    options: diverse.slice(0, 6),
     considered: shortlist.length,
     closedDropped,
     retrievedAt: h.retrievedAt,

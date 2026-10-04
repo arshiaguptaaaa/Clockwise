@@ -122,7 +122,13 @@ export async function searchAroundPoint(anchor: AroundAnchor, category: string, 
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Place search failed." };
   }
-  const places = await withWalking(anchor.point, raw.map(toAroundPlace));
+  const all = raw.map(toAroundPlace);
+  // A POI with no name (just a street) is real but not useful; keep it only when there is little else.
+  const named = all.filter((p) => p.name !== "Unnamed place");
+  const base = named.length >= 3 ? named : all;
+  const routed = await withWalking(anchor.point, base);
+  // Closest by the provider's own walking time first; places beyond the routed set keep provider order.
+  const places = [...routed.filter((p) => p.walkMinutes != null).sort((a, b) => a.walkMinutes! - b.walkMinutes!), ...routed.filter((p) => p.walkMinutes == null)];
   return { ok: true, anchor, category, places, retrievedAt: raw[0]?.retrievedAt ?? new Date().toISOString() };
 }
 
@@ -182,6 +188,7 @@ const VIBE_BY_CATEGORY: Record<string, { energy?: string[]; nearby?: string; lab
   atm: { nearby: "atm", label: "ATMs" },
 };
 
+const ENERGY_WORDS: Record<string, string> = { CAFES: "cafés", SLOW_MORNINGS: "slow mornings", FOOD: "food", SHOPPING: "shopping", PRETTY: "pretty places", CLASSICS: "classics", HIDDEN_GEMS: "hidden gems", NATURE: "nature", NIGHTLIFE: "nightlife", MUSEUMS: "museums" };
 export function whyPicked(category: string, prefs: { energy?: string[]; nearby?: string[]; food?: string[] }, diet?: string | null): string | null {
   const v = VIBE_BY_CATEGORY[category];
   const parts: string[] = [];
@@ -190,8 +197,9 @@ export function whyPicked(category: string, prefs: { energy?: string[]; nearby?:
     const hitNearby = v.nearby && prefs.nearby?.includes(v.nearby);
     const hitEnergy = v.energy?.filter((e) => prefs.energy?.includes(e)) ?? [];
     if (hitNearby || hitEnergy.length) {
-      const energyWords = hitEnergy.map((e) => e.toLowerCase().replace(/_/g, " "));
-      parts.push(`it matches your ${v.label}${energyWords.length ? ` + ${energyWords.join(" + ")}` : ""} picks`);
+      // De-duplicated phrases: "cafés" must not appear twice just because two picks mean it.
+      const phrases = [...new Set([...(hitNearby ? [v.label] : []), ...hitEnergy.map((e) => ENERGY_WORDS[e] ?? e.toLowerCase().replace(/_/g, " "))])];
+      parts.push(`it matches your ${phrases.join(" + ")} ${phrases.length > 1 ? "picks" : "pick"}`);
     }
   }
   if (!parts.length) return null;

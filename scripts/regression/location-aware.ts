@@ -40,7 +40,8 @@ async function main() {
   });
   await ok("'why' only echoes the traveller's own picks; nothing qualitative", () => {
     const w = whyPicked("cafe", { energy: ["CAFES", "SLOW_MORNINGS"], nearby: ["cafe"] });
-    assert.ok(w && /cafés/.test(w) && /picks\.$/.test(w));
+    assert.ok(w && /cafés/.test(w) && /pick(s)?\.$/.test(w));
+    assert.ok(!/cafés \+ cafés|cafes/i.test(w!) || (w!.match(/cafés/g) || []).length === 1, "no duplicated phrase");
     assert.ok(!/amazing|best|locals|love|famous|cozy/i.test(w!));
     assert.equal(whyPicked("pharmacy", { energy: ["CAFES"], nearby: ["cafe"] }), null);
   });
