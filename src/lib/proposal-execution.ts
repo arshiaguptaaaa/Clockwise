@@ -382,6 +382,8 @@ async function executeReschedule(proposal: Proposal): Promise<ExecutionResult> {
     },
   });
 
+  await prisma.tripEvent.create({ data: { tripId: proposal.tripId, kind: "PLAN_UPDATED", scope: "GROUP", actorUserId: proposal.organiserConfirmedBy ?? null, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify({ change: "moved", commitment: c.name, from: current, to: r.newTime, proposalId: proposal.id, readBack: true }), propagation: JSON.stringify(["plan", "chat", "live-sync"]) } }).catch(() => undefined);
+  await prisma.tripClash.updateMany({ where: { commitmentId: c.id, status: { in: ["OPEN", "INFORMED", "PROPOSED"] } }, data: { status: "RESOLVED" } }).catch(() => undefined);
   await recomputeRendezvous(proposal.tripId);
   const view = await buildRendezvousView(proposal.tripId);
   const check = view.commitments.find((x) => x.id === c.id);

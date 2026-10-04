@@ -15,7 +15,8 @@ import { searchForIntent, groupDietFor, type PlaceSearchOutcome } from "@/lib/tr
 import { buildIdea, maybeSurfaceIdea, tripDayWindow } from "@/lib/ideas";
 import { observeMessage, loadPointers, pointerLine } from "@/lib/pointers/store";
 import { parseOwnArrival } from "@/lib/traveller/arrival-parse";
-import { updateMyArrival } from "@/lib/traveller/arrival";
+import { handleArrivalChange, evaluateConsequences, answerClashFromChat } from "@/lib/disruption";
+import { recomputeRendezvous } from "@/lib/rendezvous";
 import { executeTool } from "./tools";
 import { localNow } from "@/lib/when";
 import { getOpenDecisions } from "@/lib/decisions";
@@ -130,7 +131,7 @@ const MODEL_MARKERS = /\b(let'?s|lets|we should|we'?ll|we will|actually|going to
 
 // Quiet observation of a human message nobody addressed to Clockwise. Never produces a reply. Returns whether the
 // model should still look at it (journey/limit/money statements that need a tool).
-export async function observePassive(ctx: AgentContext, last: ConversationTurn, opts: { mentionedAll?: boolean } = {}): Promise<{ calls: { name: string; input: unknown }[]; needsModel: boolean }> {
+export async function observePassive(ctx: AgentContext, last: ConversationTurn, opts: { mentionedAll?: boolean } = {}): Promise<{ calls: { name: string; input: unknown }[]; needsModel: boolean; reply?: string }> {
   const calls: { name: string; input: unknown }[] = [];
   const text = last.content;
 
@@ -139,20 +140,49 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
   for (const c of seen.captured) calls.push({ name: "note_trip_pointer", input: { kind: c.kind, subject: c.subject, label: c.label, mentions: c.mentions } });
   for (const s of seen.supported) calls.push({ name: "support_trip_pointer", input: { subject: s } });
 
-  // 2. the speaker's OWN arrival changed -> update it, check the Plan, propose a fix if something is now impossible
+  // 2. A clash question is waiting and this is the answer ("Yeah", "inform them", "cancel it", "leave it").
+  const answered = await answerClashFromChat(ctx.trip.id, ctx.actingUserId, text);
+  if (answered) {
+    calls.push({ name: "answer_clash", input: { text: text.slice(0, 60) } });
+    return { calls, needsModel: false, reply: answered.reply };
+  }
+
+  // 2a. Clockwise asked "where are you heading after the airport?" and this short message is the answer.
+  let reply: string | undefined;
+  const asked = await prisma.tripEvent.findFirst({ where: { tripId: ctx.trip.id, kind: "ANCHOR_QUESTION_ASKED", subjectUserId: ctx.actingUserId, createdAt: { gt: new Date(Date.now() - 2 * 3600_000) } }, orderBy: { createdAt: "desc" } });
+  if (asked && text.trim().split(/\s+/).length <= 6 && !seen.captured.some((c) => c.kind === "MEET") && /[A-Za-z]{3}/.test(text) && !text.includes("?")) {
+    const subject = text.replace(/^(i'?m |im |i am )?(heading|going|headed)( to)?\s+/i, "").replace(/^(the|at)\s+/i, "").replace(/[.!]+$/, "").trim();
+    if (subject) {
+      const { recordPointer } = await import("@/lib/pointers/store");
+      await recordPointer({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: last.id, kind: "MEET", subject, label: `is heading to ${subject}` });
+      seen.captured.push({ id: "", kind: "MEET", subject, label: "", mentions: 1, isNew: true });
+    }
+  }
+  // A named gathering place changes where everyone needs to get to: re-measure and re-check for whoever was asked.
+  if (seen.captured.some((c) => c.kind === "MEET")) {
+    await recomputeRendezvous(ctx.trip.id).catch(() => undefined);
+    const askedAll = await prisma.tripEvent.findMany({ where: { tripId: ctx.trip.id, kind: "ANCHOR_QUESTION_ASKED", createdAt: { gt: new Date(Date.now() - 2 * 3600_000) } }, select: { subjectUserId: true } });
+    for (const uid of new Set(askedAll.map((e) => e.subjectUserId).filter((x): x is string => Boolean(x)))) {
+      const r = await evaluateConsequences({ tripId: ctx.trip.id, userId: uid, sourceMessageId: last.id });
+      calls.push({ name: "evaluate_consequences", input: { traveller: uid, clashes: r.clashIds.length } });
+      if (r.reply && !reply) reply = r.reply;
+    }
+  }
+
+  // 2b. the speaker's OWN arrival changed -> the whole consequence chain (journey, anchor, provider route, ready time, clashes)
   let handledArrival = false;
   const window = await tripDayWindow(ctx.trip.id);
   const arrival = parseOwnArrival(text, localNow(), window);
-  if (arrival && arrival.kind === "time") {
-    const r = await updateMyArrival({ tripId: ctx.trip.id, userId: ctx.actingUserId, arrivalTime: arrival.arrivalTime, arrivalDate: arrival.arrivalDate, sourceMessageId: last.id, sourceChannel: "GROUP" });
-    calls.push({ name: "update_my_arrival", input: { arrivalTime: arrival.arrivalTime, arrivalDate: arrival.arrivalDate ?? null, ok: r.ok, ...(r.ok ? {} : { error: r.error }) } });
-    handledArrival = r.ok;
-    if (r.ok) {
-      for (const a of r.atRisk) {
-        const out = await executeTool("propose_commitment_reschedule", { commitmentName: a.name, newTime: a.suggestedTime.slice(11) }, ctx);
-        calls.push({ name: "propose_commitment_reschedule", input: { commitmentName: a.name, newTime: a.suggestedTime.slice(11), result: out.output.slice(0, 160) } });
-      }
-    }
+  if (arrival && arrival.kind !== "ambiguous") {
+    const r = await handleArrivalChange({
+      tripId: ctx.trip.id,
+      userId: ctx.actingUserId,
+      sourceMessageId: last.id,
+      ...(arrival.kind === "time" ? { arrivalTime: arrival.arrivalTime, arrivalDate: arrival.arrivalDate } : arrival.kind === "ready" ? { readyTime: arrival.readyTime, readyDate: arrival.readyDate } : { place: arrival.place, arrivalTime: arrival.arrivalTime }),
+    });
+    calls.push({ name: "handle_arrival_change", input: { kind: arrival.kind, clashes: r.clashIds.length, resolved: r.resolved.length } });
+    handledArrival = true;
+    if (r.reply) reply = r.reply;
   }
 
   // 2b. "@all dinner moved to 9?" / "let's do dinner at 9 instead": a concrete change to something already in the
@@ -179,7 +209,7 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
   const onlyPointers = seen.captured.length > 0 && !MODEL_MARKERS.test(text);
   // A short remark with nothing in it that states trip state ("HAHAHA Arshia 😭") never reaches the model.
   const banter = text.length < 24 && !MODEL_MARKERS.test(text);
-  return { calls, needsModel: !handledArrival && !onlyPointers && !banter };
+  return { calls, needsModel: !handledArrival && !onlyPointers && !banter && !reply, reply };
 }
 
 export { pointerLine, first };

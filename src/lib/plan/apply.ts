@@ -120,7 +120,7 @@ async function organiserOf(tripId: string) {
   return (await prisma.trip.findUnique({ where: { id: tripId }, select: { createdBy: true } }))?.createdBy ?? null;
 }
 
-export async function moveCommitmentChecked(params: { tripId: string; actorId: string; commitmentId: string; local: string; sourceMessageId?: string | null; guessed?: boolean; forceProposal?: boolean }): Promise<ApplyResult> {
+export async function moveCommitmentChecked(params: { tripId: string; actorId: string; commitmentId: string; local: string; sourceMessageId?: string | null; guessed?: boolean; forceProposal?: boolean; because?: string; voterUserIds?: string[] }): Promise<ApplyResult> {
   const { tripId, actorId } = params;
   const c = await prisma.commitment.findUnique({ where: { id: params.commitmentId } });
   if (!c || c.tripId !== tripId || c.status === "CANCELLED") return { ok: false, reply: "That isn't in the Plan any more, so there's nothing to move." };
@@ -144,7 +144,7 @@ export async function moveCommitmentChecked(params: { tripId: string; actorId: s
       }
     });
     if (dup) return { ok: true, changed: false, verb: "asked", reply: `That move is already waiting for everyone's vote.`, proposalId: dup.id };
-    const because = `${by} asked for it`;
+    const because = params.because ?? `${by} asked for it`;
     const proposal = await createProposal({
       tripId,
       type: "OTHER",
@@ -152,6 +152,7 @@ export async function moveCommitmentChecked(params: { tripId: string; actorId: s
       summary: `${by} would like ${c.name} at ${timeLabel(params.local)} instead of ${timeLabel(before)}.`,
       payload: { timing: `${timeLabel(before)} → ${timeLabel(params.local)}`, reschedule: { commitmentId: c.id, commitmentName: c.name, oldTime: before, newTime: params.local, because } },
       createdBy: clockwiseId,
+      voterUserIds: params.voterUserIds,
     });
     const msg = await prisma.message.create({ data: { tripId, senderId: clockwiseId, channel: "GROUP", content: `Proposal: ${proposal.title}` } });
     await prisma.proposal.update({ where: { id: proposal.id }, data: { groupMessageId: msg.id } });

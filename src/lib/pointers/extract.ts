@@ -3,7 +3,7 @@
 // "I need proper dosa", "Cubbon Park is non-negotiable"). A passing mood ("I love coffee right now") or anything
 // about someone else is left alone, and nothing sensitive is inferred. These become PASSIVE POINTERS: memory,
 // never a plan item.
-export type PointerKind = "DIET" | "LIKE" | "WANT" | "MUST" | "AVOID" | "WINDOW";
+export type PointerKind = "DIET" | "LIKE" | "WANT" | "MUST" | "AVOID" | "WINDOW" | "MEET";
 export type ExtractedPointer = { kind: PointerKind; subject: string; label: string };
 
 const clean = (s: string) => s.toLowerCase().replace(/\s+/g, " ").replace(/^[\s,.:;!-]+|[\s,.:;!?-]+$/g, "").trim();
@@ -93,6 +93,14 @@ export function extractPointers(text: string): ExtractedPointer[] {
   }
   const dLove = new RegExp(`\\bi'?d love (${proper})\\b`).exec(t);
   if (dLove) add({ kind: "WANT", subject: clean(dLove[1]), label: `would love ${titleish(clean(dLove[1]))}` });
+
+  // ---- MEET: a physical place the group is gathering ("meet us at Church Street"). It can act as the group anchor
+  // when there is no confirmed stay, so it needs a proper place name, not a vague word.
+  const meet = /\b[Mm]eet(?:ing)?(?:\s+(?:us|me|up|everyone|them))?\s+(?:at|in|near|by|outside)\s+((?:the\s+)?[A-Z][\w'’-]*(?:\s+(?:of\s+|de\s+|the\s+)?[A-Z0-9][\w'’-]*){0,4})/.exec(t);
+  if (meet) {
+    const subject = clean(meet[1].replace(/^the\s+/i, ""));
+    if (subject && subject.split(" ").length <= 5) add({ kind: "MEET", subject, label: `is meeting at ${titleish(subject)}` });
+  }
 
   // ---- WINDOW ("Saturday evening let's keep free", "keep Sunday open")
   const win = /\b(?:let'?s |lets |we should |can we |pls |please )?(?:keep|leave|save)\s+(.+?)\s+(?:free|open|empty|unplanned|relaxed)\b/i.exec(t) ?? /^(.+?)\s+(?:let'?s|lets|we should|pls|please)\s+(?:keep|leave)(?: it)?\s+(?:free|open|empty)\b/i.exec(t);

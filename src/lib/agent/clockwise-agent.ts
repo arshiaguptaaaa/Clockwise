@@ -263,17 +263,32 @@ export async function respondToGroupMessage(
   // arrival change is applied, and a connected idea may surface. Nothing here posts a chat reply.
   let passiveCalls: { name: string; input: unknown }[] = [];
   let needsModel = true;
+  let passiveReply: string | undefined;
   if (lastHumanTurn && !addressed) {
     const obs = await observePassive(ctx, lastHumanTurn, { mentionedAll: Boolean(klass?.mentions.all) }).catch((err) => {
       console.error("[observe] failed:", err instanceof Error ? err.message : err);
-      return { calls: [], needsModel: true };
+      return { calls: [], needsModel: true, reply: undefined as string | undefined };
     });
     passiveCalls = obs.calls;
     needsModel = obs.needsModel;
+    passiveReply = obs.reply;
   } else if (lastHumanTurn) {
+    const { answerClashFromChat } = await import("@/lib/disruption");
+    const ans = await answerClashFromChat(tripId, actingUserId, lastHumanTurn.content).catch(() => null);
+    if (ans) {
+      await prisma.message.create({ data: { tripId, senderId: ctx.clockwiseUserId, channel: "GROUP", content: ans.reply } });
+      return { spoke: true, replyText: ans.reply, toolCalls: [{ name: "answer_clash", input: {} }] };
+    }
     // "@Clockwise I'm vegetarian" - still remember it.
     const { observeMessage } = await import("@/lib/pointers/store");
     await observeMessage({ tripId, userId: actingUserId, messageId: lastHumanTurn.id, text: lastHumanTurn.content }).catch(() => undefined);
+  }
+
+  // Something Clockwise genuinely needs to say about a quiet observation (a clash question, "where are you heading?",
+  // the answer to "Yeah"). This is the only way an unaddressed message gets a reply.
+  if (lastHumanTurn && !addressed && passiveReply) {
+    await prisma.message.create({ data: { tripId, senderId: ctx.clockwiseUserId, channel: "GROUP", content: passiveReply, toolCalls: passiveCalls.length ? JSON.stringify(passiveCalls) : null } });
+    return { spoke: true, replyText: passiveReply, toolCalls: passiveCalls };
   }
 
   if (lastHumanTurn && !addressed && (!needsModel || isObviousNonTripChatter(lastHumanTurn.content))) {

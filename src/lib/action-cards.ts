@@ -77,6 +77,8 @@ export type ActionCardData = {
     windowLabel: string;
     steps: { kind: "place" | "food" | "return"; name: string; at: string | null; location: string | null; note: string | null; provider: string | null; providerPlaceId: string | null; lat: number | null; lng: number | null }[];
   };
+  // CLOCKWISE CAUGHT A CLASH: the card renders live from TripClash.
+  clash?: { clashId: string };
   // Which providers answered a search, in order, shown quietly on the card ("Places · Geoapify").
   sources?: string[];
   route?: {

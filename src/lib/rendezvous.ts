@@ -14,14 +14,54 @@ export const ARRIVAL_BUFFER_MIN = 15;
 const toMs = (local: string) => new Date(`${local}:00.000Z`).getTime();
 const toLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
 
-async function confirmedStay(tripId: string) {
-  return prisma.booking.findFirst({ where: { tripId, type: "STAY", status: "CONFIRMED", latitude: { not: null }, longitude: { not: null } }, orderBy: { createdAt: "desc" } });
+// WHERE EVERYONE NEEDS TO GET TO, in this order, and never the city centre by default:
+//   1. the confirmed stay  2. a meeting point the group named ("meet us at Church Street")
+//   3. the location of the next shared commitment, if it names a real place  4. nothing -> Clockwise asks.
+export type GroupAnchor = { id: string; placeName: string; latitude: number; longitude: number; kind: "stay" | "meeting" | "commitment" };
+
+const geocodeMemo = new Map<string, { at: number; value: { lat: number; lng: number; label: string } | null }>();
+async function geocodeAnchorText(tripId: string, text: string) {
+  const key = `${tripId}:${text.toLowerCase()}`;
+  const hit = geocodeMemo.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
+  const { suggestPlaces, pointForSuggestion } = await import("./travel/locate");
+  const sug = await suggestPlaces(text, { tripId }).catch(() => null);
+  let value: { lat: number; lng: number; label: string } | null = null;
+  if (sug && sug.ok && sug.suggestions[0]) {
+    const pick = sug.suggestions[0];
+    const pt = await pointForSuggestion(pick.label, pick.lat != null && pick.lng != null ? { lat: pick.lat, lng: pick.lng } : null, { tripId });
+    if (pt) value = { lat: pt.point.lat, lng: pt.point.lng, label: pick.label.split(",")[0] };
+  }
+  geocodeMemo.set(key, { at: Date.now(), value });
+  return value;
+}
+
+export async function groupAnchor(tripId: string): Promise<GroupAnchor | null> {
+  const stay = await prisma.booking.findFirst({ where: { tripId, type: "STAY", status: "CONFIRMED", latitude: { not: null }, longitude: { not: null } }, orderBy: { createdAt: "desc" } });
+  if (stay) return { id: stay.id, placeName: stay.placeName ?? "the stay", latitude: stay.latitude!, longitude: stay.longitude!, kind: "stay" };
+
+  const meet = await prisma.tripPointer.findFirst({ where: { tripId, kind: "MEET", status: { not: "DISMISSED" } }, orderBy: { updatedAt: "desc" } });
+  if (meet) {
+    const g = await geocodeAnchorText(tripId, meet.subject);
+    if (g) return { id: `meet:${meet.id}`, placeName: g.label, latitude: g.lat, longitude: g.lng, kind: "meeting" };
+  }
+
+  const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { name: true, destinations: { select: { name: true, displayName: true } } } });
+  const generic = new Set(["", "to be decided", "tbd", (trip?.name ?? "").toLowerCase(), ...(trip?.destinations ?? []).flatMap((d) => [d.name.toLowerCase(), (d.displayName ?? "").toLowerCase(), (d.displayName ?? "").split(",")[0].toLowerCase()])]);
+  const upcoming = await prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" }, targetTime: { gt: new Date(Date.now() - 12 * 3600_000) } }, orderBy: { targetTime: "asc" }, take: 5 });
+  for (const c of upcoming) {
+    const loc = c.location.trim();
+    if (generic.has(loc.toLowerCase())) continue;
+    const g = await geocodeAnchorText(tripId, loc);
+    if (g) return { id: `commitment:${c.id}`, placeName: g.label, latitude: g.lat, longitude: g.lng, kind: "commitment" };
+  }
+  return null;
 }
 
 // Measures arrival-point -> stay for every confirmed journey that doesn't have a
 // fresh provider route for THIS stay. Safe to call repeatedly.
 export async function recomputeRendezvous(tripId: string) {
-  const stay = await confirmedStay(tripId);
+  const stay = await groupAnchor(tripId);
   const journeys = await prisma.travellerJourney.findMany({ where: { tripId, status: "CONFIRMED" } });
   let routed = 0;
   const providersUsed = new Set<string>();
@@ -81,6 +121,10 @@ export type TravellerClock = {
   mode: string;
   arriveLocal: string | null;
   arrivalPlace: string | null;
+  // The arrival on the ticket, when a delay has moved arriveLocal off it.
+  scheduledArrive: string | null;
+  // Bags and exits: a stated assumption, shown apart from the route.
+  allowanceMin: number;
   routeMinutes: number | null;
   routeKm: number | null;
   routeProvider: string | null;
@@ -90,6 +134,7 @@ export type TravellerClock = {
 export type CommitmentCheck = { id: string; name: string; target: string; allAtHotelBy: boolean; late: { name: string; hotelBy: string }[]; unknown: string[] };
 export type RendezvousView = {
   stayName: string | null;
+  anchorKind: "stay" | "meeting" | "commitment" | null;
   clocks: TravellerClock[];
   noJourney: string[];
   meetAt: string | null; // everyone-with-a-journey can be at the stay by this local time
@@ -111,14 +156,14 @@ export function appliesTo(participantIdsJson: string): (userId: string) => boole
 
 export async function buildRendezvousView(tripId: string): Promise<RendezvousView> {
   const [stay, journeys, members, commitments] = await Promise.all([
-    confirmedStay(tripId),
+    groupAnchor(tripId),
     prisma.travellerJourney.findMany({ where: { tripId, status: "CONFIRMED" } }),
     prisma.tripMember.findMany({ where: { tripId }, include: { user: { select: { id: true, name: true } } } }),
     prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" } }, orderBy: { targetTime: "asc" } }),
   ]);
   const nameOf = new Map(members.map((m) => [m.userId, m.user.name]));
   const clocks: TravellerClock[] = journeys.map((j) => {
-    const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName };
+    const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName, scheduledArrive: j.scheduledArriveLocal && j.scheduledArriveLocal !== j.arriveLocal ? j.scheduledArriveLocal : null, allowanceMin: ARRIVAL_BUFFER_MIN };
     if (!stay) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_STAY" as const };
     if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
     if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
@@ -143,7 +188,7 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
     const missing = members.filter((m) => applies(m.userId) && !have.has(m.userId)).map((m) => m.user.name);
     return { id: c.id, name: c.name, target, allAtHotelBy: late.length === 0 && unknown.length === 0 && missing.length === 0, late, unknown };
   });
-  return { stayName: stay?.placeName ?? null, clocks, noJourney, meetAt, meetComplete, commitments: checks };
+  return { stayName: stay?.placeName ?? null, anchorKind: stay?.kind ?? null, clocks, noJourney, meetAt, meetComplete, commitments: checks };
 }
 
 // One notification per (commitment, traveller) risk, to the organiser — never repeated.

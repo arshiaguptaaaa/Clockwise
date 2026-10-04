@@ -14,6 +14,7 @@ import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
 import { IdeaCard, type IdeaView } from "@/components/ideas/IdeaCard";
 import { isAgentRequest } from "@/lib/mentions";
+import { ClashCard, type ClashView } from "@/components/clash/ClashCard";
 
 export type ChatThreadMessage = {
   id: string;
@@ -47,6 +48,7 @@ export function ChatThread({
   header,
   collections = [],
   ideas = [],
+  clashes = [],
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
@@ -70,6 +72,7 @@ export function ChatThread({
   collections?: CollectionView[];
   // Live suggestion state keyed by id: the IDEA card renders from this, never from its first snapshot.
   ideas?: IdeaView[];
+  clashes?: ClashView[];
 }) {
   // Only covers the fast DB write — the composer is disabled for
   // milliseconds, not for however long Gemini takes.
@@ -136,6 +139,11 @@ export function ChatThread({
           const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
           const grouped = !message.isClockwise && plain(message) && plain(prev) && prev!.senderId === message.senderId && message.timestamp.getTime() - prev!.timestamp.getTime() < 5 * 60_000;
           const collectionId = message.cardData && message.cardData.includes('"collection":true') ? (/"collectionId":"([^"]+)"/.exec(message.cardData)?.[1] ?? null) : null;
+          if (message.cardData && message.cardData.includes('"clash":{')) {
+            const cid = /"clashId":"([^"]+)"/.exec(message.cardData)?.[1];
+            const clash = clashes.find((x) => x.id === cid);
+            return clash ? <ClashCard key={message.id} clash={clash} canCancel /> : null;
+          }
           if (message.cardType === "IDEA" && message.cardData) {
             const sid = /"suggestionId":"([^"]+)"/.exec(message.cardData)?.[1];
             const idea = ideas.find((x) => x.suggestionId === sid);

@@ -1200,24 +1200,16 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
 // The speaker's OWN journey only: the acting user id comes from the session, never
 // from a name in the model's arguments, so one traveller can't change another's.
 async function updateMyArrivalTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
-  const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
-  const r = await updateMyArrival({
+  const { handleArrivalChange } = await import("@/lib/disruption");
+  const r = await handleArrivalChange({
     tripId: ctx.trip.id,
     userId: ctx.actingUserId,
     arrivalTime: typeof input.arrivalTime === "string" ? input.arrivalTime : undefined,
     arrivalDate: typeof input.arrivalDate === "string" ? input.arrivalDate : undefined,
-    sourceMessageId,
-    sourceChannel: ctx.mode,
+    sourceMessageId: [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null,
   });
-  if (!r.ok) return { output: `Not changed: ${r.error}` };
-  const risk = r.atRisk.length
-    ? r.atRisk
-        .map((a) => `${a.name} (${timeLabel(a.oldTime)}) is now at risk — ${a.blocking.map((b) => `${b.name} can't be at the stay before ${timeLabel(b.hotelBy)}`).join("; ")}. Suggested new time: ${a.suggestedTime.slice(11)} (24h, same day). Call propose_commitment_reschedule with commitmentName "${a.name}" and newTime "${a.suggestedTime.slice(11)}".`)
-        .join(" ")
-    : r.unknownRoute
-      ? "No shared commitment could be checked because there is no confirmed stay or no provider route for this traveller yet — say so, don't claim it's fine."
-      : "No shared commitment is put at risk by this.";
-  return { output: `Updated ${r.name}'s arrival to ${resolvedMoment(r.newArrival)} (state this full day and time back, so a wrong day is caught): ${r.oldArrival ? `${timeLabel(r.oldArrival)} → ` : ""}${timeLabel(r.newArrival)}. Everyone's clocks were recomputed with provider routes. ${risk}` };
+  if (r.reply && !r.clashIds.length) return { output: `${r.reply} (Say this and nothing different.)`, finalReply: r.reply };
+  return { output: r.clashIds.length ? "Updated the arrival, measured the route with the provider, found a clash and posted a 'Clockwise caught a clash' card with the options. Do not repeat the card in text; the group decides." : "Updated the arrival. No shared plan is affected. Reply with one very short confirmation or nothing." };
 }
 
 async function proposeCommitmentReschedule(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {

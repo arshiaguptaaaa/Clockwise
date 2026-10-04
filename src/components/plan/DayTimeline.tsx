@@ -1,7 +1,7 @@
 import { Plane, TrainFront, Bus, Car, BedDouble, CalendarClock, Utensils } from "lucide-react";
 import { timeLabel } from "@/lib/traveller/journey";
 import { HUMAN } from "@/lib/copy";
-import type { RendezvousView } from "@/lib/rendezvous";
+import { ARRIVAL_BUFFER_MIN, type RendezvousView } from "@/lib/rendezvous";
 import type { PendingMove } from "./RendezvousSection";
 
 type Kind = "arrive" | "reach" | "together" | "commitment";
@@ -53,6 +53,7 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
       title: (
         <>
           <span className="font-semibold">{first}</span> lands{c.arrivalPlace ? <span className="text-muted-foreground"> · {c.arrivalPlace.replace(/ International Airport$/, "")}</span> : null}
+          {c.scheduledArrive && <span className="ml-1.5 rounded-full bg-danger-tint px-2 py-0.5 text-[10px] font-semibold tracking-[0.12em] text-danger" data-delayed>DELAYED · was {timeLabel(c.scheduledArrive)}</span>}
         </>
       ),
     });
@@ -63,10 +64,10 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
         kind: "reach",
         title: (
           <>
-            {first} reaches the stay
+            {first} is realistically {view.anchorKind === "stay" || !view.anchorKind ? "at the stay" : `at ${view.stayName}`}
           </>
         ),
-        leg: `${c.routeMinutes} min to the stay · ${basisName(c.routeProvider)}`,
+        leg: `${ARRIVAL_BUFFER_MIN} min bags & exits + ${c.routeMinutes} min to ${view.anchorKind === "stay" || !view.anchorKind ? "the stay" : view.stayName} · ${basisName(c.routeProvider)}`,
       });
     }
   }

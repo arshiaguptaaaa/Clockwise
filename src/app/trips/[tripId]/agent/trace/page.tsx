@@ -22,12 +22,17 @@ const KIND_LABEL: Record<TraceEntry["kind"], string> = {
 // a step that hasn't happened yet shows as pending, never as made up.
 const CHAIN: { kind: string; alt?: string; label: string }[] = [
   { kind: "GNANI_STT_COMPLETED", label: "Voice → words" },
-  { kind: "TRAVELLER_ARRIVAL_UPDATED", label: "Arrival updated" },
-  { kind: "DELHIVERY_ROUTE_COMPLETED", alt: "ARRIVAL_ROUTE_COMPLETED", label: "Route measured" },
-  { kind: "RENDEZVOUS_CONFLICT_DETECTED", label: "Conflict detected" },
-  { kind: "COMMITMENT_RESCHEDULE_PROPOSED", label: "Change proposed" },
+  { kind: "TRAVELLER_DELAY_DETECTED", alt: "TRAVELLER_ARRIVAL_UPDATED", label: "Delay noticed" },
+  { kind: "JOURNEY_UPDATED", alt: "TRAVELLER_ARRIVAL_UPDATED", label: "Journey updated" },
+  { kind: "NEXT_ANCHOR_RESOLVED", label: "Where they need to be" },
+  { kind: "ROUTE_CALCULATED", alt: "DELHIVERY_ROUTE_COMPLETED", label: "Route measured" },
+  { kind: "REALISTIC_READY_TIME_UPDATED", label: "Lands ≠ available" },
+  { kind: "COMMITMENT_CONFLICT_DETECTED", alt: "RENDEZVOUS_CONFLICT_DETECTED", label: "Clash caught" },
+  { kind: "AFFECTED_TRAVELLERS_IDENTIFIED", label: "Who it affects" },
+  { kind: "RESOLUTION_SUGGESTED", label: "Option suggested" },
+  { kind: "GROUP_PROPOSAL_CREATED", alt: "COMMITMENT_RESCHEDULE_PROPOSED", label: "Proposed to group" },
   { kind: "GROUP_APPROVED", label: "Group approved" },
-  { kind: "COMMITMENT_RESCHEDULED", label: "Plan updated" },
+  { kind: "PLAN_UPDATED", alt: "COMMITMENT_RESCHEDULED", label: "Plan updated" },
 ];
 
 function formatTimestamp(date: Date): string {

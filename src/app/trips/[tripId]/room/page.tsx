@@ -14,6 +14,8 @@ import { decodeProposalPayload } from "@/lib/proposals";
 import { describeProposal } from "@/lib/decisions";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
 import type { IdeaView } from "@/components/ideas/IdeaCard";
+import type { ClashView } from "@/components/clash/ClashCard";
+import { timeLabel } from "@/lib/traveller/journey";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -119,6 +121,28 @@ export default async function TripRoomChatPage({
       // unreadable card: shown without its intro
     }
   }
+  const clashRows = await prisma.tripClash.findMany({ where: { tripId: trip.id }, orderBy: { createdAt: "asc" } });
+  const firstOf = (id: string) => (trip.members.find((m) => m.userId === id)?.user.name ?? "Someone").split(" ")[0];
+  const clashes: ClashView[] = clashRows.map((c) => {
+    const options = (JSON.parse(c.options) as string[]).map((o) => ({ local: o, label: timeLabel(o) }));
+    return {
+      id: c.id,
+      status: c.status,
+      traveller: firstOf(c.travellerId),
+      commitmentName: c.commitmentName,
+      targetLabel: timeLabel(c.targetLocal),
+      landsLabel: timeLabel(c.landsAt),
+      readyLabel: timeLabel(c.readyAt),
+      allowanceMin: c.allowanceMin,
+      routeMinutes: c.routeMinutes,
+      providerLabel: c.routeProvider === "delhivery" ? "Delhivery" : c.routeProvider === "geoapify" ? "Geoapify" : "provider route",
+      anchorLabel: c.anchorKind === "stay" ? "the stay" : c.anchorLabel,
+      suggestedLocal: c.suggestedLocal,
+      suggestedLabel: c.suggestedLocal ? timeLabel(c.suggestedLocal) : null,
+      options,
+      affected: (JSON.parse(c.affectedIds) as string[]).map(firstOf),
+    };
+  });
   const ideas: IdeaView[] = suggestionRows.map((s) => ({ suggestionId: s.id, title: s.title, why: s.why, intro: introBySuggestion.get(s.id) ?? null, windowLabel: "", steps: JSON.parse(s.steps), status: s.status }));
   const late = people.find((p) => p.tone === "late");
   const voiceLine = late ? `${late.name.split(" ")[0]}'s running late. I'll keep everyone together.` : "Everyone's on a different clock. I'll keep them together.";
@@ -170,6 +194,7 @@ export default async function TripRoomChatPage({
       roster={roster}
       collections={collections}
       ideas={ideas}
+      clashes={clashes}
       currentUserId={currentUserId}
       organiserId={trip.createdBy}
       organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"}

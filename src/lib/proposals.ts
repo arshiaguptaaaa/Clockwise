@@ -148,6 +148,8 @@ export type CreateProposalInput = {
   // explicitly, since a superseded-but-not-cancelled proposal is still a
   // meaningful distinct state (see isConfirmable's supersededBy check).
   supersedesId?: string;
+  // Only these travellers vote (and are told). Default: everyone on the trip. The organiser can still confirm.
+  voterUserIds?: string[];
 };
 
 // Fixes the eligible-voter set at creation time: one ProposalApproval row
@@ -155,7 +157,7 @@ export type CreateProposalInput = {
 // not retroactively added as a voter for this proposal — a deliberate,
 // documented limitation for this stage, not an oversight.
 export async function createProposal(input: CreateProposalInput) {
-  const tripMembers = await prisma.tripMember.findMany({ where: { tripId: input.tripId } });
+  const tripMembers = await prisma.tripMember.findMany({ where: { tripId: input.tripId, ...(input.voterUserIds?.length ? { userId: { in: input.voterUserIds } } : {}) } });
   if (tripMembers.length === 0) {
     throw new Error("Cannot create a proposal for a trip with no members.");
   }

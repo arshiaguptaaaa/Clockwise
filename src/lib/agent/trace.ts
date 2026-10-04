@@ -243,6 +243,32 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         state: `Journey updated; provider routes recomputed${p.routeKnown ? "" : " (route unknown — nothing was assumed)"}; Plan arrivals, Ready? and rendezvous refreshed.`,
       };
     }
+    case "TRAVELLER_DELAY_DETECTED":
+      return { understanding: `TRAVELLER_DELAY_DETECTED — ${str(p.traveller)} said their arrival moved ${str(p.direction)} by ${Math.abs(Number(p.movedMinutes))} min (${str(p.from).replace("T", " ")} → ${str(p.to).replace("T", " ")}). Recognised from ${str(p.recognisedFrom)}.`, state: "Stage: TRIP_STATE_UPDATE. Nothing in the shared Plan has moved." };
+    case "JOURNEY_UPDATED":
+      return { understanding: p.change ? `JOURNEY_UPDATED — ${str(p.traveller)}'s arrival point changed to ${str(p.to)}.` : `JOURNEY_UPDATED — ${str(p.traveller)}: scheduled ${str(p.scheduledArrival).replace("T", " ")}, now expected ${str(p.expectedArrival).replace("T", " ")}.`, state: str(p.note) || "The ticket's scheduled arrival is kept separately from the expected one." };
+    case "NEXT_ANCHOR_RESOLVED":
+      return { understanding: `NEXT_ANCHOR_RESOLVED — ${str(p.traveller)} needs to get to: ${p.anchor ? `${str(p.anchor)} (${str(p.anchorKind)})` : "no usable anchor yet"}. Order tried: ${Array.isArray(p.order) ? (p.order as string[]).join(" → ") : ""}.`, state: str(p.note) };
+    case "ANCHOR_QUESTION_ASKED":
+      return { understanding: `${str(p.traveller)} was asked where they are heading after the airport${p.forCommitment ? ` (needed to check ${str(p.forCommitment)})` : ""}.`, state: "No hotel or city centre was invented." };
+    case "ROUTE_CALCULATED":
+      return { understanding: p.ok ? `ROUTE_CALCULATED — ${str(p.traveller)}: ${str(p.from)} → ${str(p.to)}, ${str(p.minutes)} min / ${str(p.km)} km, measured by ${str(p.provider)}.` : `ROUTE_CALCULATED — no provider route for ${str(p.traveller)} (${str(p.reason)}). Nothing was guessed.`, state: "Route minutes come from the routing provider." };
+    case "REALISTIC_READY_TIME_UPDATED":
+      return { understanding: `REALISTIC_READY_TIME_UPDATED — ${str(p.traveller)} LANDS ${str(p.landsAt).replace("T", " ")} ≠ AVAILABLE ${str(p.readyAt).replace("T", " ")} (+${str(p.allowanceMin)} min bags & exits, +${str(p.routeMinutes)} min via ${str(p.routeProvider)}).`, state: "Lands at ≠ available at. The allowance is a stated assumption, kept apart from the route." };
+    case "COMMITMENT_CONFLICT_DETECTED":
+      return { understanding: `COMMITMENT_CONFLICT_DETECTED — ${str(p.traveller)} can't be ready until ${str(p.readyAt).replace("T", " ")}, but "${str(p.commitment)}" is at ${str(p.target).replace("T", " ")} (${str(p.slackMinutes)} min).`, state: "Read from the stored Plan, not from the chat." };
+    case "AFFECTED_TRAVELLERS_IDENTIFIED":
+      return { understanding: `AFFECTED_TRAVELLERS_IDENTIFIED — "${str(p.commitment)}" involves ${Array.isArray(p.affected) ? (p.affected as string[]).join(", ") : ""} (${str(p.ofTrip)} on the trip).`, state: str(p.note) };
+    case "RESOLUTION_SUGGESTED":
+      return { understanding: `RESOLUTION_SUGGESTED — "${str(p.commitment)}": ${p.suggested ? `${str(p.suggested).replace("T", " ")}` : "no time fits everyone's stated limits"}${Array.isArray(p.options) && (p.options as string[]).length ? `, other options ${(p.options as string[]).map((o) => o.slice(11)).join(", ")}` : ""}.`, state: "Stage: SUGGESTION. Nothing has moved; a human decides." };
+    case "GROUP_PROPOSAL_CREATED":
+      return { understanding: `GROUP_PROPOSAL_CREATED — move "${str(p.commitment)}" ${str(p.from).replace("T", " ")} → ${str(p.to).replace("T", " ")}; voters: ${Array.isArray(p.voters) ? (p.voters as string[]).join(", ") : ""}.`, state: "Stage: PROPOSAL. Only the people the commitment involves vote." };
+    case "AFFECTED_INFORMED":
+      return { understanding: `AFFECTED_INFORMED — ${Array.isArray(p.informed) ? (p.informed as string[]).join(", ") : ""} were told about the clash on "${str(p.commitment)}".`, state: str(p.note) };
+    case "CLASH_LEFT_AS_IS":
+      return { understanding: `A human chose to leave "${str(p.commitment)}" as it is.`, state: str(p.note) };
+    case "PLAN_UPDATED":
+      return { understanding: `PLAN_UPDATED — "${str(p.commitment)}" ${str(p.change)}${p.from ? ` ${str(p.from).replace("T", " ")} → ${str(p.to).replace("T", " ")}` : ""}. Saved row read back.`, state: "Canonical Plan changed; every traveller's view refreshed." };
     case "COMMITMENT_CANCELLED":
       return { understanding: `COMMITMENT_CANCELLED — "${str(p.commitment)}" (${str(p.at).replace("T", " ")}) taken out of the Plan${p.via === "proposal" ? " after the group agreed" : " by the organiser from chat"}. Read back from the database: status CANCELLED.`, state: "Canonical Plan changed; every traveller's view refreshed; group notified." };
     case "POINTER_CAPTURED":

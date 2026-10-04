@@ -1240,6 +1240,9 @@ model TravellerJourney {
   routeProvider      String?
   routeComputedAt    DateTime?
   routeStayBookingId String?
+  // The arrival printed on the ticket / first confirmed, kept when a delay moves arriveLocal, so a disruption is
+  // visible as scheduled -> expected and never overwrites what the ticket said.
+  scheduledArriveLocal String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -1407,6 +1410,39 @@ model TripSuggestion {
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([tripId, status])
+}
+
+// A clash Clockwise caught: someone's realistic availability (landing + allowance + provider route to the next
+// physical anchor) no longer fits a shared commitment. It records the facts and the options; it never moves or
+// cancels anything by itself. Resolution always needs a human: PROPOSE (group vote + organiser), INFORM,
+// CANCEL (organiser, or a proposal) or LEAVE IT.
+model TripClash {
+  id            String   @id @default(cuid())
+  tripId        String
+  commitmentId  String
+  travellerId   String
+  // OPEN | PROPOSED | INFORMED | LEFT | RESOLVED | SUPERSEDED
+  status        String   @default("OPEN")
+  commitmentName String
+  targetLocal   String
+  landsAt       String
+  allowanceMin  Int
+  routeMinutes  Int
+  routeProvider String?
+  anchorKind    String
+  anchorLabel   String
+  readyAt       String
+  suggestedLocal String?
+  // JSON: later options that also work, ["2026-10-05T23:15", ...]
+  options       String   @default("[]")
+  // JSON: userIds of the people the commitment involves (only they hear about it)
+  affectedIds   String   @default("[]")
+  messageId     String?
+  proposalId    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([tripId, status])
 }
