@@ -28,6 +28,9 @@ export const viewport: Viewport = {
   // Lets the app draw under the notch/home indicator; TopBar/BottomNav add
   // the matching safe-area padding.
   viewportFit: "cover",
+  // When the on-screen keyboard opens the layout shrinks to what is visible, so the composer stays above it
+  // (Chrome/Android; iOS scrolls the focused field into view on its own).
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
