@@ -11,6 +11,7 @@ import { NEARBY_CATEGORIES, searchNearby, getRoute, isGeoapifyConfigured } from 
 import { tripAnchors } from "./resolve";
 import { prisma } from "@/lib/prisma";
 import type { LatLng } from "./types";
+import type { HoursStatus } from "./hours";
 
 export { AROUND_CATEGORIES } from "./around-categories";
 
@@ -69,6 +70,8 @@ export type AroundPlace = {
   walkMinutes: number | null;
   // Provider fields, shown only when present.
   openingHours: string | null;
+  // Computed server-side from openingHours against the destination's local clock; absent when not evaluated.
+  hoursNow?: HoursStatus;
   website: string | null;
   phone: string | null;
   retrievedAt: string;

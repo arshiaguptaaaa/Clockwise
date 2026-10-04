@@ -7,7 +7,8 @@ import { destinationSearchProvider } from "@/lib/destination-search/open-meteo-p
 import { QUESTIONS, setPref, getPrefs, type QuestionId } from "@/lib/traveller/vibe";
 import { confirmJourney, discardJourney, createPendingJourney, type JourneyFacts } from "@/lib/traveller/journey";
 import { searchAroundPoint, brandSearch, resolveAnchor, anchorsFor, whyPicked, orderCategories, type AroundPlace, type AnchorType } from "@/lib/travel/around";
-import { nextUpFor, freeTimeOptions, type NextUp, type FreeTime } from "@/lib/travel/window";
+import { nextUpFor, freeTimeOptions, localNowZ, type NextUp, type FreeTime } from "@/lib/travel/window";
+import { hoursAt } from "@/lib/travel/hours";
 import { getRoute } from "@/lib/travel/geoapify-provider";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
 import { proposePlace, type PlaceRef } from "@/lib/places/place-proposals";
@@ -152,6 +153,14 @@ async function savedIds(tripId: string, userId: string) {
   return (await prisma.savedPlace.findMany({ where: { tripId, userId }, select: { providerPlaceId: true } })).map((s) => s.providerPlaceId);
 }
 
+// Open/closed NOW, from the provider's hours string and the destination's local clock. Unparseable or missing => left unknown.
+async function annotateHours(places: AroundPlace[], at: { lat: number; lng: number }) {
+  if (!places.some((p) => p.openingHours)) return;
+  const now = await localNowZ(at);
+  if (!now) return;
+  for (const p of places) if (p.openingHours) p.hoursNow = hoursAt(p.openingHours, now);
+}
+
 export async function aroundSearchAction(tripId: string, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; anchor: AnchorType; me?: Me }): Promise<AroundResponse> {
   const userId = await member(tripId);
   if (!userId) return { ok: false, error: "Sign in first." };
@@ -160,6 +169,7 @@ export async function aroundSearchAction(tripId: string, category: string, opts:
   if (!a.ok) return a;
   const r = await searchAroundPoint(a.anchor, category, { diet: opts.diet });
   if (!r.ok) return r;
+  await annotateHours(r.places, a.anchor.point);
   const base = { provider: "geoapify", category, diet: opts.diet ?? null, anchorType: a.anchor.kind, resultCount: r.places.length, walkMinutesFromProvider: r.places.filter((p) => p.walkMinutes != null).length, retrievedAt: r.retrievedAt };
   // Hotel / destination / arrival anchors name a place; ME is recorded only as "current location".
   await personalEvent(tripId, userId, "PLACES_SEARCH_COMPLETED", { ...base, anchor: a.anchor.kind === "me" ? "current location (user-authorised)" : a.anchor.label, tool: "around-you" });
@@ -182,6 +192,7 @@ export async function brandSearchAction(tripId: string, brand: string, opts: { a
   if (!a.ok) return a;
   const r = await brandSearch(tripId, q, a.anchor);
   if (!r.ok) return r;
+  await annotateHours(r.places, a.anchor.point);
   await personalEvent(tripId, userId, "PLACES_SEARCH_COMPLETED", { provider: "geoapify", category: "brand", brand: q, anchorType: a.anchor.kind, anchor: a.anchor.kind === "me" ? "current location (user-authorised)" : a.anchor.label, resultCount: r.places.length, matchedBrand: r.found.length > 0, retrievedAt: r.retrievedAt, tool: "around-you" });
   if (a.anchor.kind === "me") await personalEvent(tripId, userId, "LOCATION_SEARCH_COMPLETED", { provider: "geoapify", category: "brand", resultCount: r.places.length, retrievedAt: r.retrievedAt, coordinatesStored: false });
   return { ok: true, anchorType: a.anchor.kind, anchorLabel: a.anchor.label, category: "convenience", places: r.places, why: {}, retrievedAt: r.retrievedAt, note: r.note, saved: await savedIds(tripId, userId) };

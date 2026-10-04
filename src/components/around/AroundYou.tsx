@@ -209,6 +209,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                 {p.address ? <span className="text-muted-foreground">{p.walkMinutes != null || p.distanceMeters != null ? " · " : ""}{p.address}</span> : null}
               </p>
               <p className="text-xs text-muted-foreground" data-hours>
+                {p.hoursNow?.state === "open" && <span className="font-semibold text-accent-strong">{p.hoursNow.until ? `Open until ${p.hoursNow.until}` : "Open now"} · </span>}
+                {p.hoursNow?.state === "closed" && <span className="font-semibold text-danger">{p.hoursNow.opensAt ? `Closed now, opens ${p.hoursNow.opensAt}` : "Closed now"} · </span>}
                 {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
               </p>
               {whyText && (
@@ -441,7 +443,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
             <p className="font-display text-lg leading-tight">YOU&apos;VE GOT {fmtDur(free.windowMinutes)}.</p>
             {free.next && free.windowSource === "next-commitment" && <p className="text-xs text-muted-foreground">Until {free.next.name} at {hhmm(free.next.targetLocal)}, {free.next.pointLabel ?? "location not on the map"}.</p>}
             {free.rainyMode && free.rain && <p className="rounded-lg bg-pop-yellow-tint px-2 py-1 text-xs" data-rainy>RAINY WINDOW. Rain is likely around {hhmm(free.rain.atLocal)} ({free.rain.probability}%). Indoor-type places only.</p>}
-            {free.options.length === 0 && <p className="text-sm text-muted-foreground">Nothing I checked fits that window (I routed {free.considered} real places). Try a longer window or a different anchor.</p>}
+            {free.options.length === 0 && <p className="text-sm text-muted-foreground">Nothing I checked fits that window (I routed {free.considered} real places{free.closedDropped ? `, ${free.closedDropped} dropped because their hours say closed` : ""}). Try a longer window or a different anchor.</p>}
+            {free.options.length > 0 && free.closedDropped > 0 && <p className="text-[11px] text-muted-foreground">{free.closedDropped} place(s) left out because the provider&apos;s hours say they&apos;re closed during your visit.</p>}
             <ul className="space-y-2">
               {free.options.map((o) =>
                 renderCard(
@@ -449,7 +452,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                   o.category,
                   o.why,
                   <p className="mt-1 text-xs" data-fits>
-                    <span className="font-semibold text-accent-strong">Fits ✓</span> · {o.walkToMin} min away · ~{o.stayMin} min there (assumed) · {o.walkOnMin} min {free.windowSource === "next-commitment" && free.next ? `to ${free.next.name} afterwards` : "back afterwards"} · {o.spareMin} min spare
+                    <span className="font-semibold text-accent-strong">Fits ✓</span> · {o.hours.state === "open" ? `open for your visit${o.hours.until ? ` (until ${o.hours.until})` : ""}` : "hours unavailable, check before you go"} · {o.walkToMin} min away · ~{o.stayMin} min there (assumed) · {o.walkOnMin} min {free.windowSource === "next-commitment" && free.next ? `to ${free.next.name} afterwards` : "back afterwards"} · {o.spareMin} min spare
                   </p>
                 )
               )}

@@ -12,6 +12,7 @@ import { resolveTripLocationText, resolveTripCityPoint, isResolveFailure } from 
 import { getTripById } from "@/lib/trip";
 import { appliesTo } from "@/lib/rendezvous";
 import { toAroundPlace, whyPicked, type AroundAnchor, type AroundPlace } from "./around";
+import { hoursCoverVisit, type HoursStatus } from "./hours";
 import type { LatLng } from "./types";
 
 export const BUFFER_MIN = 10; // arrive this long before a commitment
@@ -111,7 +112,7 @@ export async function nextUpFor(tripId: string, userId: string, anchor: AroundAn
   };
 }
 
-export type FreeOption = { place: AroundPlace; category: string; walkToMin: number; stayMin: number; walkOnMin: number; spareMin: number; why: string | null };
+export type FreeOption = { place: AroundPlace; category: string; walkToMin: number; stayMin: number; walkOnMin: number; spareMin: number; why: string | null; hours: HoursStatus };
 export type FreeTime = {
   ok: true;
   windowMinutes: number;
@@ -123,6 +124,7 @@ export type FreeTime = {
   rainyMode: boolean;
   options: FreeOption[];
   considered: number;
+  closedDropped: number;
   retrievedAt: string;
   assumptions: string;
 };
@@ -176,14 +178,24 @@ export async function freeTimeOptions(tripId: string, userId: string, anchor: Ar
     return { cat, p, to, on };
   });
   const options: FreeOption[] = [];
+  let closedDropped = 0;
   for (const t of timed) {
     if (t.to == null || t.on == null) continue; // no provider route => no claim it fits
     const stay = STAY_MIN[t.cat] ?? 30;
     const spare = spareMinutes(windowMinutes, needBuffer, t.to, stay, t.on);
-    if (spare >= 0) options.push({ place: { ...t.p, walkMinutes: t.to }, category: t.cat, walkToMin: t.to, stayMin: stay, walkOnMin: t.on, spareMin: spare, why: whyPicked(t.cat, opts.prefs) });
+    if (spare < 0) continue;
+    // Provider hours decide whether it is OPEN for the whole visit. Known-closed is dropped;
+    // missing/unparseable hours are kept but flagged, never assumed open.
+    const arrive = new Date(`${addMinutes(nowLocal, t.to)}:00Z`);
+    const hours = hoursCoverVisit(t.p.openingHours, arrive, stay);
+    if (hours.state === "closed") {
+      closedDropped++;
+      continue;
+    }
+    options.push({ place: { ...t.p, walkMinutes: t.to }, category: t.cat, walkToMin: t.to, stayMin: stay, walkOnMin: t.on, spareMin: spare, why: whyPicked(t.cat, opts.prefs), hours });
   }
-  // Vibe Check order first (category position), then the most spare time.
-  options.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || b.spareMin - a.spareMin);
+  // Vibe Check order first, then places whose hours are confirmed open, then the most spare time.
+  options.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || Number(a.hours.state === "unknown") - Number(b.hours.state === "unknown") || b.spareMin - a.spareMin);
   return {
     ok: true,
     windowMinutes,
@@ -195,8 +207,19 @@ export async function freeTimeOptions(tripId: string, userId: string, anchor: Ar
     rainyMode,
     options: options.slice(0, 6),
     considered: shortlist.length,
+    closedDropped,
     retrievedAt: h.retrievedAt,
     assumptions: `Time at each place is Clockwise's assumption (${Object.entries(STAY_MIN).map(([k, v]) => `${k} ${v} min`).join(", ")}), not provider data. ${needBuffer ? `${needBuffer} min is kept as a buffer before ${next?.name}. ` : ""}${source === "next-commitment" && !next?.point ? `${next?.name}'s location couldn't be placed on the map, so the walk back is measured to where you started.` : ""}`.trim(),
   };
 }
 export { hhmm };
+
+// Destination-local "now" as a Z-convention Date, for evaluating provider opening hours.
+export async function localNowZ(point: LatLng): Promise<Date | null> {
+  try {
+    const h = await getHourlyContext(point);
+    return new Date(`${localNowIso(h)}:00Z`);
+  } catch {
+    return null;
+  }
+}

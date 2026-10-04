@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { resolveAnchor, toAroundPlace, whyPicked } from "../../src/lib/travel/around";
 import { groupOverlaps } from "../../src/lib/travel/saved-overlap";
 import { spareMinutes, rainInWindow, addMinutes, STAY_MIN, BUFFER_MIN } from "../../src/lib/travel/window";
+import { hoursAt, hoursCoverVisit } from "../../src/lib/travel/hours";
 import { orderCategories } from "../../src/lib/travel/around";
 import { AROUND_CATEGORIES, countWord } from "../../src/lib/travel/around-categories";
 
@@ -78,6 +79,19 @@ async function main() {
     const o = orderCategories(all, { nearby: ["cafe", "shopping"], energy: ["PRETTY"] });
     assert.deepEqual(o.slice(0, 3), ["cafe", "shopping", "attraction"]);
     for (const c of all) assert.ok(o.includes(c), c);
+  });
+  await ok("provider hours: closed at 00:25 Sunday, open at 10:00, never guessed when missing or unparseable", () => {
+    const z = (s: string) => new Date(`${s}:00Z`);
+    const raw = "Mo-Sa 08:00-20:00; Su 09:00-18:00";
+    assert.equal(hoursAt(raw, z("2026-10-04T00:25")).state, "closed");
+    assert.deepEqual(hoursAt(raw, z("2026-10-04T10:00")), { state: "open", until: "18:00" });
+    assert.equal(hoursAt(null, z("2026-10-04T10:00")).state, "unknown");
+    assert.equal(hoursAt("not hours ???", z("2026-10-04T10:00")).state, "unknown");
+  });
+  await ok("free time: a visit that runs past closing is not offered as open", () => {
+    const z = (s: string) => new Date(`${s}:00Z`);
+    assert.equal(hoursCoverVisit("Mo-Su 09:00-12:00", z("2026-10-05T11:30"), 45).state, "closed");
+    assert.equal(hoursCoverVisit("Mo-Su 09:00-12:00", z("2026-10-05T11:00"), 45).state, "open");
   });
   console.log(`${n} location-aware checks passed`);
 }
