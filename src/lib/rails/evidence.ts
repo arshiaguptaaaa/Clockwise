@@ -2,7 +2,8 @@
 // Round 3 submission. Redaction is structural, not best-effort: secrets are
 // removed by KEY NAME (anything auth-shaped) and by VALUE (the configured
 // secrets are scrubbed wherever they appear), and contact details are masked.
-// Delhivery is not integrated, so nothing here ever records a Delhivery call.
+// Delhivery Maps calls are recorded here too (partner DELHIVERY); its Bearer JWT is scrubbed by key name,
+// by configured value, and by JWT shape wherever it appears.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { prisma } from "@/lib/prisma";
 
@@ -12,7 +13,7 @@ export const withRailContext = <T>(ctx: RailContext, fn: () => Promise<T>): Prom
 export const currentRailContext = () => als.getStore();
 
 const SECRET_KEYS = /^(authorization|x-api-key|x-api-key-id|api[-_]?key|apikey|client[-_]?secret|client[-_]?id|access[-_]?token|refresh[-_]?token|token|password|secret|cookie|set-cookie|webhook[-_]?secret)$/i;
-const SECRET_ENV = ["GNANI_SPEECH_API_KEY", "GNANI_API_KEY", "GNANI_PLATFORM_API_KEY", "PINELABS_CLIENT_ID", "PINELABS_CLIENT_SECRET", "PINELABS_WEBHOOK_SECRET", "GEMINI_API_KEY", "RESEND_API_KEY", "DATABASE_URL"];
+const SECRET_ENV = ["DELHIVERY_MAPS_TOKEN", "GNANI_SPEECH_API_KEY", "GNANI_API_KEY", "GNANI_PLATFORM_API_KEY", "PINELABS_CLIENT_ID", "PINELABS_CLIENT_SECRET", "PINELABS_WEBHOOK_SECRET", "GEMINI_API_KEY", "RESEND_API_KEY", "DATABASE_URL"];
 
 export function maskEmail(v: string) {
   const [u, d] = v.split("@");
@@ -23,8 +24,9 @@ export function maskPhone(v: string) {
   return digits.length > 4 ? `${"*".repeat(Math.max(0, digits.length - 2))}${digits.slice(-2)}` : "***";
 }
 
+const JWT_SHAPE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
 function scrubString(s: string): string {
-  let out = s;
+  let out = s.replace(JWT_SHAPE, "[REDACTED]");
   for (const name of SECRET_ENV) {
     const v = process.env[name];
     if (v && v.length > 5) out = out.split(v).join("[REDACTED]");
@@ -45,7 +47,7 @@ export function sanitize(value: unknown, key = ""): unknown {
 }
 
 export type RailRecord = {
-  partner: "GNANI" | "PINELABS";
+  partner: "GNANI" | "PINELABS" | "DELHIVERY";
   operation: string;
   endpoint: string;
   method: string;
