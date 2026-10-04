@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
-import { countWord } from "@/lib/travel/around-categories";
+import { countWordTitle } from "@/lib/travel/around-categories";
 import { ProposeSaved } from "@/components/around/ProposeSaved";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 
@@ -26,7 +26,7 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
         <section key={o.providerPlaceId} className="section" data-overlap={o.name}>
           <p className="eyebrow text-accent">◷ Wait.</p>
           <h2 className="headline headline-lg mt-2">
-            {countWord(o.count)} of you saved this.
+            {countWordTitle(o.count)} of you saved this.
           </h2>
           <p className="mt-3 font-display text-[22px] leading-tight tracking-[-0.01em]">{o.name}</p>
           <p className="mt-1 text-[12.5px] text-muted-foreground">Nobody is told who saved what.</p>

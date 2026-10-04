@@ -289,7 +289,7 @@ const SCENES: Record<BengaluruScene, { bg: string; draw: () => ReactNode }> = {
 export function BengaluruArt({ scene, className = "", rounded = true }: { scene: BengaluruScene; className?: string; rounded?: boolean }) {
   const s = SCENES[scene];
   return (
-    <svg viewBox="0 0 260 204" role="img" aria-hidden="true" className={`block h-auto w-full ${className}`} style={{ borderRadius: rounded ? 22 : 0 }}>
+    <svg viewBox="0 0 260 204" role="img" aria-hidden="true" className={`block h-auto ${/(^|\s)w-/.test(className) ? "" : "w-full"} ${className}`} style={{ borderRadius: rounded ? 22 : 0 }}>
       <rect width="260" height="204" fill={s.bg} />
       {s.draw()}
     </svg>

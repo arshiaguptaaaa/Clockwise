@@ -7,7 +7,7 @@ import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
 import type { NextUp, FreeTime } from "@/lib/travel/window";
 import type { AroundPlace } from "@/lib/travel/around";
-import { AROUND_CATEGORIES, countWord } from "@/lib/travel/around-categories";
+import { AROUND_CATEGORIES, countWordTitle } from "@/lib/travel/around-categories";
 
 type Ok = Extract<AroundResponse, { ok: true }>;
 type RouteOk = Extract<RouteResponse, { ok: true }>;
@@ -159,8 +159,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
     { id: "arrival", icon: "✈", label: "ARRIVAL", ok: anchors.arrival.available, why: "Confirm your journey first" },
     { id: "destination", icon: "◎", label: "DESTINATION", ok: anchors.destination.available, why: "No destination yet" },
   ];
-  const where =
-    anchor === "me" ? "WHERE YOU ARE" : anchor === "stay" ? "YOUR HOTEL" : anchor === "arrival" ? "YOUR ARRIVAL POINT" : anchor === "destination" ? (anchors.destination.label ?? "THE DESTINATION").split(",")[0].toUpperCase() : "";
+  const whereText =
+    anchor === "me" ? "where you are" : anchor === "stay" ? "your hotel" : anchor === "arrival" ? "your arrival point" : anchor === "destination" ? (anchors.destination.label ?? "the destination").split(",")[0] : "";
 
   // ---- Step 1: nothing is known about where the traveller is until they say so.
   if (!anchor) {
@@ -312,7 +312,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           </span>
           Around you
         </p>
-        <h1 className="headline headline-xl mt-2">Around {where.toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}.</h1>
+        <h1 className="headline headline-xl mt-2">Around {whereText}.</h1>
         <p className="lede mt-2" data-anchor-note>
           {anchor === "me" && fix
             ? `Location from ${minutesAgo(fix.at, now)}. Private to you.`
@@ -517,7 +517,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       {overlap && (
         <div className="border-l-2 border-accent pl-3" data-overlap>
           <p className="eyebrow text-accent">◷ Wait.</p>
-          <p className="headline headline-md mt-1">{countWord(overlap.count)} of you saved this.</p>
+          <p className="headline headline-md mt-1">{countWordTitle(overlap.count)} of you saved this.</p>
           <p className="mt-1 text-[13px] font-semibold">{overlap.name}</p>
           <p className="text-xs text-muted-foreground">Nobody is told who. See it under Saved.</p>
         </div>
