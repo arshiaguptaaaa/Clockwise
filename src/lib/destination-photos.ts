@@ -169,7 +169,7 @@ export const CURATED_PHOTOS: CuratedPhoto[] = [
     label: "Bengaluru",
     country: "India",
     alt: "A rain-wet paved path under trees in Lalbagh Botanical Garden, Bengaluru",
-    tagline: "Rain at four. Dinner at eight.",
+    tagline: "Rain at four. Filter coffee at any hour.",
     signals: ["Lalbagh · 16:00", "Plan synced"],
     credit: "Ashwin Kumar / Flickr",
     license: "CC BY-SA 2.0",
