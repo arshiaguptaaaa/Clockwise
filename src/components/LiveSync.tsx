@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 // anything changed (new message, vote, arrival, plan change) and, if so, refreshes the
 // server-rendered screen in place. Client state (what you are typing, open sheets) is
 // preserved by router.refresh(). Short polling, honestly named: not a websocket.
-export function LiveSync({ tripId, intervalMs = 3500 }: { tripId: string; intervalMs?: number }) {
+export function LiveSync({ tripId, intervalMs = 5000 }: { tripId: string; intervalMs?: number }) {
   const router = useRouter();
   const last = useRef<string | null>(null);
 
