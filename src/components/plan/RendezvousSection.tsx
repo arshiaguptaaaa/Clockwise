@@ -17,14 +17,14 @@ export function RendezvousSection({ view }: { view: RendezvousView }) {
   return (
     <>
       {view.clocks.length > 0 && (
-        <section className="section" data-rendezvous>
-          <div className="flex items-start justify-between gap-4">
+        <details className="section group" data-rendezvous>
+          <summary className="flex cursor-pointer list-none items-start justify-between gap-4 [&::-webkit-details-marker]:hidden">
             <div>
               <p className="eyebrow">Individual clocks · Arrivals</p>
               <h2 className="headline headline-md mt-2 max-w-[15rem]">Everyone lands on their own time.</h2>
             </div>
             {view.clocks.length > 1 && <BengaluruArt scene="converge" className="w-24 shrink-0 -rotate-2 shadow-[0_10px_24px_-14px_rgba(20,24,26,0.5)]" />}
-          </div>
+          </summary>
 
           <ol className="row-rule mt-5">
             {view.clocks.map((c) => (
@@ -57,7 +57,7 @@ export function RendezvousSection({ view }: { view: RendezvousView }) {
             </p>
           )}
           <p className="mt-4 text-[10.5px] leading-relaxed text-muted-foreground">Arrival → stay is measured by a routing provider (Delhivery in India, Geoapify elsewhere), plus 15 minutes for bags and exits. These are estimates, not live traffic. No ticket details are shown.</p>
-        </section>
+        </details>
       )}
 
     </>

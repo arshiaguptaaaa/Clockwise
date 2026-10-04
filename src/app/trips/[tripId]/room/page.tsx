@@ -89,11 +89,10 @@ export default async function TripRoomChatPage({
       retry: Boolean(p.supersedesId),
       executionResult: p.executionResult,
       failureReason: p.failureReason,
-      approvals: p.approvals.map((a) => ({
-        userId: a.tripMember.userId,
-        name: a.tripMember.user.name,
-        decision: a.decision,
-      })),
+      // Stable, human order (the roster's), not whichever vote landed last.
+      approvals: p.approvals
+        .map((a) => ({ userId: a.tripMember.userId, name: a.tripMember.user.name, decision: a.decision }))
+        .sort((x, y) => trip.members.findIndex((m) => m.userId === x.userId) - trip.members.findIndex((m) => m.userId === y.userId)),
     };
   }
 

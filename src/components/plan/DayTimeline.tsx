@@ -107,8 +107,8 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
               .map((i) => (
                 <li key={i.key} className={`relative py-3.5 pl-7 ${i.kind === "commitment" ? "tile-in" : ""}`} {...(i.commitmentName ? { "data-commitment": i.commitmentName } : {})}>
                   <span className={`absolute -left-[9px] top-[1.15rem] flex size-[18px] items-center justify-center rounded-full bg-page ${i.risk ? "text-danger" : "text-foreground"}`}>{i.icon}</span>
-                  <div className="grid grid-cols-[4.4rem_1fr] gap-x-3">
-                    <p className={`font-display text-[20px] leading-[1.1] tracking-[-0.01em] ${i.risk ? "text-danger" : ""}`}>{timeLabel(i.local)}</p>
+                  <div className="grid grid-cols-[5.2rem_1fr] gap-x-2">
+                    <p className={`whitespace-nowrap font-display text-[20px] leading-[1.1] tracking-[-0.01em] ${i.risk ? "text-danger" : ""}`}>{timeLabel(i.local)}</p>
                     <div className="min-w-0">
                       <p className="text-[15px] leading-snug">{i.title}</p>
                       {i.note && <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{i.note}</p>}
