@@ -136,11 +136,16 @@ export function isTransientMood(text: string): boolean {
   return /\b(anything|something|whatever|literally anything|any food)\s+(except|but|other than|besides)\b/i.test(text) || /\b(not|no)\s+(another|more)\s+\w+/i.test(text) || /\b(another|more)\s+[\w ]{2,24}\s+(place|spot|restaurant|joint|cafe|café)\b.*[😭😩😫🙃🫠]/u.test(text);
 }
 
-export function validateModelPointer(text: string, kind: string, subject: string, otherNames: string[]): { ok: true } | { ok: false; reason: string } {
+// "I am too!" / "me too" / "same here" answering someone who just said "I'm vegetarian": the speaker is plainly saying it about THEMSELVES.
+const ECHO = /^\s*(?:i am|i'?m|im|me|same|so am i|so do i|i do|i too|same here)\b[^.?!]{0,12}\b(?:too|also|as well|same)\b|^\s*(?:me too|same here|same|so am i|i am too|i'?m too)\b/i;
+
+export function validateModelPointer(text: string, kind: string, subject: string, otherNames: string[], previousText?: string | null): { ok: true } | { ok: false; reason: string } {
   const t = text.replace(/\s+/g, " ").trim();
   const det = extractPointers(t);
   const subj = subject.toLowerCase();
   if (det.some((d) => d.kind === kind && (d.subject.includes(subj) || subj.includes(d.subject)))) return { ok: true };
+  // An echo of someone else's first-person statement ("I'm vegetarian btw." -> "I am too!") is the speaker's own, and only that.
+  if (kind === "DIET" && previousText && ECHO.test(t) && extractPointers(previousText).some((d) => d.kind === "DIET" && (d.subject.includes(subj) || subj.includes(d.subject)))) return { ok: true };
   if (kind === "DIET") return { ok: false, reason: "A diet is stored only when the speaker says it about themselves." };
   if (kind === "AVOID") return { ok: false, reason: "A dislike is stored only when the speaker states it about themselves." };
   if (isTransientMood(t)) return { ok: false, reason: "That is about the next meal, not a lasting preference." };

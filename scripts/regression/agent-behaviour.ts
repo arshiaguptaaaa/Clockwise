@@ -493,3 +493,13 @@ ok("'X owes me ₹N' is one debt with a direction; nothing here is a split", () 
   assert.deepEqual(parsePayDirective("@Clockwise pay Ridhima ₹1,000.", names), { recipientWord: "Ridhima", amountMinor: 100000, remaining: false });
 });
 console.log(`\n${n} agent-behaviour checks passed`);
+
+ok("contextual understanding is kept: 'I am too!' after 'I'm vegetarian btw.' is the speaker's own diet; a guess about someone else still is not", () => {
+  const others = ["Arshia"];
+  assert.equal(validateModelPointer("I am too! Dosa sounds good.", "DIET", "vegetarian", others, "I'm vegetarian btw.").ok, true);
+  assert.equal(validateModelPointer("me too", "DIET", "vegetarian", others, "I'm vegetarian btw").ok, true);
+  assert.equal(validateModelPointer("I am too! Dosa sounds good.", "DIET", "vegetarian", others, "what should we eat?").ok, false);
+  assert.equal(validateModelPointer("I am too! Dosa sounds good.", "DIET", "vegetarian", others, null).ok, false);
+  assert.equal(validateModelPointer("Arshia's vegetarian, I think.", "DIET", "vegetarian", others, "I'm vegetarian btw.").ok, false);
+});
+console.log(`\n${n} agent-behaviour checks passed`);

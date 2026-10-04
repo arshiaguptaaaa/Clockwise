@@ -960,8 +960,11 @@ async function noteTripPointerTool(input: Record<string, unknown>, ctx: AgentCon
   const subject = String(input.subject ?? "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 60);
   if (!POINTER_VERB[kind] || !subject) return { output: "Not noted: need a kind and a subject." };
   // The model proposes, code decides: only what the speaker said about THEMSELVES is stored (see validateModelPointer).
-  const spoken = [...ctx.history].reverse().find((h) => !h.isClockwise)?.content ?? "";
-  const verdict = validateModelPointer(spoken, kind, subject, ctx.trip.members.filter((m) => m.userId !== ctx.actingUserId).map((m) => m.user.name.split(" ")[0]));
+  const humans = [...ctx.history].reverse().filter((h) => !h.isClockwise);
+  const spoken = humans[0]?.content ?? "";
+  // The message just before this one, from someone else: what an echo like "I am too!" is echoing.
+  const previous = humans.slice(1).find((h) => h.senderName !== humans[0]?.senderName)?.content ?? null;
+  const verdict = validateModelPointer(spoken, kind, subject, ctx.trip.members.filter((m) => m.userId !== ctx.actingUserId).map((m) => m.user.name.split(" ")[0]), previous);
   if (!verdict.ok) return { output: `Not noted. ${verdict.reason} Do not reply to the group about it.` };
   const label = kind === "WANT" ? `wants ${subject}` : `${POINTER_VERB[kind]} ${subject}`;
   const r = await recordPointer({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: lastHumanId(ctx), kind: kind as never, subject, label });
