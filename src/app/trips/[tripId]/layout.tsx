@@ -6,6 +6,9 @@ import { BottomNav } from "@/components/BottomNav";
 import { VibeCheck } from "@/components/vibe/VibeCheck";
 import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
 import { prisma } from "@/lib/prisma";
+import { LiveSync } from "@/components/LiveSync";
+import { DecisionStrip } from "@/components/decisions/DecisionStrip";
+import { getOpenDecisions } from "@/lib/decisions";
 
 export default async function TripShellLayout({
   children,
@@ -35,6 +38,9 @@ export default async function TripShellLayout({
     vibe = <VibeCheck tripId={tripId} firstName={member.user.name.split(" ")[0]} questions={asks} knownLine={known || null} />;
   }
 
+  const decisions = await getOpenDecisions(tripId, member.userId);
+  const organiser = trip.members.find((m) => m.userId === trip.createdBy);
+
   const subtitle = `${trip.members.length} ${trip.members.length === 1 ? "traveller" : "travellers"} · ${dateRange}`;
 
   return (
@@ -47,8 +53,10 @@ export default async function TripShellLayout({
         isOrganiser={member.userId === trip.createdBy}
       />
       <div className="mx-auto flex w-full min-h-0 max-w-lg flex-1 flex-col bg-surface lg:max-w-2xl lg:border-x lg:border-border">
+        <DecisionStrip tripId={tripId} viewerId={member.userId} organiserId={trip.createdBy} organiserName={organiser?.user.name ?? "the organiser"} decisions={decisions} />
         {children}
       </div>
+      <LiveSync tripId={tripId} />
       <BottomNav tripId={tripId} />
       {vibe}
     </div>

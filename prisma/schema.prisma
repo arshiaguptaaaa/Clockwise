@@ -171,6 +171,9 @@ model Trip {
   // getDemoTrip() finds "the" demo trip reliably regardless of how many
   // real trips exist — never inferred from name or creation order.
   isDemo        Boolean   @default(false)
+  // Persistent group join link (/join/<joinCode>). Generated lazily by the
+  // organiser; rotating it invalidates the old link. Nullable.
+  joinCode      String?   @unique
 
   destinations   Destination[]
   members        TripMember[]
@@ -774,6 +777,9 @@ model ProposalApproval {
 
   decision    ApprovalDecision @default(PENDING)
   respondedAt DateTime?
+  // Optional reason when the traveller can't make it. The traveller's own words:
+  // never rendered to the group (the group sees the structured effect only).
+  note        String?
 
   createdAt DateTime @default(now())
 

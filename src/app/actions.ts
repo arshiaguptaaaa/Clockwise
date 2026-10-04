@@ -1,5 +1,6 @@
 "use server";
 
+import { voteFromChat } from "@/lib/chat-vote";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
@@ -70,6 +71,17 @@ export async function postGroupMessage(tripId: string, formData: FormData): Prom
 
   if (attachment) {
     await prisma.attachment.update({ where: { id: attachment.id }, data: { messageId: message.id } });
+  }
+
+  // A plain "yes" / "can't do 10" / "make it 9:30" answers the one open decision waiting on
+  // this person. When it did, Clockwise has nothing more to say, so no agent turn follows.
+  if (!attachment) {
+    const answered = await voteFromChat({ tripId, userId: senderId, text: content }).catch(() => ({ handled: false }));
+    if (answered.handled) {
+      revalidatePath(`/trips/${tripId}/room`);
+      revalidatePath(`/trips/${tripId}/plan`);
+      return;
+    }
   }
 
   revalidatePath(`/trips/${tripId}/room`);

@@ -7,6 +7,7 @@
 // transport-actions.ts split for the Uber flow.
 import { revalidatePath } from "next/cache";
 import { getCurrentUserId } from "@/lib/session";
+import { declineWithReason } from "@/lib/reschedule-counter";
 import {
   createProposal,
   castApprovalVote,
@@ -36,6 +37,18 @@ export async function castApprovalVoteAction(proposalId: string, decision: "APPR
   if (!actorId) return { ok: false as const, error: "Sign in to vote on this proposal." };
 
   const result = await castApprovalVote(proposalId, actorId, decision);
+  if (result.ok) {
+    const proposal = await getProposalWithApprovals(proposalId);
+    if (proposal) revalidateTrip(proposal.tripId);
+  }
+  return result;
+}
+
+// "I can't" plus an optional reason (see declineWithReason in reschedule-counter.ts).
+export async function declineWithReasonAction(proposalId: string, reason: string) {
+  const actorId = await getCurrentUserId();
+  if (!actorId) return { ok: false as const, error: "Sign in to respond." };
+  const result = await declineWithReason(proposalId, actorId, reason);
   if (result.ok) {
     const proposal = await getProposalWithApprovals(proposalId);
     if (proposal) revalidateTrip(proposal.tripId);

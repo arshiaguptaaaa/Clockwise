@@ -9,7 +9,9 @@ const basis = (p: string | null) => (p === "delhivery" ? "Delhivery · traffic-a
 
 // ONE TRIP, MANY CLOCKS: each person's own arrival, what it means for the stay, and what that means
 // for the plan everyone agreed. Group-safe: arrival facts only, no ticket details.
-export function RendezvousSection({ view }: { view: RendezvousView }) {
+export type PendingMove = { to: string; proposalId: string; stage: string };
+
+export function RendezvousSection({ view, pending = {}, organiserName = "the organiser" }: { view: RendezvousView; pending?: Record<string, PendingMove>; organiserName?: string }) {
   if (view.clocks.length === 0 && view.commitments.length === 0) return null;
   const atRisk = view.commitments.filter((c) => c.late.length > 0);
   return (
@@ -74,6 +76,13 @@ export function RendezvousSection({ view }: { view: RendezvousView }) {
                     <p className={`mt-1 text-[12.5px] leading-snug ${late ? "font-semibold text-danger" : "text-muted-foreground"}`}>
                       {late ? <><span className="mr-1.5 rounded-full bg-danger-tint px-2 py-0.5 text-[10px] tracking-[0.14em]">AT RISK</span>{c.late.map((l) => `${l.name} can't be at the stay before ${hhmm(l.hotelBy)}`).join("; ")}</> : c.allAtHotelBy ? "Everyone can be at the stay in time ✓" : "Can't tell yet: someone's clock is unknown"}
                     </p>
+                    {pending[c.id] && (
+                      <p className="mt-1.5 text-[12.5px] leading-snug" data-pending-move>
+                        <span className="mr-1.5 rounded-full border border-dashed border-foreground/40 px-2 py-0.5 text-[10px] tracking-[0.14em]">{pending[c.id].stage === "AGREED" ? "AGREED" : "PROPOSED"}</span>
+                        <span className="font-display text-[15px]">{hhmm(pending[c.id].to)} ?</span>{" "}
+                        <span className="text-muted-foreground">{pending[c.id].stage === "AGREED" ? `Everyone accepted · the Plan changes when ${organiserName.split(" ")[0]} confirms.` : "Not in the Plan yet · waiting for the group."}</span>
+                      </p>
+                    )}
                   </div>
                 </li>
               );

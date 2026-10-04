@@ -8,6 +8,7 @@
 import type { ApprovalDecision, ProposalStatus, ProposalType } from "@prisma/client";
 import { prisma } from "./prisma";
 import { executeConfirmedProposal, type ExecutionResult } from "./proposal-execution";
+import { notify } from "./notifications";
 
 export type ProposalPayload = {
   provider?: string;
@@ -184,6 +185,18 @@ export async function createProposal(input: CreateProposalInput) {
     },
   });
 
+  // Everyone who can vote hears about it: a decision is waiting. Never throws into
+  // the caller (notify swallows its own failures).
+  await notify({
+    tripId: input.tripId,
+    recipientIds: tripMembers.map((m) => m.userId).filter((id) => id !== input.createdBy),
+    severity: "IMPORTANT",
+    kind: "DECISION_WAITING",
+    title: "A decision's waiting",
+    body: input.title,
+    href: `/trips/${input.tripId}/room`,
+  });
+
   return proposal;
 }
 
@@ -200,7 +213,8 @@ export type CastVoteResult =
 export async function castApprovalVote(
   proposalId: string,
   actorId: string,
-  decision: "APPROVED" | "REJECTED"
+  decision: "APPROVED" | "REJECTED",
+  note?: string | null
 ): Promise<CastVoteResult> {
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
   if (!proposal) return { ok: false, error: "Proposal not found." };
@@ -229,7 +243,7 @@ export async function castApprovalVote(
 
   await prisma.proposalApproval.update({
     where: { id: approval.id },
-    data: { decision, respondedAt: new Date() },
+    data: { decision, respondedAt: new Date(), note: decision === "REJECTED" ? (note?.trim().slice(0, 300) || null) : null },
   });
 
   await prisma.auditLog.create({
@@ -255,6 +269,22 @@ export async function castApprovalVote(
     });
     if (claimed.count > 0) {
       proposalStatus = nextAggregate;
+      if (nextAggregate === "APPROVED") {
+        // Everyone is in. The Plan has NOT changed: the organiser still makes it official.
+        const trip = await prisma.trip.findUnique({ where: { id: proposal.tripId }, select: { createdBy: true } });
+        const members = await prisma.tripMember.findMany({ where: { tripId: proposal.tripId }, select: { userId: true } });
+        if (trip) {
+          await notify({
+            tripId: proposal.tripId,
+            recipientIds: members.map((m) => m.userId).filter((id) => id === trip.createdBy),
+            severity: "IMPORTANT",
+            kind: "DECISION_EVERYONE_IN",
+            title: "Everyone's in",
+            body: `${proposal.title} Make it official when you're ready.`,
+            href: `/trips/${proposal.tripId}/room`,
+          });
+        }
+      }
       await prisma.auditLog.create({
         data: {
           tripId: proposal.tripId,

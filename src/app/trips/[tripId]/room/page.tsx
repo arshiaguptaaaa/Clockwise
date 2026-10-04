@@ -6,6 +6,7 @@ import { ChatThread } from "@/components/trip-room/ChatThread";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
+import { describeProposal } from "@/lib/decisions";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
 
 // Server actions on this page run the agent (model + tool calls), which can take
@@ -35,6 +36,8 @@ export default async function TripRoomChatPage({
         select: {
           id: true,
           status: true,
+          type: true,
+          supersedesId: true,
           title: true,
           summary: true,
           payload: true,
@@ -55,12 +58,18 @@ export default async function TripRoomChatPage({
   const roster = trip.members.map((m) => ({ id: m.userId, name: m.user.name }));
 
   function toProposalCardData(p: NonNullable<(typeof messages)[number]["proposal"]>): ProposalCardData {
+    const payload = decodeProposalPayload(p.payload);
+    const d = describeProposal({ title: p.title, type: p.type, payload });
     return {
       id: p.id,
       status: p.status,
       title: p.title,
       summary: p.summary,
-      payload: decodeProposalPayload(p.payload),
+      payload,
+      headline: d.headline,
+      kind: d.kind,
+      change: d.change,
+      retry: Boolean(p.supersedesId),
       executionResult: p.executionResult,
       failureReason: p.failureReason,
       approvals: p.approvals.map((a) => ({
@@ -105,6 +114,7 @@ export default async function TripRoomChatPage({
       roster={roster}
       currentUserId={currentUserId}
       organiserId={trip.createdBy}
+      organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"}
       postAction={postGroupMessage.bind(null, tripId)}
       runAgentAction={runGroupAgentTurn.bind(null, tripId)}
       placeholder="Message the group…"

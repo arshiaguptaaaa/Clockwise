@@ -33,6 +33,7 @@ export function ChatThread({
   roster,
   currentUserId,
   organiserId,
+  organiserName = "the organiser",
   postAction,
   runAgentAction,
   placeholder,
@@ -45,6 +46,7 @@ export function ChatThread({
   roster: CardPerson[];
   currentUserId: string | null;
   organiserId: string;
+  organiserName?: string;
   // Fast: persists the human message only, returns immediately.
   postAction: (formData: FormData) => Promise<{ senderId: string } | void>;
   // Slow: the actual agent turn. Deliberately a SEPARATE transition from
@@ -83,6 +85,7 @@ export function ChatThread({
               proposal={message.proposal}
               viewerId={currentUserId}
               isOrganiser={currentUserId === organiserId}
+              organiserName={organiserName}
             />
           ) : message.failed ? (
             <FailedClockwiseMessage

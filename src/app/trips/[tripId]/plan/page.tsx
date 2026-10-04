@@ -18,6 +18,7 @@ import { RendezvousSection } from "@/components/plan/RendezvousSection";
 import { AgreedPlacesSection } from "@/components/plan/AgreedPlacesSection";
 import { agreedPlaces } from "@/lib/places/place-proposals";
 import { buildRendezvousView } from "@/lib/rendezvous";
+import { pendingReschedules } from "@/lib/decisions";
 
 export default async function PlanOverviewPage({
   params,
@@ -30,7 +31,7 @@ export default async function PlanOverviewPage({
   // The seeded demo route starts at Delhi, which its photo grid skips. Real
   // trips show every stop — a real Delhi stop must not vanish.
   const middleStops = trip.isDemo ? stops.filter((s) => s.name !== "Delhi") : stops;
-  const [stay, rendezvous, agreed] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId), agreedPlaces(tripId)]);
+  const [stay, rendezvous, agreed, pending] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId), agreedPlaces(tripId), pendingReschedules(tripId)]);
   const mapMarkers = [
     ...buildDestinationMarkers(stops),
     ...(stay?.status === "CONFIRMED" && stay.latitude != null && stay.longitude != null
@@ -97,7 +98,7 @@ export default async function PlanOverviewPage({
 
       {stay && <StaySection stay={stay} />}
       <AgreedPlacesSection places={agreed} />
-      <RendezvousSection view={rendezvous} />
+      <RendezvousSection view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />
 
       <section className="section">
         <p className="eyebrow">Where</p>
