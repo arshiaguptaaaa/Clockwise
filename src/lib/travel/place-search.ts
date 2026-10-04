@@ -140,12 +140,13 @@ function scoreKeyword(p: PlaceResult, kw: Keyword): { score: number; why: string
   const tag = syn.find((s) => word(cuisine, s));
   if (tag) {
     score += 4;
-    why = `provider tags it ${(p.cuisine ?? "").split(";").find((c) => word(lc(c), tag)) ?? tag}`.replace(/_/g, " ");
+    why = (p.cuisine ?? "").split(";").find((c) => word(lc(c), tag)) ?? tag;
+    why = why.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
   const named = syn.find((s) => word(name, s));
   if (named) {
     score += 3;
-    why = why ?? `name says ${named}`;
+    why = why ?? `Name says ${named}`;
   }
   if (score === 0 && /indian/.test(cats) && /(dosa|idli|south|biryani|thali)/.test(lc(kw.word))) score += 0.5;
   return { score, why };
@@ -202,7 +203,7 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
       // regional restaurants (where South Indian lives), and a name search for the dish. Each can fail alone.
       const indianish = kw.synonyms.some((s) => /south|dosa|indian|udupi|thali|biryani|tiffin/.test(s));
       const [all, indian, byName, vegOnly] = await Promise.all([
-        searchNearbyRaw(cats, anchor.point, 10000, 80),
+        searchNearbyRaw(cats, anchor.point, 15000, 100),
         indianish ? searchNearbyRaw("catering.restaurant.indian,catering.restaurant.regional,catering.fast_food", anchor.point, 12000, 100).catch(() => [] as PlaceResult[]) : Promise.resolve([] as PlaceResult[]),
         searchNearbyRaw(cats, anchor.point, 15000, 40, undefined, kw.word.toLowerCase()).catch(() => [] as PlaceResult[]),
         diet ? searchNearbyRaw(cats, anchor.point, 10000, 60, diet).catch(() => [] as PlaceResult[]) : Promise.resolve([] as PlaceResult[]),
@@ -257,7 +258,7 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
     const w = walked[i]?.walkMinutes ?? null;
     const card = toCard(r.p, w != null && w <= 30 ? w : null, category, now, { why: r.score >= 3 ? r.why : null }, diet ? r.veg : null);
     const from = anchor.kind === "stay" ? "your stay" : anchor.label;
-    const parts = [diet && r.veg ? `${diet.replace(/^./, (c) => c.toUpperCase())}-friendly` : null, r.score >= 3 && intent.what ? intent.what.replace(/^./, (c) => c.toUpperCase()) : null, card.walkMinutes != null ? `${card.walkMinutes} min walk from ${from}` : card.distanceMeters != null ? `${(card.distanceMeters / 1000).toFixed(1)} km from ${from}` : null].filter(Boolean);
+    const parts = [diet && r.veg ? `${diet.replace(/^./, (c) => c.toUpperCase())}-friendly` : null, r.score >= 3 ? r.why : null, card.walkMinutes != null ? `${card.walkMinutes} min walk from ${from}` : card.distanceMeters != null ? `${(card.distanceMeters / 1000).toFixed(1)} km from ${from}` : null].filter(Boolean);
     card.why = parts.length >= 2 ? parts.join(" · ") : null;
     return card;
   });
@@ -266,7 +267,7 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
   const what = intent.what ?? CATEGORY_LABEL[category]?.toLowerCase() ?? category;
   const bits: string[] = [];
   if (intent.keyword) {
-    bits.push(keywordMatches >= 3 ? `${keywordMatches} places the provider's data tags or names as ${what}.` : keywordMatches > 0 ? `Only ${keywordMatches} place${keywordMatches === 1 ? " is" : "s are"} tagged or named ${what} in the provider's data; the rest are the closest related restaurants.` : `No place is tagged or named ${what} in the provider's data here, so these are the closest related restaurants. They may or may not serve it.`);
+    bits.push(keywordMatches >= 3 ? `${keywordMatches} places matched ${what} on the provider's cuisine tags and names.` : keywordMatches > 0 ? `Only ${keywordMatches} place${keywordMatches === 1 ? " is" : "s are"} tagged or named ${what} in the provider's data; the rest are the closest related restaurants.` : `No place is tagged or named ${what} in the provider's data here, so these are the closest related restaurants. They may or may not serve it.`);
   } else if (widened) bits.push("Widened the search to find enough real places.");
   if (diet) bits.push(`Found using Geoapify's ${diet} search${dietWhy ? ` (${dietWhy})` : ""}. That's a provider filter, not a check of each menu.`);
   return { ok: true, anchor, anchorWhy: located.why, title: titleFor(intent, category, anchor), context: bits.join(" "), places, chain, provider: "geoapify", retrievedAt, keywordMatches, diet, dietWhy, category };

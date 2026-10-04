@@ -200,7 +200,11 @@ export async function buildIdea(params: { tripId: string; userId: string; when?:
   // WHY: only what was actually said and what the Plan actually holds.
   const said: string[] = [];
   const names = (i: Interest) => peopleList(i.people);
-  if (place) said.push(place.must && place.people.length === 1 ? `${names(place)} said ${title(place.subject)} is a must` : `${names(place)} ${place.people.length > 1 ? "both mentioned" : "mentioned"} ${title(place.subject)}`);
+  if (place) {
+    const fl = peopleList(place.floatedBy);
+    const ag = place.agreedBy.length ? ` and ${peopleList(place.agreedBy)} agreed` : "";
+    said.push(place.must && !ag ? `${fl} said ${title(place.subject)} is a must` : `${fl} ${place.must ? `said ${title(place.subject)} is a must` : `mentioned ${title(place.subject)}`}${ag}`);
+  }
   if (food) said.push(`${names(food)} ${food.people.length > 1 ? "both " : ""}${food.kind === "LIKE" ? (food.people.length > 1 ? "like" : "likes") : food.people.length > 1 ? "want" : "wants"} ${food.subject}`);
   const dietRows = pointers.filter((p) => p.kind === "DIET");
   if (dietRows.length) said.push(`${peopleList([...new Set(dietRows.map((p) => p.userName))])} ${dietRows.length > 1 ? "are" : "is"} ${[...new Set(dietRows.map((p) => p.subject))].join("/")}`);
@@ -277,7 +281,7 @@ export async function maybeSurfaceIdea(tripId: string, userId: string): Promise<
   }
   if (!when) return null;
   const crowd = peopleList(hot.people);
-  const intro = hot.people.length >= 2 ? `Looks like ${title(hot.subject)} is winning 👀 ${crowd} are up for it.` : `${title(hot.subject)} has come up ${hot.mentions} times.`;
+  const intro = hot.people.length >= 2 ? `Looks like ${title(hot.subject)} is winning 👀 ${crowd} ${hot.people.length > 1 ? "are" : "is"} up for it.` : `${title(hot.subject)} has come up ${hot.mentions} times.`;
   const out = await buildIdea({ tripId, userId, when, intro, focusSubject: hot.subject });
   return out;
 }

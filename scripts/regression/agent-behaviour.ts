@@ -205,7 +205,6 @@ ok("own arrival is read from a casual delay message", () => {
   assert.equal(parseOwnArrival("lol my flight is so boring", NOW), null);
   assert.equal(parseOwnArrival("I'm vegetarian btw", NOW), null);
 });
-console.log(`\n${n} agent-behaviour checks passed`);
 
 import { classifyClashAnswer } from "../../src/lib/disruption";
 ok("a reply to a clash question is understood without @Clockwise", () => {
@@ -224,5 +223,18 @@ ok("arrival statements: later, earlier, hotel time, different airport", () => {
   const p = parseOwnArrival("Change of plan, I'm landing at Hyderabad airport now", NOW);
   assert.equal(p?.kind, "place");
   assert.deepEqual(extractPointers("Meet us at Church Street").map((x) => [x.kind, x.subject]), [["MEET", "church street"]]);
+});
+console.log(`\n${n} agent-behaviour checks passed`);
+
+ok("'Update: now landing at 9:30 PM' is an arrival update, not a place answer", () => {
+  assert.deepEqual(parseOwnArrival("Update: now landing at 9:30 PM", NOW), { kind: "time", arrivalTime: "21:30" });
+  assert.equal(parseOwnArrival("Church Street", NOW), null);
+});
+console.log(`\n${n} agent-behaviour checks passed`);
+
+ok("'dinner moved to 9?' (passive voice, said to the group) is read as a move", () => {
+  const c = parsePlanCommand("@all dinner moved to 9?", ctx([dinner]));
+  assert.equal(c?.kind, "move");
+  if (c?.kind === "move") assert.equal(c.time, "21:00");
 });
 console.log(`\n${n} agent-behaviour checks passed`);

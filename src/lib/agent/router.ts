@@ -18,8 +18,12 @@ import { parseOwnArrival } from "@/lib/traveller/arrival-parse";
 import { handleArrivalChange, evaluateConsequences, answerClashFromChat } from "@/lib/disruption";
 import { recomputeRendezvous } from "@/lib/rendezvous";
 import { executeTool } from "./tools";
+import { doesThisFit } from "@/lib/travel/fit";
+import { anchorsFor } from "@/lib/travel/around";
+import { searchPlaceByText } from "@/lib/travel/geoapify-provider";
 import { localNow } from "@/lib/when";
 import { getOpenDecisions } from "@/lib/decisions";
+import { timeLabel } from "@/lib/traveller/journey";
 import type { AgentContext, ConversationTurn } from "./context";
 import type { MessageMode } from "@/lib/mentions";
 
@@ -76,7 +80,7 @@ export async function runPlaceRequest(ctx: AgentContext, text: string, channel: 
 
   const top = outcome.places[0];
   const what = intent.what ?? outcome.category;
-  const lead = outcome.keywordMatches >= 1 && intent.keyword ? `${outcome.keywordMatches} of these ${outcome.keywordMatches === 1 ? "is" : "are"} tagged or named ${what} in Geoapify's data` : `Real places from Geoapify`;
+  const lead = outcome.keywordMatches >= 1 && intent.keyword ? `${outcome.keywordMatches} of these ${outcome.keywordMatches === 1 ? "matches" : "match"} ${what} on Geoapify's cuisine tags or names` : `Real places from Geoapify`;
   const why = top.why ? ` WHY THIS WORKS ✦ ${top.why}.` : "";
   const dietNote = outcome.dietWhy ? ` Ranked with ${outcome.dietWhy} in mind.` : "";
   return { reply: `Found ${outcome.places.length} around ${outcome.anchor.label}: ${lead}. Top pick is ${top.name}.${why}${dietNote} Full list is in the card.`, outcome };
@@ -109,6 +113,24 @@ export async function routeAddressed(ctx: AgentContext, last: ConversationTurn, 
 
   if (/\bwhat('?s| is| are)\b.*\b(still )?(undecided|left to decide|open|pending|waiting)\b/i.test(text)) {
     return { handled: true, reply: await openQuestions(ctx), calls: [{ name: "open_questions", input: {} }] };
+  }
+
+  // "can we fit Cubbon Park before dinner?" is a feasibility question about ONE named place, not a search.
+  const fitAsk = /\b(?:can|could|will|would|do|should)\s+(?:we|i)\s+(?:actually\s+|really\s+)?(?:fit|squeeze(?:\s+in)?|do|visit|see|make|manage|get to|go to|add)\s+(.+?)\s+(?:before|ahead of|prior to|between)\b/i.exec(text);
+  if (fitAsk) {
+    const placeName = fitAsk[1].replace(/\s+in$/i, "").replace(/^(the|a)\s+/i, "").trim();
+    const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
+    const origin = a.stay ?? a.destination;
+    const found = origin ? await searchPlaceByText(placeName, origin.point).catch(() => []) : [];
+    if (!origin || !found[0]) return { handled: true, reply: origin ? `I couldn't find "${placeName}" on the map, so I can't say whether it fits. I haven't guessed.` : "There's no stay or destination to measure from yet, so I can't say whether it fits.", calls: [{ name: "does_this_fit", input: { placeName, found: false } }] };
+    const kind = /park|garden/i.test(placeName) ? "park" : "attraction";
+    const r = await doesThisFit({ tripId: ctx.trip.id, userId: ctx.actingUserId, place: { name: found[0].name, lat: found[0].latitude, lng: found[0].longitude }, kind, origin: { label: origin.kind === "stay" ? "the hotel" : origin.label, point: origin.point } });
+    if (!r.ok) return { handled: true, reply: r.error, calls: [{ name: "does_this_fit", input: { placeName, error: r.error } }] };
+    await prisma.tripEvent.create({ data: { tripId: ctx.trip.id, kind: "FIT_CHECKED", scope: "GROUP", actorUserId: ctx.actingUserId, sourceChannel: "GROUP", confidence: "HIGH", payload: JSON.stringify({ place: r.place, verdict: r.verdict, routeProvider: r.routeProvider, reachChecked: r.reach.checked, reachInside: r.reach.inside, reachProvider: r.reach.provider, toMin: r.toMin, onMin: r.onMin, spareMin: r.spareMin, commitment: r.commitment?.name ?? null, whatIf: r.whatIf, evidenceIds: r.evidenceIds, tool: "does_this_fit" }), propagation: JSON.stringify(["chat"]) } }).catch(() => undefined);
+    const t = (l: string) => timeLabel(l);
+    const provider = r.routeProvider === "delhivery" ? "Delhivery" : "Geoapify";
+    const reply = `${r.verdict === "YES" ? "Yes" : r.verdict === "TIGHT" ? "It's tight, but" : "No"}: ${r.place} ${r.verdict === "NO" ? "doesn't fit" : "fits"}${r.commitment ? ` before ${r.commitment.name} (${t(r.commitment.targetLocal)})` : ""}. ${r.toMin != null ? `${r.toMin} min there from ${r.originLabel}${r.onMin != null ? `, ${r.onMin} min back` : ""} (${provider}), about ${r.stayMin} min at the place. ` : ""}${r.verdict !== "NO" && r.leaveByLocal ? `Leave by ${t(r.leaveByLocal)}. ` : ""}${r.whatIf ? `That's a what-if for setting off at ${t(r.leaveLocal)}. ` : ""}${r.reason}`;
+    return { handled: true, reply, calls: [{ name: "does_this_fit", input: { placeName } }] };
   }
 
   if (isPlaceSearch(text)) {
@@ -150,7 +172,14 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
   // 2a. Clockwise asked "where are you heading after the airport?" and this short message is the answer.
   let reply: string | undefined;
   const asked = await prisma.tripEvent.findFirst({ where: { tripId: ctx.trip.id, kind: "ANCHOR_QUESTION_ASKED", subjectUserId: ctx.actingUserId, createdAt: { gt: new Date(Date.now() - 2 * 3600_000) } }, orderBy: { createdAt: "desc" } });
-  if (asked && text.trim().split(/\s+/).length <= 6 && !seen.captured.some((c) => c.kind === "MEET") && /[A-Za-z]{3}/.test(text) && !text.includes("?")) {
+  // Only the FIRST message after the question can be its answer, and only a short bare place name (no digits, no
+  // question, nothing that reads as an arrival update).
+  let isAnswer = false;
+  if (asked) {
+    const between = await prisma.message.count({ where: { tripId: ctx.trip.id, channel: "GROUP", senderId: ctx.actingUserId, timestamp: { gt: asked.createdAt }, id: { not: last.id } } });
+    isAnswer = between === 0 && text.trim().split(/\s+/).length <= 5 && /^[\p{L}][\p{L}\s.'’,-]{2,}$/u.test(text.trim().replace(/[.!]+$/, "")) && !parseOwnArrival(text, localNow(), {});
+  }
+  if (asked && isAnswer && !seen.captured.some((c) => c.kind === "MEET")) {
     const subject = text.replace(/^(i'?m |im |i am )?(heading|going|headed)( to)?\s+/i, "").replace(/^(the|at)\s+/i, "").replace(/[.!]+$/, "").trim();
     if (subject) {
       const { recordPointer } = await import("@/lib/pointers/store");

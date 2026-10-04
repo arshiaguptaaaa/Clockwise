@@ -25,15 +25,28 @@ async function geocodeAnchorText(tripId: string, text: string) {
   const hit = geocodeMemo.get(key);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
   const { suggestPlaces, pointForSuggestion } = await import("./travel/locate");
-  const sug = await suggestPlaces(text, { tripId }).catch(() => null);
+  // "Church Street" exists in every country: ask for it IN the trip's city and bias the provider to the destination.
+  const dest = await prisma.destination.findFirst({ where: { tripId }, orderBy: { order: "asc" }, select: { name: true, city: true, latitude: true, longitude: true } });
+  const city = (dest?.city ?? dest?.name ?? "").split(",")[0].trim();
+  const query = city && !text.toLowerCase().includes(city.toLowerCase()) ? `${text}, ${city}` : text;
+  const bias = dest?.latitude != null && dest.longitude != null ? { lat: dest.latitude, lng: dest.longitude } : null;
+  const sug = await suggestPlaces(query, { tripId, bias }).catch(() => null);
   let value: { lat: number; lng: number; label: string } | null = null;
   if (sug && sug.ok && sug.suggestions[0]) {
     const pick = sug.suggestions[0];
     const pt = await pointForSuggestion(pick.label, pick.lat != null && pick.lng != null ? { lat: pick.lat, lng: pick.lng } : null, { tripId });
-    if (pt) value = { lat: pt.point.lat, lng: pt.point.lng, label: pick.label.split(",")[0] };
+    // A street name that resolves hundreds of km from the trip is the wrong street: refuse it rather than route to it.
+    const far = pt && bias ? Math.hypot((pt.point.lat - bias.lat) * 111, (pt.point.lng - bias.lng) * 111 * Math.cos((bias.lat * Math.PI) / 180)) > 150 : false;
+    if (pt && !far) value = { lat: pt.point.lat, lng: pt.point.lng, label: pick.label.split(",")[0] };
   }
   geocodeMemo.set(key, { at: Date.now(), value });
   return value;
+}
+
+// A commitment location that is just the city / trip / placeholder is not a specific place.
+export async function genericLocations(tripId: string): Promise<Set<string>> {
+  const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { name: true, destinations: { select: { name: true, displayName: true, city: true } } } });
+  return new Set(["", "to be decided", "tbd", (trip?.name ?? "").toLowerCase(), ...(trip?.destinations ?? []).flatMap((d) => [d.name.toLowerCase(), (d.displayName ?? "").toLowerCase(), (d.displayName ?? "").split(",")[0].toLowerCase(), (d.city ?? "").toLowerCase()])]);
 }
 
 export async function groupAnchor(tripId: string): Promise<GroupAnchor | null> {
@@ -46,8 +59,7 @@ export async function groupAnchor(tripId: string): Promise<GroupAnchor | null> {
     if (g) return { id: `meet:${meet.id}`, placeName: g.label, latitude: g.lat, longitude: g.lng, kind: "meeting" };
   }
 
-  const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { name: true, destinations: { select: { name: true, displayName: true } } } });
-  const generic = new Set(["", "to be decided", "tbd", (trip?.name ?? "").toLowerCase(), ...(trip?.destinations ?? []).flatMap((d) => [d.name.toLowerCase(), (d.displayName ?? "").toLowerCase(), (d.displayName ?? "").split(",")[0].toLowerCase()])]);
+  const generic = await genericLocations(tripId);
   const upcoming = await prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" }, targetTime: { gt: new Date(Date.now() - 12 * 3600_000) } }, orderBy: { targetTime: "asc" }, take: 5 });
   for (const c of upcoming) {
     const loc = c.location.trim();

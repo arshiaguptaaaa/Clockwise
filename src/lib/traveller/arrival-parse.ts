@@ -41,7 +41,7 @@ export function parseOwnArrival(text: string, now: LocalNow, window: DayWindow =
   for (const s of sentences) {
     if (!VERB.test(s)) continue;
     // "landing at 8:15 instead" has no subject word: a bare gerund in chat is the speaker's own.
-    const subj = SUBJECT.exec(s) ?? SUBJECT.exec(t) ?? /^\s*(?:now |ok |so |guys,? )?(?:landing|reaching|arriving|getting in)\b/i.exec(s);
+    const subj = SUBJECT.exec(s) ?? SUBJECT.exec(t) ?? /^\s*(?:(?:update|edit|ps|fyi|ok|okay|so|hey|guys|btw|now|actually)\b[:,!\s]*)*(?:landing|reaching|arriving|getting in)\b/i.exec(s);
     if (!subj) continue;
     // Someone else named as the one arriving: "Ridhima will reach at 9".
     if (/^\s*[A-Z][a-z]+\s+(?:will|is|has|'ll)\s/.test(s) && !/^\s*(I|We|My|Our)\b/.test(s)) continue;

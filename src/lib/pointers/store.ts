@@ -12,6 +12,7 @@ export type PointerRow = {
   subject: string;
   label: string;
   supporterIds: string[];
+  supporterNames: string[];
   mentions: number;
   status: string;
 };
@@ -127,25 +128,28 @@ export async function observeMessage(params: { tripId: string; userId: string; m
 export async function loadPointers(tripId: string, statuses: string[] = ["ACTIVE", "SUGGESTED", "PROPOSED"]): Promise<PointerRow[]> {
   const rows = await prisma.tripPointer.findMany({ where: { tripId, status: { in: statuses } }, orderBy: { createdAt: "asc" } });
   if (rows.length === 0) return [];
-  const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.userId))] } }, select: { id: true, name: true } });
+  const wanted = [...new Set(rows.flatMap((r) => [r.userId, ...parseIds(r.supporterIds)]))];
+  const users = await prisma.user.findMany({ where: { id: { in: wanted } }, select: { id: true, name: true } });
   const name = new Map(users.map((u) => [u.id, u.name.split(" ")[0]]));
-  return rows.map((r) => ({ id: r.id, userId: r.userId, userName: name.get(r.userId) ?? "Someone", kind: r.kind, subject: r.subject, label: r.label, supporterIds: parseIds(r.supporterIds), mentions: r.mentions, status: r.status }));
+  return rows.map((r) => ({ id: r.id, userId: r.userId, userName: name.get(r.userId) ?? "Someone", kind: r.kind, subject: r.subject, label: r.label, supporterIds: parseIds(r.supporterIds), supporterNames: parseIds(r.supporterIds).map((i) => name.get(i) ?? "Someone"), mentions: r.mentions, status: r.status }));
 }
 
 // "Ridhima wants to try dosa." One line per pointer, in the order they came up.
 export const pointerLine = (p: PointerRow) => `${p.userName} ${p.label}.`;
 
 // Pointers about the same thing, across people: this is where "you both mentioned Cubbon Park" comes from.
-export type Interest = { subject: string; people: string[]; peopleIds: string[]; mentions: number; must: boolean; pointerIds: string[]; kind: string };
+export type Interest = { subject: string; people: string[]; peopleIds: string[]; floatedBy: string[]; agreedBy: string[]; mentions: number; must: boolean; pointerIds: string[]; kind: string };
 
 export function groupInterests(rows: PointerRow[]): Interest[] {
   const by = new Map<string, Interest>();
   for (const r of rows) {
     if (!["WANT", "MUST", "LIKE"].includes(r.kind)) continue;
-    const cur = by.get(r.subject) ?? { subject: r.subject, people: [], peopleIds: [], mentions: 0, must: false, pointerIds: [], kind: r.kind };
+    const cur = by.get(r.subject) ?? { subject: r.subject, people: [], peopleIds: [], floatedBy: [], agreedBy: [], mentions: 0, must: false, pointerIds: [], kind: r.kind };
     const ids = [r.userId, ...r.supporterIds];
     for (const id of ids) if (!cur.peopleIds.includes(id)) cur.peopleIds.push(id);
-    if (!cur.people.includes(r.userName)) cur.people.push(r.userName);
+    for (const n of [r.userName, ...r.supporterNames]) if (!cur.people.includes(n)) cur.people.push(n);
+    if (!cur.floatedBy.includes(r.userName)) cur.floatedBy.push(r.userName);
+    for (const n of r.supporterNames) if (!cur.agreedBy.includes(n) && !cur.floatedBy.includes(n)) cur.agreedBy.push(n);
     cur.mentions += r.mentions;
     cur.must = cur.must || r.kind === "MUST";
     cur.pointerIds.push(r.id);

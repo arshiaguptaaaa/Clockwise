@@ -15,7 +15,7 @@ import { getClockwiseUserId } from "@/lib/clockwise";
 import { notify } from "@/lib/notifications";
 import { updateMyArrival } from "@/lib/traveller/arrival";
 import { resolveNewArrival, ceilToQuarter } from "@/lib/traveller/arrival-rules";
-import { buildRendezvousView, appliesTo, ARRIVAL_BUFFER_MIN, recomputeRendezvous } from "@/lib/rendezvous";
+import { buildRendezvousView, appliesTo, ARRIVAL_BUFFER_MIN, recomputeRendezvous, genericLocations } from "@/lib/rendezvous";
 import { checkFeasibility } from "@/lib/personal-state";
 import { moveCommitmentChecked, cancelCommitmentChecked } from "@/lib/plan/apply";
 import { resolveTripLocationText, isResolveFailure } from "@/lib/travel/resolve";
@@ -256,7 +256,8 @@ export async function informClash(clashId: string, actorId: string): Promise<{ o
   const c = await loadClash(clashId);
   if (!c) return { ok: false, reply: "That clash isn't there any more." };
   const traveller = first((await prisma.user.findUnique({ where: { id: c.travellerId }, select: { name: true } }))?.name ?? "A traveller");
-  const recipients = ids(c.affectedIds).filter((i) => i !== c.travellerId);
+  const recipients = ids(c.affectedIds).filter((i) => i !== c.travellerId && i !== actorId);
+  if (recipients.length === 0) return { ok: true, reply: `There's nobody else on ${c.commitmentName} to tell, so I've left it as it is. You could still propose a new time or cancel it.` };
   await notify({
     tripId: c.tripId,
     recipientIds: recipients,
@@ -270,7 +271,8 @@ export async function informClash(clashId: string, actorId: string): Promise<{ o
   const names = (await prisma.user.findMany({ where: { id: { in: recipients } }, select: { name: true } })).map((u) => first(u.name));
   await ev(c.tripId, "AFFECTED_INFORMED", actorId, c.travellerId, null, { commitment: c.commitmentName, informed: names, note: "Only the people the commitment involves. Nothing was moved or cancelled." }, ["notifications"]);
   const place = await prisma.commitment.findUnique({ where: { id: c.commitmentId }, select: { location: true } });
-  const external = place && place.location && !/^(to be decided|tbd)$/i.test(place.location) && place.location.toLowerCase() !== c.anchorLabel.toLowerCase();
+  const generic = await genericLocations(c.tripId);
+  const external = place && place.location && !generic.has(place.location.toLowerCase()) && place.location.toLowerCase() !== c.anchorLabel.toLowerCase();
   return { ok: true, reply: `Told ${names.length ? names.join(" and ") : "the people involved"} that ${traveller} may not make ${c.commitmentName}. Nothing has moved.${external ? ` ${place!.location} may also need to know. I can't contact them (no messaging connector is connected), so that part's on you.` : ""}` };
 }
 

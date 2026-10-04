@@ -124,7 +124,9 @@ export function parsePlanCommand(raw: string, ctx: PlanCtx): PlanCommand | null 
   const m2 = /^(?:let'?s|lets|can we|could we|shall we|should we|how about|what about)?\s*(?:do|have|make|move|keep|go for|push|shift)\s+(.+?)\s+(?:at|to|for|by)\s+(.+?)\s+instead$/i.exec(text);
   const m3 = /^(.+?)\s+(?:at|to|for)\s+(.+?)\s+instead$/i.exec(text);
   const m4 = /^(?:let'?s|lets)\s+(?:do|have|make)\s+(.+?)\s+(?:at|for)\s+(.+)$/i.exec(text);
-  const mv = m2 ?? m1 ?? m3 ?? m4;
+  // "dinner moved to 9?" (passive, usually said to the group)
+  const m5 = /^(.+?)\s+(?:moved|moving|pushed|shifted|rescheduled|changed)\s+(?:to|until|till|for)\s+(.+)$/i.exec(text);
+  const mv = m2 ?? m1 ?? m3 ?? m4 ?? m5;
   if (mv) {
     moveTarget = mv[1].replace(/\bfrom\s+\S+(?:\s*[ap]\.?m\.?)?\s*$/i, "").trim();
     moveWhen = mv[2];
