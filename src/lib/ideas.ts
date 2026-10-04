@@ -151,11 +151,15 @@ export async function buildIdea(params: { tripId: string; userId: string; when?:
     const fromPoint = placePoint ?? origin;
     const intent = intentFor(food.subject, "");
     const out = fromPoint
-      ? await searchForIntent({ tripId, userId, intent, groupDiet: dietG, anchorOverride: { anchor: { kind: "anywhere", label: place ? title(place.subject) : originLabel, point: fromPoint }, why: place ? title(place.subject) : originLabel } })
+      ? await searchForIntent({ tripId, userId, intent, groupDiet: dietG, atLocal: addMin(cursor, 15), anchorOverride: { anchor: { kind: "anywhere", label: place ? title(place.subject) : originLabel, point: fromPoint }, why: place ? title(place.subject) : originLabel } })
       : null;
     if (out && out.ok && out.places.length > 0) {
       chain.push(...out.chain);
-      const top = out.places[0];
+      // Never suggest a place its own opening hours say is shut at that time.
+      const top = out.places.find((x) => !x.hours?.startsWith("Closed")) ?? null;
+      if (!top) {
+        chain.push(...out.chain);
+      } else {
       let travel = top.walkMinutes ?? 12;
       if (placePoint && top.walkMinutes == null) {
         try {
@@ -170,6 +174,7 @@ export async function buildIdea(params: { tripId: string; userId: string; when?:
       const word = intent.keyword?.word ?? title(food.subject);
       steps.push({ kind: "food", name: top.name, at, location: top.formattedAddress ?? top.name, note: [top.why ?? top.matched, top.hours].filter(Boolean).join(" · ") || `${word}, from ${out.provider === "geoapify" ? "Geoapify" : out.provider}`, provider: top.provider, providerPlaceId: top.providerPlaceId, lat: top.latitude, lng: top.longitude });
       cursor = addMin(at, 50);
+      }
     }
   }
   if (steps.length === 0) return { ok: false, reason: "I couldn't find real places to build that around right now, so I haven't suggested anything." };
@@ -195,15 +200,15 @@ export async function buildIdea(params: { tripId: string; userId: string; when?:
   // WHY: only what was actually said and what the Plan actually holds.
   const said: string[] = [];
   const names = (i: Interest) => peopleList(i.people);
-  if (place) said.push(`${names(place)} ${place.people.length > 1 ? "both mentioned" : place.must ? "said they must see" : "mentioned"} ${title(place.subject)}`);
-  if (food) said.push(`${names(food)} ${food.people.length > 1 ? "both" : ""} ${food.kind === "LIKE" ? "like" : "wanted"} ${food.subject}`.replace(/\s+/g, " "));
+  if (place) said.push(place.must && place.people.length === 1 ? `${names(place)} said ${title(place.subject)} is a must` : `${names(place)} ${place.people.length > 1 ? "both mentioned" : "mentioned"} ${title(place.subject)}`);
+  if (food) said.push(`${names(food)} ${food.people.length > 1 ? "both " : ""}${food.kind === "LIKE" ? (food.people.length > 1 ? "like" : "likes") : food.people.length > 1 ? "want" : "wants"} ${food.subject}`);
   const dietRows = pointers.filter((p) => p.kind === "DIET");
   if (dietRows.length) said.push(`${peopleList([...new Set(dietRows.map((p) => p.userName))])} ${dietRows.length > 1 ? "are" : "is"} ${[...new Set(dietRows.map((p) => p.subject))].join("/")}`);
   const coffee = pointers.find((p) => /coffee|cafe|café/.test(p.subject) && p.kind !== "AVOID");
   if (coffee && !food?.subject.match(/coffee|cafe|café/)) said.push(`${coffee.userName} likes ${coffee.subject}`);
-  const dayName = humanMoment(`${day.date}T12:00`).split(" ")[0];
+  const dayName = new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" });
   const windowLabel = `${dayName}${part === "day" ? "" : ` ${part}`}`;
-  const why = `${said.join("; ")}. ${title(windowLabel)} is open${slot.nextAfter ? ` until ${slot.nextAfter.name}` : ""}.`.replace(/^\s*;\s*/, "");
+  const why = `${said.join("; ")}. ${windowLabel} is open${slot.nextAfter ? ` until ${slot.nextAfter.name}` : ""}.`.replace(/^\s*;\s*/, "");
 
   const ideaTitle = steps.filter((s) => s.kind !== "return").map((s) => s.name).join(" → ");
   const row = await prisma.tripSuggestion.create({

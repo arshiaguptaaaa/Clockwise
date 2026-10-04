@@ -124,6 +124,8 @@ ok("a request that never says Clockwise is still recognised, banter is not", () 
   assert.equal(isAgentRequest("show us coffee near the hotel"), true);
   assert.equal(isAgentRequest("where should we eat tonight"), true);
   assert.equal(isAgentRequest("find me a boyfriend lol"), true); // narrow, not perfect: the model then declines it
+  assert.equal(isAgentRequest("Now show coffee around our stay"), true);
+  assert.equal(isAgentRequest("ok so find dosa near Indiranagar"), true);
   assert.equal(isAgentRequest("HAHAHA Arshia 😭"), false);
   assert.equal(isAgentRequest("I'm vegetarian btw"), false);
   assert.equal(isAgentRequest("did you find the charger"), false);

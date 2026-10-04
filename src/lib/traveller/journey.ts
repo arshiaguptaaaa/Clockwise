@@ -120,7 +120,11 @@ export async function confirmJourney(journeyId: string, userId: string, edits?: 
 
   // Personal availability limit (private): leave-for-departure time. Only now.
   const lead = LEAD_MINUTES[saved.mode];
-  if (lead && saved.departLocal) {
+  // Only a journey that LEAVES the trip (a return leg) limits what the traveller can attend. A journey that brings
+  // them TO the trip says nothing about dinner at the destination, and used to wrongly block every later time that day.
+  const tripPlaces = (await prisma.destination.findMany({ where: { tripId: saved.tripId }, select: { name: true, city: true } })).flatMap((d) => [d.name, d.city ?? ""]).map((x) => x.toLowerCase().split(",")[0].trim()).filter(Boolean);
+  const leavesTheTrip = Boolean(saved.originName) && tripPlaces.some((p) => saved.originName!.toLowerCase().includes(p) || p.includes(saved.originName!.toLowerCase().split(",")[0].trim()));
+  if (lead && saved.departLocal && leavesTheTrip) {
     const latest = latestArrivalFor(saved.departLocal, lead);
     await recordPersonalConstraint({
       tripId: saved.tripId,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/session";
-import { getRoute, isGeoapifyConfigured, resolveLocationText, searchStays } from "@/lib/travel/geoapify-provider";
+import { getRoute, isGeoapifyConfigured, resolveLocationText, searchStays, searchNearbyRaw } from "@/lib/travel/geoapify-provider";
 
 // Signed-in only. Exercises the live Geoapify calls the product depends on and
 // reports each step's outcome (never the key): geocoding, stay search, routing.
@@ -22,6 +22,30 @@ export async function GET(request: NextRequest) {
       out[name] = { ok: false, error: err instanceof Error ? err.message : "unknown" };
     }
   };
+  // ?places=dosa&bias=12.9716,77.5946 : how each way of asking the provider for a dish performs (names only).
+  const dish = q.get("places");
+  if (dish && near) {
+    const FOOD = "catering.restaurant,catering.fast_food,catering.food_court,catering.cafe";
+    const variants: [string, () => Promise<{ name: string; cuisine?: string | null }[]>][] = [
+      ["broad_8km_60", () => searchNearbyRaw(FOOD, near, 8000, 60)],
+      ["broad_15km_100", () => searchNearbyRaw(FOOD, near, 15000, 100)],
+      ["name_param", () => searchNearbyRaw(FOOD, near, 15000, 40, undefined, dish)],
+      ["indian_subcats", () => searchNearbyRaw("catering.restaurant.indian,catering.restaurant.regional,catering.fast_food", near, 12000, 100)],
+      ["name_param_veg", () => searchNearbyRaw(FOOD, near, 15000, 40, "vegetarian", dish)],
+    ];
+    const rows: Record<string, unknown> = {};
+    for (const [label, fn] of variants) {
+      try {
+        const r = await fn();
+        const re = new RegExp(`\\b(${dish}|dosai|udupi|darshini|south[ _]indian)\\b`, "i");
+        rows[label] = { ok: true, count: r.length, withCuisine: r.filter((x) => x.cuisine).length, matching: r.filter((x) => re.test(x.name) || re.test(x.cuisine ?? "")).slice(0, 8).map((x) => `${x.name} [${x.cuisine ?? ""}]`), first: r.slice(0, 5).map((x) => `${x.name} [${x.cuisine ?? ""}]`) };
+      } catch (err) {
+        rows[label] = { ok: false, error: err instanceof Error ? err.message : "unknown" };
+      }
+    }
+    out.places = rows;
+    return NextResponse.json(out);
+  }
   let from: { lat: number; lng: number } | null = null;
   let to: { lat: number; lng: number } | null = null;
   await step("geocodeFrom", async () => {

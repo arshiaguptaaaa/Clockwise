@@ -133,15 +133,19 @@ function scoreKeyword(p: PlaceResult, kw: Keyword): { score: number; why: string
   const cuisine = lc(p.cuisine ?? "");
   const cats = lc(p.categories.join(" "));
   const syn = kw.synonyms.map(lc);
+  // Whole words only: "Mathsyadarshini" (a fish canteen) is not a "darshini".
+  const word = (hay: string, s: string) => new RegExp(`(^|[^a-z])${s.replace(/[ _]/g, "[ _]")}($|[^a-z])`, "i").test(hay);
   let score = 0;
   let why: string | null = null;
-  if (syn.some((s) => cuisine.includes(s.replace(/ /g, "_")) || cuisine.includes(s))) {
+  const tag = syn.find((s) => word(cuisine, s));
+  if (tag) {
     score += 4;
-    why = `provider tags it ${(p.cuisine ?? "").split(";")[0].replace(/_/g, " ")}`;
+    why = `provider tags it ${(p.cuisine ?? "").split(";").find((c) => word(lc(c), tag)) ?? tag}`.replace(/_/g, " ");
   }
-  if (syn.some((s) => name.includes(s))) {
+  const named = syn.find((s) => word(name, s));
+  if (named) {
     score += 3;
-    why = why ?? `name says ${syn.find((s) => name.includes(s))}`;
+    why = why ?? `name says ${named}`;
   }
   if (score === 0 && /indian/.test(cats) && /(dosa|idli|south|biryani|thali)/.test(lc(kw.word))) score += 0.5;
   return { score, why };
@@ -170,7 +174,7 @@ function toCard(p: PlaceResult, walk: number | null, category: string, now: Date
 
 const FOOD_BASE = "catering.restaurant,catering.fast_food,catering.food_court,catering.cafe";
 
-export async function searchForIntent(params: { tripId: string; userId: string; intent: PlaceIntent; me?: (LatLng & { label?: string }) | null; groupDiet?: { diet: "vegetarian" | "vegan"; names: string[] } | null; anchorOverride?: { anchor: AroundAnchor; why: string } | null }): Promise<PlaceSearchOutcome> {
+export async function searchForIntent(params: { tripId: string; userId: string; intent: PlaceIntent; me?: (LatLng & { label?: string }) | null; groupDiet?: { diet: "vegetarian" | "vegan"; names: string[] } | null; anchorOverride?: { anchor: AroundAnchor; why: string } | null; atLocal?: string | null }): Promise<PlaceSearchOutcome> {
   const { tripId, userId, intent } = params;
   const chain: ChainStep[] = [];
   if (!isGeoapifyConfigured()) return { ok: false, error: "Place search isn't connected in this environment.", chain: [{ step: "places", provider: "geoapify", status: "not_configured" }] };
@@ -194,12 +198,18 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
     if (intent.keyword) {
       const kw = intent.keyword;
       const cats = kw.category === "cafe" ? "catering.cafe,catering.fast_food,catering.restaurant" : FOOD_BASE;
-      const [all, vegOnly] = await Promise.all([
-        searchNearbyRaw(cats, anchor.point, 8000, 60),
-        diet ? searchNearbyRaw(cats, anchor.point, 8000, 40, diet).catch(() => [] as PlaceResult[]) : Promise.resolve([] as PlaceResult[]),
+      // Several honest ways of asking the SAME provider, merged: the nearest food places, the provider's Indian /
+      // regional restaurants (where South Indian lives), and a name search for the dish. Each can fail alone.
+      const indianish = kw.synonyms.some((s) => /south|dosa|indian|udupi|thali|biryani|tiffin/.test(s));
+      const [all, indian, byName, vegOnly] = await Promise.all([
+        searchNearbyRaw(cats, anchor.point, 10000, 80),
+        indianish ? searchNearbyRaw("catering.restaurant.indian,catering.restaurant.regional,catering.fast_food", anchor.point, 12000, 100).catch(() => [] as PlaceResult[]) : Promise.resolve([] as PlaceResult[]),
+        searchNearbyRaw(cats, anchor.point, 15000, 40, undefined, kw.word.toLowerCase()).catch(() => [] as PlaceResult[]),
+        diet ? searchNearbyRaw(cats, anchor.point, 10000, 60, diet).catch(() => [] as PlaceResult[]) : Promise.resolve([] as PlaceResult[]),
       ]);
       const vegIds = new Set(vegOnly.map((v) => v.providerId));
-      const pool = [...all, ...vegOnly.filter((v) => !all.some((a) => a.providerId === v.providerId))];
+      const seenIds = new Set<string>();
+      const pool = [...all, ...indian, ...byName, ...vegOnly].filter((x) => (seenIds.has(x.providerId) ? false : (seenIds.add(x.providerId), true)));
       raw = pool;
       ranked = pool
         .filter((p) => p.name !== "Unnamed place")
@@ -240,8 +250,9 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
   // Walking time from the anchor, by the provider's own route; nothing is converted from straight-line distance.
   const aroundPlaces: AroundPlace[] = ranked.map((r) => toAroundPlace(r.p as never));
   const walked = await withWalking(anchor.point, aroundPlaces);
+  // Open or closed is judged at the time the place would be VISITED when the caller knows it, else right now.
   const nowLocal = localNow();
-  const now = new Date(`${nowLocal.date}T${nowLocal.time}:00Z`);
+  const now = new Date(params.atLocal ? `${params.atLocal}:00Z` : `${nowLocal.date}T${nowLocal.time}:00Z`);
   const places = ranked.map((r, i) => {
     const w = walked[i]?.walkMinutes ?? null;
     const card = toCard(r.p, w != null && w <= 30 ? w : null, category, now, { why: r.score >= 3 ? r.why : null }, diet ? r.veg : null);

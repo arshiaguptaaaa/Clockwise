@@ -5,6 +5,8 @@
 //   REQUEST   "find me dosa places in Bengaluru" (no name)       -> an unmistakable ask of the agent -> answers
 //   PASSIVE   "I'm vegetarian btw", "my flight is delayed, 9:15" -> quietly notices state, may act on it
 //   HUMAN     "HAHAHA Arshia 😭", "@Ridhima what do you think?"   -> stays out of it
+import { parsePlaceIntent } from "@/lib/travel/place-intent";
+
 export type Person = { userId: string; name: string };
 export type Mentions = { clockwise: boolean; all: boolean; userIds: string[]; names: string[] };
 
@@ -65,9 +67,13 @@ export function mentionOptions(query: string, people: Person[], selfId?: string 
 // facts ("find me…", "show us…", "where should we eat"). Deliberately narrow: ordinary talk between travellers
 // must never be taken for a request.
 export function isAgentRequest(text: string): boolean {
-  const t = text.trim().replace(/^(@\w+\s*)+/, "").trim();
+  const t = text.trim().replace(/^(@\w+\s*)+/, "").replace(/^((?:now|ok|okay|alright|also|and|so|then|next|hey|hi|btw|actually|cool|great)[,!.]?\s+)+/i, "").trim();
   if (/^(please\s+|pls\s+)?(find|show|search|suggest|recommend|look up|look for|get)\s+(me|us)\b/i.test(t)) return true;
   if (/^(please\s+|pls\s+)?(find|show|search|suggest|recommend)\s+(good|great|best|nice|some|any|the best|top)\b/i.test(t)) return true;
+  if (/^(please\s+|pls\s+)?(find|show|search|suggest|recommend|get)\b/i.test(t)) {
+    const i = parsePlaceIntent(t);
+    if (i.category || i.keyword) return true;
+  }
   if (/^(where|what)\s+(should|can|do|shall)\s+(we|i)\s+(eat|go|do|see|visit|stay|grab|get)\b/i.test(t)) return true;
   if (/^what('?s| is| are)\s+(still\s+)?(undecided|left to decide|open|pending)\b/i.test(t)) return true;
   if (/^(what('?s| is)|anything)\s+(good\s+)?(near|around|close to)\b/i.test(t)) return true;

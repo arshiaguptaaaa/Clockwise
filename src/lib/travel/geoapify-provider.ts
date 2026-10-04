@@ -265,9 +265,10 @@ export const BROAD_CATEGORIES: Record<string, string> = {
   museum: "entertainment.museum,entertainment.culture,tourism.sights",
 };
 
-export async function searchNearbyRaw(categories: string, near: LatLng, radiusMeters: number, limit = 15, diet?: "vegetarian" | "vegan" | "halal"): Promise<PlaceResult[]> {
+export async function searchNearbyRaw(categories: string, near: LatLng, radiusMeters: number, limit = 15, diet?: "vegetarian" | "vegan" | "halal", name?: string): Promise<PlaceResult[]> {
   const params = new URLSearchParams({
     categories,
+    ...(name ? { name } : {}),
     ...(diet ? { conditions: diet } : {}),
     filter: `circle:${near.lng},${near.lat},${radiusMeters}`,
     bias: `proximity:${near.lng},${near.lat}`,

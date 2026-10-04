@@ -223,7 +223,9 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
     for (const call of result.toolCalls) {
       executedTools.push({ name: call.name, input: call.input });
       const toolStart = Date.now();
-      const toolResult = await executeTool(call.name, call.input, ctx);
+      // A model can name a tool it was not offered. Quiet mode offers only capture tools, so anything else is refused
+      // here rather than trusted: nothing runs that the mode did not allow.
+      const toolResult = tools.some((t) => t.name === call.name) ? await executeTool(call.name, call.input, ctx) : { output: `The tool ${call.name} is not available right now. Do nothing further.` };
       toolMs.push(Date.now() - toolStart);
       if (toolResult.finalReply) finals.push(toolResult.finalReply);
       messages = [

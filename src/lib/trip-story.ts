@@ -20,8 +20,10 @@ export async function tripStory(tripId: string): Promise<string | null> {
   const bits: string[] = [];
 
   if (places.length) {
-    const named = places.slice(0, 3).map((p) => title(p.subject));
-    bits.push(`${list(named)} ${named.length > 1 ? "have" : "has"} come up${places[0].must ? `, and ${places[0].people[0]} says ${title(places[0].subject)} is a must` : ""}`);
+    const musts = places.filter((p) => p.must).slice(0, 2);
+    const rest = places.filter((p) => !p.must).slice(0, 3).map((p) => title(p.subject));
+    if (musts.length) bits.push(list(musts.map((p) => `${p.people[0]} says ${title(p.subject)} is a must`)));
+    if (rest.length) bits.push(`${list(rest)} ${rest.length > 1 ? "have" : "has"} come up`);
   }
   // per person, only what they themselves said
   const byPerson = new Map<string, string[]>();
