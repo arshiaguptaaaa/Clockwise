@@ -16,7 +16,7 @@ against that database. **Pushing this branch as it stands would migrate the prod
    optionally `DELHIVERY_MAPS_TOKEN`. Leave `RESEND_API_KEY`, `UBER_*`, `GNANI_*`, VAPID keys unset so nothing external fires.
 4. Deployment Protection on previews will ask for a Vercel login; use a protection-bypass token for automated checks.
 
-## 1. What the migration does (both additive, no data is rewritten)
+## 1. What the migrations do (all four additive, no data is rewritten)
 
 ```sql
 -- 20261005190000_traveller_direct_route
@@ -24,6 +24,9 @@ ALTER TABLE "TravellerJourney" ADD COLUMN "directToCommitmentId" TEXT, ADD COLUM
   ADD COLUMN "directRouteMeters" INTEGER, ADD COLUMN "directProvider" TEXT, ADD COLUMN "notOutBeforeLocal" TEXT;
 -- 20261005200000_proposal_conditions
 CREATE TABLE "ProposalCondition" (...);  -- new table, FK to Proposal ON DELETE CASCADE
+-- 20261005210000_route_fallback_label
+ALTER TABLE "TravellerJourney" ADD COLUMN "routeFellBackFrom" TEXT; ALTER TABLE "TripClash" ADD COLUMN "routeFellBackFrom" TEXT;
+ALTER TABLE "PaymentCollection" ADD COLUMN "payeeUserId" TEXT;
 ```
 
 Rehearsal (local Postgres 17): database built from the migrations that are live today, seeded, a marker row added, then the two new
@@ -55,3 +58,10 @@ Old code ignores the new columns and table, so a rollback needs no schema change
 * No real Pine charge has been run, and none will be without your explicit authorisation.
 * The Pine webhook secret (`PINELABS_WEBHOOK_SECRET`) is not set on production; the webhook refuses everything and payment status is
   learned from the return page and the status API. Set it when Pine Labs issues one.
+
+## 5. Added for the final video (same branch, same deploy)
+
+* Speech-to-text writes "eight fifteen tonight" as "08:15 tonight"; production currently reads that as 8:15 AM and asks "morning or evening?". Fixed (an evening cue means evening).
+* Delhivery cool-down is recorded as a NOT SENT evidence row (never as a fake 429); Geoapify's route is its own evidence row labelled FALLBACK; Plan and clash card say "Geoapify · FALLBACK (Delhivery 429 · rate-limited)".
+* "Ridhima owes me ₹1,000" is one debt (Ridhima to Arshia), not a split. "@Clockwise pay Arshia ₹1,000" asks the payer to authorise, creates one Pine Labs UAT link, and says LINK CREATED · NOT PAID until Pine Labs returns PROCESSED; only then is a settlement recorded.
+* The organiser's trace chain reads its first step ("Voice -> words") from the real Gnani rail call.
