@@ -27,7 +27,10 @@ export type DelhiveryOutcome =
   | { ok: true; httpStatus: number; latencyMs: number; data: unknown; evidenceId: string | null }
   | { ok: false; blocked: "DELHIVERY_CREDENTIALS_REQUIRED" | "DELHIVERY_TOKEN_REJECTED" | null; httpStatus: number | null; latencyMs: number; error: string; data?: unknown; evidenceId: string | null };
 
-export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, decision?: string): Promise<DelhiveryOutcome> {
+export type EvidenceCtx = { tripId?: string | null; userId?: string | null; decision?: string };
+
+export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string): Promise<DelhiveryOutcome> {
+  const evCtx: EvidenceCtx = typeof ctx === "string" ? { decision: ctx } : (ctx ?? {});
   const token = process.env.DELHIVERY_MAPS_TOKEN?.trim();
   if (!token) return { ok: false, blocked: "DELHIVERY_CREDENTIALS_REQUIRED", httpStatus: null, latencyMs: 0, error: "DELHIVERY_MAPS_TOKEN is not set", evidenceId: null };
   const url = new URL(`${delhiveryBase()}${path}`);
@@ -64,7 +67,7 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
     response: compactForEvidence(data ?? { error }),
     httpStatus: status,
     durationMs: latencyMs,
-    context: decision ? { decision } : undefined,
+    context: evCtx,
   });
   if (status != null && status >= 200 && status < 300) return { ok: true, httpStatus: status, latencyMs, data, evidenceId };
   return { ok: false, blocked: status === 401 ? "DELHIVERY_TOKEN_REJECTED" : null, httpStatus: status, latencyMs, error: error || "failed", data: data ?? undefined, evidenceId };
@@ -77,7 +80,7 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const pick = (o: unknown, path: string[]): unknown => path.reduce<unknown>((a, k) => (a && typeof a === "object" ? (a as Record<string, unknown>)[k] : undefined), o);
 
-export async function delhiveryGeocode(address: string, decision?: string) {
+export async function delhiveryGeocode(address: string, decision?: EvidenceCtx | string) {
   const r = await delhiveryCall("maps.geocode", "POST", "/geocode", { address, req_id: `clockwise-${Date.now()}` }, decision);
   if (!r.ok) return { ...r, point: null as LatLng | null };
   const lat = num(pick(r.data, ["lat"]));
@@ -99,7 +102,7 @@ export function extractRouteSummary(data: unknown): { distanceMeters: number; du
   return null;
 }
 
-export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "auto" | "motorcycle" | "pedestrian"; trafficAware?: boolean; departureTime?: string | null; decision?: string } = {}) {
+export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "auto" | "motorcycle" | "pedestrian"; trafficAware?: boolean; departureTime?: string | null; decision?: string; tripId?: string | null; userId?: string | null } = {}) {
   const body: Record<string, unknown> = {
     geo_coords: [
       [from.lat, from.lng],
@@ -110,13 +113,13 @@ export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "a
     ...(opts.trafficAware && opts.departureTime ? { departure_time: opts.departureTime } : {}),
     output_format: { encode_polyline: true, maneuvers: false },
   };
-  const r = await delhiveryCall("maps.route", "POST", "/route", body, opts.decision);
+  const r = await delhiveryCall("maps.route", "POST", "/route", body, { decision: opts.decision, tripId: opts.tripId, userId: opts.userId });
   if (!r.ok) return { ...r, route: null as DelhiveryRoute | null };
   const sum = extractRouteSummary(r.data);
   return { ...r, route: sum ? ({ ...sum, trafficAware: Boolean(opts.trafficAware), departureTime: opts.trafficAware ? (opts.departureTime ?? null) : null, evidenceId: r.evidenceId, latencyMs: r.latencyMs } as DelhiveryRoute) : null };
 }
 
-export async function delhiveryMatrix(sources: LatLng[], targets: LatLng[], mode: "auto" | "motorcycle" | "pedestrian" = "auto", decision?: string) {
+export async function delhiveryMatrix(sources: LatLng[], targets: LatLng[], mode: "auto" | "motorcycle" | "pedestrian" = "auto", decision?: EvidenceCtx | string) {
   return delhiveryCall("maps.matrix", "POST", "/matrix", { sources: sources.map((p) => [p.lat, p.lng]), targets: targets.map((p) => [p.lat, p.lng]), travel_mode: mode }, decision);
 }
 

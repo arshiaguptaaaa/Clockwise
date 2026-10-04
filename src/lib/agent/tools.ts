@@ -1787,7 +1787,7 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
   try {
     if (mode === "drive") {
       // India drives are measured by Delhivery Maps when available (stated on the card); elsewhere Geoapify.
-      const d = await driveRoute(from.point, to.point, { decision: "Route question asked in chat" });
+      const d = await driveRoute(from.point, to.point, { decision: "Route question asked in chat", tripId: ctx.trip.id, userId: ctx.actingUserId });
       route = { mode, distanceMeters: d.distanceMeters, durationSeconds: d.durationSeconds, provider: d.provider, retrievedAt: d.retrievedAt };
       if (d.provider === "delhivery") snapNotes.push(d.basis);
     } else {

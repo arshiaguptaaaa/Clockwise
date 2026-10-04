@@ -19,11 +19,11 @@ export type DriveRoute = {
   fellBackFrom?: string;
 };
 
-export async function driveRoute(from: LatLng, to: LatLng, opts: { departLocal?: string | null; decision?: string } = {}): Promise<DriveRoute> {
+export async function driveRoute(from: LatLng, to: LatLng, opts: { departLocal?: string | null; decision?: string; tripId?: string | null; userId?: string | null } = {}): Promise<DriveRoute> {
   let fellBackFrom: string | undefined;
   if (isDelhiveryConfigured() && inIndia(from) && inIndia(to)) {
     const useTraffic = Boolean(opts.departLocal);
-    const r = await delhiveryRoute(from, to, { mode: "auto", trafficAware: useTraffic, departureTime: opts.departLocal ?? null, decision: opts.decision });
+    const r = await delhiveryRoute(from, to, { mode: "auto", trafficAware: useTraffic, departureTime: opts.departLocal ?? null, decision: opts.decision, tripId: opts.tripId, userId: opts.userId });
     if (r.ok && r.route) {
       return {
         provider: "delhivery",

@@ -34,7 +34,7 @@ export async function recomputeRendezvous(tripId: string) {
       try {
         // The traveller leaves the airport after the allowance for bags and exits: that is the departure time to price.
         const departLocal = j.arriveLocal ? toLocal(toMs(j.arriveLocal) + ARRIVAL_BUFFER_MIN * 60_000) : null;
-        const r = await driveRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, { departLocal, decision: `Arrival-to-stay time for ${j.userId}: feeds readiness, rendezvous and commitment feasibility` });
+        const r = await driveRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, { departLocal, tripId, userId: j.userId, decision: "Arrival point to confirmed stay: feeds readiness, rendezvous and commitment feasibility" });
         providersUsed.add(r.provider);
         await prisma.travellerJourney.update({
           where: { id: j.id },
