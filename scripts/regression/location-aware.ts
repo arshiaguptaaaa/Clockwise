@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { resolveAnchor, toAroundPlace, whyPicked } from "../../src/lib/travel/around";
 import { groupOverlaps } from "../../src/lib/travel/saved-overlap";
 import { spareMinutes, rainInWindow, addMinutes, STAY_MIN, BUFFER_MIN } from "../../src/lib/travel/window";
+import { pickPassengerAirport } from "../../src/lib/travel/airport-pick";
 import { hoursAt, hoursCoverVisit } from "../../src/lib/travel/hours";
 import { orderCategories } from "../../src/lib/travel/around";
 import { AROUND_CATEGORIES, countWord } from "../../src/lib/travel/around-categories";
@@ -92,6 +93,13 @@ async function main() {
     const z = (s: string) => new Date(`${s}:00Z`);
     assert.equal(hoursCoverVisit("Mo-Su 09:00-12:00", z("2026-10-05T11:30"), 45).state, "closed");
     assert.equal(hoursCoverVisit("Mo-Su 09:00-12:00", z("2026-10-05T11:00"), 45).state, "open");
+  });
+  await ok("airport choice: the passenger airport beats the nearer old/private/heliport POIs", () => {
+    const c = (name: string, distanceMeters: number, categories: string[] = ["airport"], iata: string | null = null) => ({ name, placeId: name, lat: 0, lng: 0, categories, iata, icao: null, distanceMeters });
+    const pick = pickPassengerAirport([c("HAL Airport", 8400), c("Hospital Heliport", 3000, ["airport.heliport"]), c("Kempegowda International Airport", 31000, ["airport", "airport.international"], "BLR")]);
+    assert.equal(pick?.name, "Kempegowda International Airport");
+    assert.equal(pickPassengerAirport([c("Vienna International Airport", 18000, ["airport.international"])])?.name, "Vienna International Airport");
+    assert.equal(pickPassengerAirport([c("Some Heliport", 1000)]), null);
   });
   console.log(`${n} location-aware checks passed`);
 }

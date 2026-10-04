@@ -5,6 +5,7 @@
 // result.
 import type { LatLng, PlaceResult, RouteResult, TravelMode } from "./types";
 import type { CanonicalPlace } from "@/lib/location/types";
+import { pickPassengerAirport, type AirportCandidate } from "./airport-pick";
 
 const GEOCODE_URL = "https://api.geoapify.com/v1/geocode/search";
 const PLACES_URL = "https://api.geoapify.com/v2/places";
@@ -75,32 +76,50 @@ export async function resolveLocationText(text: string, near?: LatLng): Promise<
   return geocodeText(text, near);
 }
 
-// The provider's airport POI within 40 km of a point. Never falls back to the
-// point itself or to a city-centre geocode: no airport found means null.
-export async function findAirportNear(centre: LatLng, anchor?: CanonicalPlace | null): Promise<CanonicalPlace | null> {
+// Every airport POI the provider returns within 60 km of a point, with the provider's own
+// signals (categories, IATA/ICAO when OpenStreetMap carries them).
+export async function airportCandidates(centre: LatLng): Promise<AirportCandidate[]> {
   const params = new URLSearchParams({
     categories: "airport",
-    filter: `circle:${centre.lng},${centre.lat},40000`,
+    filter: `circle:${centre.lng},${centre.lat},60000`,
     bias: `proximity:${centre.lng},${centre.lat}`,
-    limit: "5",
+    limit: "20",
     apiKey: requireApiKey(),
   });
   const res = await fetch(`${PLACES_URL}?${params}`);
-  if (!res.ok) return null;
-  const data: { features?: GeoapifyPlaceFeature[] } = await res.json();
-  const best = (data.features ?? []).find((f) => /airport|airfield/i.test(f.properties.name ?? ""));
+  if (!res.ok) return [];
+  const data: { features?: { properties: { name?: string; place_id: string; categories?: string[]; distance?: number; datasource?: { raw?: Record<string, string> } }; geometry: { coordinates: [number, number] } }[] } = await res.json();
+  return (data.features ?? []).map((f) => {
+    const raw = f.properties.datasource?.raw ?? {};
+    return {
+      name: f.properties.name ?? "",
+      placeId: f.properties.place_id,
+      lat: f.geometry.coordinates[1],
+      lng: f.geometry.coordinates[0],
+      categories: f.properties.categories ?? [],
+      iata: raw.iata ?? null,
+      icao: raw.icao ?? null,
+      distanceMeters: f.properties.distance ?? null,
+    };
+  });
+}
+
+// The provider's passenger airport near a point. Never falls back to the point itself or
+// to a city-centre geocode: no airport found means null.
+export async function findAirportNear(centre: LatLng, anchor?: CanonicalPlace | null): Promise<CanonicalPlace | null> {
+  const best = pickPassengerAirport(await airportCandidates(centre));
   if (!best) return null;
   return {
-    displayName: best.properties.formatted ?? best.properties.name ?? "Airport",
-    name: best.properties.name ?? "Airport",
+    displayName: best.name,
+    name: best.name,
     city: anchor?.city ?? null,
     region: anchor?.region ?? null,
     country: anchor?.country ?? null,
     countryCode: anchor?.countryCode ?? null,
-    latitude: best.geometry.coordinates[1],
-    longitude: best.geometry.coordinates[0],
+    latitude: best.lat,
+    longitude: best.lng,
     provider: "geoapify",
-    providerPlaceId: best.properties.place_id,
+    providerPlaceId: best.placeId,
   };
 }
 
