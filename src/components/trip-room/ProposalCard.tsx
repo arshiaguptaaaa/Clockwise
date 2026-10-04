@@ -36,6 +36,7 @@ export type ProposalCardData = {
   headline: string;
   kind: "reschedule" | "place" | "stay" | "ride" | "payment" | "other";
   change: { from: string; to: string } | null;
+  because: string | null;
   retry: boolean;
 };
 
@@ -52,11 +53,11 @@ function State({ decision }: { decision: ProposalCardApproval["decision"] }) {
 function People({ approvals }: { approvals: ProposalCardApproval[] }) {
   if (approvals.length === 0) return null;
   return (
-    <ul className="mt-3.5 flex flex-wrap gap-x-5 gap-y-2">
+    <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2.5">
       {approvals.map((a) => (
-        <li key={a.userId} className="flex items-center gap-1.5 text-[13px]">
-          <PersonFace userId={a.userId} name={a.name} className={`size-6 ${a.decision === "PENDING" ? "opacity-50 grayscale" : ""}`} />
-          <span className="font-medium text-foreground">{firstName(a.name)}</span>
+        <li key={`${a.userId}-${a.decision}`} className="vote-in flex items-center gap-2 text-[13px]">
+          <PersonFace userId={a.userId} name={a.name} className={`size-7 transition-[filter,opacity] duration-300 ${a.decision === "PENDING" ? "opacity-50 grayscale" : ""}`} />
+          <span className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-foreground">{firstName(a.name)}</span>
           <State decision={a.decision} />
         </li>
       ))}
@@ -118,12 +119,12 @@ export function ProposalCard({
   // The moment everyone is in and the Plan has genuinely changed.
   if (done && proposal.change) {
     return (
-      <div id={`proposal-${proposal.id}`} className="tile-in w-full max-w-md border-l-[3px] border-success bg-success-tint/50 py-4 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
-        <p className="eyebrow !text-success">◷ Everyone&apos;s in.</p>
-        <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{proposal.headline}</p>
-        <p className="mt-1 flex flex-wrap items-baseline gap-x-3 font-display text-[34px] leading-[1.02] tracking-[-0.02em]">
-          <span className="text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
-          <span>{proposal.change.to} <span className="text-success">✓</span></span>
+      <div id={`proposal-${proposal.id}`} className="settle w-full max-w-md border-l-[3px] border-success py-5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
+        <p className="eyebrow !text-success"><span className="cw-mark !text-success">◷</span> Everyone&apos;s aligned ✓</p>
+        <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{proposal.headline}</p>
+        <p className="t-number mt-1 flex flex-wrap items-baseline gap-x-3 text-[44px]">
+          <span className="text-[26px] text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
+          <span>{proposal.change.to}</span>
         </p>
         <p className="mt-2 text-[13px] text-muted-foreground">Plan updated.</p>
         <People approvals={proposal.approvals} />
@@ -133,25 +134,29 @@ export function ProposalCard({
   }
 
   return (
-    <div id={`proposal-${proposal.id}`} className="w-full max-w-md border-l-[3px] border-accent bg-surface-muted/60 py-4 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
-      <div className="flex flex-wrap items-center gap-x-2">
-        <span className="eyebrow !text-accent-strong">◷ Clockwise</span>
-        <span className="eyebrow">· {proposal.retry ? "One more try" : done ? "Confirmed" : agreed ? "Everyone's in" : "Proposal"}</span>
-      </div>
+    <div id={`proposal-${proposal.id}`} key={status} className="vote-in w-full max-w-md border-l-[3px] border-accent bg-surface-muted/70 py-5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
+      <p className="eyebrow !text-accent-strong">
+        <span className="cw-mark">◷</span>{" "}
+        {proposal.retry ? "One more try." : agreed ? "Everyone's aligned" : proposal.change ? "Something changed." : "A decision"}
+      </p>
 
       {proposal.change ? (
         <>
-          <p className="mt-2.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground">Move {proposal.headline}?</p>
-          <p className="mt-1 flex flex-wrap items-baseline gap-x-3 font-display text-[32px] leading-[1.02] tracking-[-0.02em]">
-            <span className="text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
-            <span className="text-muted-foreground">→</span>
+          {proposal.because && <p className="mt-2 font-display text-[19px] leading-snug tracking-[-0.01em]" data-because>{proposal.because}. {proposal.headline} is at {proposal.change.from}.</p>}
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground">Move {proposal.headline}?</p>
+          <p className="t-number mt-1.5 flex flex-wrap items-baseline gap-x-3 text-[46px]" data-change>
+            <span className="text-[26px] text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
+            <span className="text-[24px] text-muted-foreground">→</span>
             <span>{proposal.change.to}{agreed || done ? <span className="text-success"> ✓</span> : <span className="text-muted-foreground"> ?</span>}</span>
           </p>
+          {!proposal.because && <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>}
         </>
       ) : (
-        <p className="mt-2.5 font-display text-[24px] leading-[1.1] tracking-[-0.01em] text-foreground">{proposal.title}</p>
+        <>
+          <p className="mt-2.5 font-display text-[26px] leading-[1.08] tracking-[-0.015em] text-foreground">{proposal.title}</p>
+          <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>
+        </>
       )}
-      <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>
 
       {proposal.payload.split && (
         <div className="mt-3" data-split>
@@ -191,9 +196,9 @@ export function ProposalCard({
       {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
 
       {canVote && open && myApproval?.decision === "PENDING" && (
-        <div className="mt-3.5 flex gap-2">
-          <button type="button" disabled={isPending} onClick={() => vote("APPROVED")} className="cursor-pointer rounded-full bg-accent px-6 py-2 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50">ACCEPT</button>
-          <button type="button" disabled={isPending} onClick={() => vote("REJECTED")} className="cursor-pointer rounded-full border border-foreground/25 px-6 py-2 text-[12px] font-semibold tracking-[0.12em] hover:border-foreground disabled:opacity-50">CAN&apos;T</button>
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          <button type="button" disabled={isPending} onClick={() => vote("APPROVED")} className="btn btn-primary">Accept</button>
+          <button type="button" disabled={isPending} onClick={() => vote("REJECTED")} className="btn btn-ghost">Can&apos;t</button>
         </div>
       )}
       {canVote && open && myApproval?.decision === "APPROVED" && (

@@ -1,24 +1,4 @@
-import { SubTabs } from "@/components/SubTabs";
-
-export default async function PlanLayout({
-  children,
-  params,
-}: {
-  children: React.ReactNode;
-  params: Promise<{ tripId: string }>;
-}) {
-  const { tripId } = await params;
-  const base = `/trips/${tripId}/plan`;
-  const tabs = [
-    { href: base, label: "Overview" },
-    { href: `${base}/itinerary`, label: "Itinerary" },
-    { href: `${base}/travellers`, label: "Travellers" },
-  ];
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <SubTabs tabs={tabs} />
-      {children}
-    </div>
-  );
+// The Plan is one surface: a timeline. (Travellers and the route are linked from it.)
+export default function PlanLayout({ children }: { children: React.ReactNode }) {
+  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
 }

@@ -197,7 +197,7 @@ export function BudgetView({ data, owe = [] }: { data: BudgetViewData; owe?: { o
           <p className={label}>Who owes whom</p>
           {data.balances.length === 0 || settledUp ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              {empty ? "No money talk yet. Suspiciously peaceful." : settledUp ? "All square ✦ Nobody owes anybody." : "Nothing to settle yet — only paid expenses count."}
+              {empty ? "NO ONE OWES ANYONE. Enjoy it while it lasts." : settledUp ? "All square ✦ Nobody owes anybody." : "Nothing to settle yet — only paid expenses count."}
             </p>
           ) : (
             <div className="row-rule mt-2">

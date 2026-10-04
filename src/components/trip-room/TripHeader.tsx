@@ -1,17 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { InviteTravellersPanel } from "./InviteTravellersPanel";
 import { PersonFace, firstName, FaceStack } from "@/components/decisions/People";
 import type { HerePerson } from "@/lib/whos-here";
 
-// The top of the Trip Room: where, when, who - and a line of Clockwise's own voice.
+// The Trip Room's hero. Not a dashboard: where, when, who, and one living line of Clockwise's voice.
 export function TripHeader({
   tripId,
   place,
   dates,
-  tripName,
   tagline,
+  voice,
   people,
   isOrganiser,
   viewerId,
@@ -19,35 +20,51 @@ export function TripHeader({
   tripId: string;
   place: string;
   dates: string;
-  tripName: string;
   tagline: string;
+  voice: string;
   people: HerePerson[];
   isOrganiser: boolean;
   viewerId: string | null;
 }) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const tone = (t: HerePerson["tone"]) => (t === "late" ? "text-danger" : t === "early" ? "text-success" : "text-muted-foreground");
+  const names = people.map((p) => firstName(p.name)).join(" · ");
   return (
-    <header className="shrink-0 border-b border-border px-5 pb-5 pt-5" data-trip-header>
-      <p className="eyebrow">{dates}{tripName.toLowerCase() !== place.toLowerCase() ? ` · ${tripName}` : ""}</p>
-      <h1 className="headline headline-xl mt-2 uppercase">{place}</h1>
-      <div className="mt-4 flex items-center gap-3">
-        <FaceStack people={people} max={5} className="size-8" />
-        <button type="button" onClick={() => setInviteOpen(true)} className="cursor-pointer rounded-full border border-foreground/25 px-3.5 py-1 text-[11px] font-semibold tracking-[0.14em] hover:border-foreground">+ INVITE</button>
-      </div>
-      <p className="mt-4 font-display text-[16px] italic leading-snug text-muted-foreground">&ldquo;{tagline}&rdquo;</p>
+    <header className="shrink-0 px-5 pb-5 pt-4" data-trip-header>
+      <p className="eyebrow">{dates}</p>
+      <h1 className="t-display mt-2 text-[clamp(44px,15vw,64px)] break-words">{place}</h1>
+      <p className="t-voice mt-3 text-[15px]">{tagline}</p>
 
-      <ul className="mt-5 flex gap-5 overflow-x-auto pb-1 [scrollbar-width:none]" data-whos-here>
+      <div className="mt-4 flex items-center gap-3">
+        <FaceStack people={people} max={5} className="size-9" />
+        <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{names}</p>
+        <button type="button" onClick={() => setInviteOpen(true)} className="btn btn-ghost !px-4 !text-[11px]">
+          + Invite
+        </button>
+      </div>
+
+      <p className="mt-5 flex items-start gap-2 font-display text-[19px] leading-snug tracking-[-0.01em]" data-voice>
+        <span className="cw-mark mt-0.5">◷</span>
+        <span>{voice}</span>
+      </p>
+
+      <ul className="hscroll mt-5 !gap-6" data-whos-here>
         {people.map((p) => (
-          <li key={p.userId} className="flex shrink-0 items-center gap-2">
+          <li key={p.userId} className="flex items-center gap-2">
             <PersonFace userId={p.userId} name={p.name} className="size-8" />
             <span className="leading-tight">
-              <span className="block text-[13px] font-semibold text-foreground">{firstName(p.name)}{p.userId === viewerId ? " (you)" : ""}</span>
-              <span className={`block text-[11.5px] ${tone(p.tone)}`}>{p.status}</span>
+              <span className="block text-[13px] font-semibold text-foreground">
+                {firstName(p.name)}
+                {p.userId === viewerId ? " · you" : ""}
+              </span>
+              <span className={`block whitespace-nowrap text-[11.5px] ${tone(p.tone)}`}>{p.status}</span>
             </span>
           </li>
         ))}
       </ul>
+      <Link href={`/trips/${tripId}/room/files`} className="mt-3 inline-block min-h-8 text-[11.5px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground">
+        Files →
+      </Link>
       {inviteOpen && <InviteTravellersPanel tripId={tripId} isOrganiser={isOrganiser} onClose={() => setInviteOpen(false)} />}
     </header>
   );

@@ -26,6 +26,9 @@ const MODE_LABEL: Record<string, string> = { walk: "Walking", drive: "Driving", 
 
 
 // "Two hours", "45 minutes", "1 hour 30 minutes": read aloud, not as a timer.
+// Messages that come from a provider failing (not from the product telling the traveller something useful).
+const providerTrouble = (m: string) => /failed|unavailable|\(\d{3}\)|HTTP|geoapify|delhivery|pine|\bapi\b|not configured|not connected|timed out|network/i.test(m);
+
 const killWords = (m: number) => {
   if (m < 60) return `${m} minutes`;
   const h = Math.floor(m / 60);
@@ -277,6 +280,15 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
               ? (anchors.destination.label ?? "the destination").split(",")[0]
               : "";
 
+  // The active anchor, spelled out. Never just "near you".
+  const destShort = (anchors.destination.label ?? "the destination").split(",").slice(0, 2).join(",").trim();
+  const searchLabel =
+    anchor === "me" ? (locality ? [locality.locality, locality.city].filter(Boolean).join(", ") || "Where you are" : "Where you are")
+    : anchor === "anywhere" ? (custom?.label ?? "Anywhere")
+    : anchor === "stay" ? (anchors.stay.label ?? "Your hotel")
+    : anchor === "arrival" ? (anchors.arrival.label ?? "Your arrival point")
+    : destShort;
+
   // ---- Step 1: nothing is known about where the traveller is until they say so.
   if (!anchor) {
     return (
@@ -311,31 +323,59 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
     );
   }
 
+  const area = (p: AroundPlace) => (p.address ? p.address.replace(`${p.name}, `, "").split(",").slice(0, 2).join(",").replace(/\s*-\s*\d{6}.*$/, "").trim() : "");
+
   const renderCard = (p: AroundPlace, catKey: string, whyText: string | null | undefined, extra?: React.ReactNode) => {
     const on = saved.includes(p.providerPlaceId);
     const open = routeFor === p.providerPlaceId;
     const cc = AROUND_CATEGORIES[catKey] ?? AROUND_CATEGORIES[cat];
     return (
-          <li key={p.providerPlaceId} className="py-4" data-around-place={p.name}>
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="eyebrow">
-                  {cc.icon} {cc.label}
-                </p>
-                <p className="shrink-0 text-[12px] font-semibold text-foreground">{p.walkMinutes != null ? `${p.walkMinutes} min walk` : p.distanceMeters != null ? `${p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) + " km" : Math.round(p.distanceMeters) + " m"} away` : ""}</p>
-              </div>
-              <p className="mt-1 font-display text-[21px] leading-[1.1] tracking-[-0.01em]">{p.name}</p>
-              {p.address && <p className="mt-1 text-[12.5px] leading-snug text-muted-foreground">{p.address}</p>}
-              <p className="mt-1 text-[12px] text-muted-foreground" data-hours>
+          <li key={p.providerPlaceId} className="py-6" data-around-place={p.name}>
+              <p className="eyebrow">{cc.label}</p>
+              <h3 className="mt-1.5 break-words font-display text-[26px] leading-[1.05] tracking-[-0.015em]">{p.name}</h3>
+              <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-[13px] text-muted-foreground">
+                {p.walkMinutes != null ? (
+                  <>
+                    <span className="t-number text-[22px] text-foreground">{p.walkMinutes}</span>
+                    <span>min walk</span>
+                  </>
+                ) : p.distanceMeters != null ? (
+                  <>
+                    <span className="t-number text-[22px] text-foreground">{p.distanceMeters >= 1000 ? (p.distanceMeters / 1000).toFixed(1) : Math.round(p.distanceMeters)}</span>
+                    <span>{p.distanceMeters >= 1000 ? "km away" : "m away"}</span>
+                  </>
+                ) : null}
+                {area(p) && <span className="min-w-0 truncate">· {area(p)}</span>}
+              </p>
+              <p className="mt-1.5 text-[12.5px] text-muted-foreground" data-hours>
                 {p.hoursNow?.state === "open" && <span className="font-semibold text-accent-strong">{p.hoursNow.until ? `Open until ${p.hoursNow.until}` : "Open now"} · </span>}
                 {p.hoursNow?.state === "closed" && <span className="font-semibold text-danger">{p.hoursNow.opensAt ? `Closed now, opens ${p.hoursNow.opensAt}` : "Closed now"} · </span>}
                 {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
               </p>
               {whyText && (
-                <p className="mt-2 text-[12.5px] leading-snug" data-why>
-                  <span className="font-semibold">Why Clockwise picked it:</span> {whyText}
+                <p className="t-voice mt-2 text-[14px] leading-snug" data-why>
+                  {whyText}
                 </p>
               )}
-              <div className="mt-3 flex items-center gap-4">
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  data-save
+                  aria-pressed={on}
+                  onClick={() =>
+                    start(async () => {
+                      const r = await toggleSavePlaceAction(tripId, p, cat);
+                      if (r.ok) {
+                        setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
+                        setOverlap(r.saved && r.overlap ? { id: p.providerPlaceId, name: p.name, count: r.overlap } : null);
+                      }
+                    })
+                  }
+                  className={`btn !px-4 !text-[11.5px] ${on ? "btn-primary" : "btn-ghost"}`}
+                >
+                  <Heart key={String(on)} className={`size-4 ${on ? "pop" : ""}`} fill={on ? "currentColor" : "none"} />
+                  {on ? "Saved" : "Save"}
+                </button>
                 <button
                   type="button"
                   data-route
@@ -350,26 +390,9 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                       else setRouteErr(r.error);
                     });
                   }}
-                  className="cursor-pointer text-xs font-semibold text-accent"
+                  className="btn btn-ghost !px-4 !text-[11.5px]"
                 >
-                  {open ? "HIDE ROUTE" : "ROUTE"}
-                </button>
-                <button
-                  type="button"
-                  data-save
-                  onClick={() =>
-                    start(async () => {
-                      const r = await toggleSavePlaceAction(tripId, p, cat);
-                      if (r.ok) {
-                        setSaved((s) => (r.saved ? [...s, p.providerPlaceId] : s.filter((x) => x !== p.providerPlaceId)));
-                        setOverlap(r.saved && r.overlap ? { id: p.providerPlaceId, name: p.name, count: r.overlap } : null);
-                      }
-                    })
-                  }
-                  className={`flex cursor-pointer items-center gap-1 text-xs font-semibold ${on ? "text-accent-strong" : "text-muted-foreground"}`}
-                >
-                  <Heart className="size-3.5" fill={on ? "currentColor" : "none"} />
-                  {on ? "SAVED" : "SAVE"}
+                  {open ? "Hide route" : "Route →"}
                 </button>
                 {on && (
                   <button
@@ -383,14 +406,11 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                         else setErr(r.error ?? "Couldn't propose it.");
                       })
                     }
-                    className="cursor-pointer text-xs font-semibold text-accent-strong disabled:opacity-60"
+                    className="btn !px-3 !text-[11.5px] text-accent-strong"
                   >
-                    {proposed.includes(p.providerPlaceId) ? "PROPOSED" : "PROPOSE"}
+                    {proposed.includes(p.providerPlaceId) ? "Proposed" : "Propose"}
                   </button>
                 )}
-                <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-muted-foreground underline">
-                  Open in Maps
-                </a>
               </div>
               <FitCheck
                 tripId={tripId}
@@ -408,9 +428,9 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
               />
               {extra}
               {open && (
-                <div className="mt-3 space-y-2 rounded-2xl bg-surface-muted p-3.5" data-route-panel>
+                <div className="sheet-in mt-4 space-y-3 border-t border-border pt-4" data-route-panel>
                   {routeErr && <p className="text-xs text-danger">{routeErr}</p>}
-                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Asking Geoapify for the route…</p>}
+                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Working out the way…</p>}
                   {route && (
                     <>
                       <p className="text-xs">
@@ -433,11 +453,16 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                       </div>
                       <ul className="space-y-0.5 text-xs">
                         {route.legs.map((l) => (
-                        <li key={l.mode} data-route-leg={l.mode}>
-                            <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
+                        <li key={l.mode} data-route-leg={l.mode} className="flex items-baseline gap-2 text-[13px]">
+                            <span className="t-number text-[24px]">{l.durationMinutes}</span>
+                            <span>min</span>
+                            <span className="text-muted-foreground">· {MODE_LABEL[l.mode] ?? l.mode} · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}</span>
                           </li>
                         ))}
                       </ul>
+                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noopener noreferrer" className="inline-block min-h-8 text-[12px] text-muted-foreground underline underline-offset-4">
+                        Open in Maps
+                      </a>
                       <p className="text-[11px] text-muted-foreground">Geoapify routing, {new Date(route.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Only modes the provider returned are shown.</p>
                     </>
                   )}
@@ -451,36 +476,28 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
     <div className="space-y-5">
       <header>
         <p className="eyebrow flex items-center gap-2">
-          <span className="text-accent-strong">
-            <ClockwiseMark size={18} working={busy} />
+          <span className="cw-mark">
+            <ClockwiseMark size={16} working={busy} />
           </span>
-          Around you
+          Searching around
         </p>
-        {anchor === "me" && locality && (
-          <p className="eyebrow mt-2" data-youre-around>
-            You&apos;re around
-          </p>
-        )}
-        <h1 className="headline headline-xl mt-2">{anchor === "me" && locality ? `${whereText}.` : anchor === "anywhere" && !custom ? "Anywhere." : `Around ${whereText}.`}</h1>
-        {anchor === "me" && locality && (locality.city || locality.state) && (
-          <p className="lede mt-1" data-locality>
-            {[locality.locality ? locality.city : null, locality.state].filter(Boolean).join(", ")}
-          </p>
-        )}
-        <p className="lede mt-2" data-anchor-note>
+        <h1 className="t-display mt-2 text-[clamp(34px,11vw,48px)] break-words" data-search-anchor>
+          {searchLabel}
+        </h1>
+        <p className="mt-2 text-[13px] leading-snug text-muted-foreground" data-anchor-note>
           {anchor === "me" && fix
-            ? `Location from ${minutesAgo(fix.at, now)}. Private to you.`
+            ? `Your location, from ${minutesAgo(fix.at, now)}. Private to you.`
             : anchor === "stay"
-              ? anchors.stay.label
+              ? "Your hotel."
               : anchor === "arrival"
-                ? anchors.arrival.label
+                ? "Where you arrive."
                 : anchor === "anywhere"
                   ? custom
-                    ? `Searching around ${custom.label}. Nothing about where you actually are.`
+                    ? "A place you chose. Where you actually are doesn't matter."
                     : "Type any place in India and pick it. Your location isn't used."
-                  : "Based around the destination. It isn't your hotel or where you are."}
+                  : "The destination. Not your hotel, not where you are."}
           {anchor === "me" && fix && (
-            <button type="button" onClick={requestMyLocation} className="ml-2 cursor-pointer font-semibold text-accent">
+            <button type="button" onClick={requestMyLocation} className="ml-2 min-h-8 cursor-pointer font-semibold text-accent">
               REFRESH
             </button>
           )}
@@ -493,21 +510,21 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       </div>
 
       <div>
-        <p className="eyebrow mb-2">Searching around</p>
-        <div className="flex flex-wrap gap-x-5 gap-y-1">
+        <div className="hscroll -mx-5 px-5 !gap-2" role="tablist" aria-label="Search around">
           {anchorChips.map((c) => (
             <button
               key={c.id}
               type="button"
+              role="tab"
+              aria-selected={anchor === c.id}
               disabled={!c.ok || loc === "asking"}
               title={c.ok ? undefined : c.why}
               onClick={() => pickAnchor(c.id)}
               data-anchor={c.id}
-              className={`relative py-1.5 text-[12.5px] font-semibold tracking-[0.12em] ${anchor === c.id ? "text-foreground" : "text-muted-foreground"} ${c.ok ? "cursor-pointer hover:text-foreground" : "cursor-not-allowed opacity-35"}`}
+              className={`flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[12px] font-semibold tracking-[0.12em] transition-colors duration-150 ${anchor === c.id ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"} ${c.ok ? "cursor-pointer hover:border-foreground/50" : "cursor-not-allowed opacity-35"}`}
             >
-              <span className="mr-1.5 opacity-80">{c.icon}</span>
+              <span aria-hidden>{c.icon}</span>
               {c.label}
-              <span className={`absolute inset-x-0 -bottom-px h-[2px] rounded-full ${anchor === c.id ? "bg-accent" : "bg-transparent"}`} />
             </button>
           ))}
         </div>
@@ -571,9 +588,12 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       </div>
 
       {/* RIGHT NOW: the traveller's clock + where they are + what's next. Deterministic; no model involved. */}
-      <section className="section space-y-2" data-right-now>
-        <p className="eyebrow">Right now</p>
-        {nextUp && "commitment" in nextUp && (
+      <details className="section space-y-2" data-right-now>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between [&::-webkit-details-marker]:hidden">
+          <span className="eyebrow">Got time to kill?</span>
+          <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Right now ▾</span>
+        </summary>
+        {nextUp && "commitment" in nextUp && nextUp.minutesUntil <= 12 * 60 && (
           <div data-next-up>
             <p className="headline headline-md">
               ◷ {nextUp.commitment.name.toUpperCase()} {nextUp.minutesUntil > 0 ? `IN ${fmtDur(nextUp.minutesUntil)}` : "IS NOW"}
@@ -608,7 +628,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
             {routeFor === "next-up" && (
               <div className="mt-2 space-y-1 rounded-lg border border-border p-2 text-xs" data-route-panel>
                 {routeErr && <p className="text-danger">{routeErr}</p>}
-                {!route && !routeErr && <p className="text-muted-foreground">Asking Geoapify for the route…</p>}
+                {!route && !routeErr && <p className="text-muted-foreground">Working out the way…</p>}
                 {route && route.legs.map((l) => (
                   <p key={l.mode} data-route-leg={l.mode}>
                     <span className="font-semibold">{MODE_LABEL[l.mode] ?? l.mode}</span> · {l.durationMinutes} min · {l.distanceMeters >= 1000 ? (l.distanceMeters / 1000).toFixed(1) + " km" : Math.round(l.distanceMeters) + " m"}
@@ -623,6 +643,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
             )}
           </div>
         )}
+        {nextUp && "commitment" in nextUp && nextUp.minutesUntil > 12 * 60 && <p className="text-xs text-muted-foreground">Your next plan, {nextUp.commitment.name}, is days away, so there&apos;s no window to fill yet. Tell me how long you have.</p>}
         {nextUp && "none" in nextUp && <p className="text-xs text-muted-foreground">{nextUp.none}</p>}
         {!nextUp && <p className="text-xs text-muted-foreground">Checking your clock…</p>}
         <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
@@ -674,36 +695,37 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
             <p className="text-[11px] text-muted-foreground">{free.assumptions} Places and walking times: Geoapify. Weather and local time: Open-Meteo.</p>
           </div>
         )}
-      </section>
+      </details>
 
       <div className="section !mt-6 !pt-5">
         <p className="eyebrow mb-1">Looking for</p>
-        <div className="-mx-5 flex gap-5 overflow-x-auto px-5 [scrollbar-width:none]">
+        <div className="hscroll -mx-5 px-5 !gap-6" role="tablist" aria-label="What are you looking for">
           {ordered.map((c) => (
-            <button key={c} type="button" onClick={() => { setCat(c); setMaxWalk(null); }} data-around-cat={c} className={`relative shrink-0 cursor-pointer py-2 text-[14px] tracking-wide ${cat === c ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
-              <span className="mr-1.5 opacity-80">{AROUND_CATEGORIES[c].icon}</span>
+            <button key={c} type="button" role="tab" aria-selected={cat === c} onClick={() => { setCat(c); setMaxWalk(null); }} data-around-cat={c} className={`relative min-h-11 cursor-pointer py-2 text-[15px] tracking-wide transition-colors duration-150 ${cat === c ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
               {AROUND_CATEGORIES[c].label}
-              <span className={`absolute inset-x-0 -bottom-px h-[2px] rounded-full ${cat === c ? "bg-accent" : "bg-transparent"}`} />
+              <span className={`absolute inset-x-0 bottom-0 h-[2px] rounded-full transition-colors duration-200 ${cat === c ? "bg-accent" : "bg-transparent"}`} />
             </button>
           ))}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
+      <div className="hscroll !gap-2 text-xs">
         {[5, 10, 15].map((m) => (
-          <button key={m} type="button" onClick={() => setMaxWalk(maxWalk === m ? null : m)} className={`cursor-pointer rounded-full border px-3 py-1.5 text-[11.5px] font-semibold tracking-wide ${maxWalk === m ? "border-accent bg-accent-tint text-accent-strong" : "border-border text-muted-foreground"}`}>
+          <button key={m} type="button" onClick={() => setMaxWalk(maxWalk === m ? null : m)} className={`min-h-9 cursor-pointer rounded-full border px-3.5 text-[11.5px] font-semibold tracking-wide ${maxWalk === m ? "border-accent bg-accent-tint text-accent-strong" : "border-border text-muted-foreground"}`}>
             {m} MIN WALK
           </button>
         ))}
         {(cat === "restaurant" || cat === "cafe") && (
-          <button type="button" onClick={() => setVeg((v) => !v)} className={`cursor-pointer rounded-full border px-3 py-1.5 text-[11.5px] font-semibold tracking-wide ${veg ? "border-accent bg-accent-tint text-accent-strong" : "border-border text-muted-foreground"}`}>
+          <button type="button" onClick={() => setVeg((v) => !v)} className={`min-h-9 cursor-pointer rounded-full border px-3.5 text-[11.5px] font-semibold tracking-wide ${veg ? "border-accent bg-accent-tint text-accent-strong" : "border-border text-muted-foreground"}`}>
             VEGETARIAN SEARCH
           </button>
         )}
       </div>
 
+      <details className="group">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center text-[12px] uppercase tracking-[0.14em] text-muted-foreground [&::-webkit-details-marker]:hidden">Looking for a specific store? ▾</summary>
       <form
-        className="flex gap-2"
+        className="mt-1 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (!brand.trim()) return;
@@ -717,13 +739,39 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           });
         }}
       >
-        <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Looking for a store? e.g. 7-Eleven" className="flex-1 rounded-full border border-border bg-surface px-4 py-2.5 text-sm focus:border-accent focus:outline-none" />
-        <button type="submit" disabled={busy} className="cursor-pointer rounded-full bg-accent px-5 py-2.5 text-xs font-semibold tracking-[0.12em] text-accent-foreground">
+        <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Looking for a store? e.g. 7-Eleven" className="min-h-11 min-w-0 flex-1 rounded-full border border-border bg-surface px-4 text-base focus:border-accent focus:outline-none" />
+        <button type="submit" disabled={busy} className="min-h-11 cursor-pointer rounded-full bg-accent px-5 text-xs font-semibold tracking-[0.12em] text-accent-foreground">
           FIND
         </button>
       </form>
+      </details>
 
-      {err && <p className="text-sm text-danger" data-around-error>{err}</p>}
+      {err && (
+        <div className="vote-in" data-around-error>
+          {providerTrouble(err) ? (
+            <>
+              <p className="font-display text-[20px] leading-snug tracking-[-0.01em]">Couldn&apos;t reach live results.</p>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">Try that again?</p>
+              <button type="button" className="btn btn-primary mt-3" onClick={() => { setErr(null); if (anchor) run(cat, anchor, veg ? "vegetarian" : undefined); }}>
+                Retry
+              </button>
+            </>
+          ) : (
+            <p className="text-[14px] text-danger">{err}</p>
+          )}
+        </div>
+      )}
+      {busy && !res && !err && (
+        <div className="space-y-6 py-2" aria-hidden data-skeleton>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="space-y-2.5">
+              <div className="skeleton h-3 w-16" />
+              <div className="skeleton h-7 w-3/4" />
+              <div className="skeleton h-4 w-1/2" />
+            </div>
+          ))}
+        </div>
+      )}
       {res?.note && (
         <div className="border-l-2 border-accent pl-3" data-around-note>
           {brand.trim() && <p className="font-display text-[19px] leading-snug tracking-[-0.01em]">{HUMAN.noBrand(brand.trim(), null)}</p>}
@@ -790,7 +838,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           )}
         </div>
       )}
-      <ul className="row-rule">
+      <ul className={`row-rule transition-opacity duration-200 ${busy && res ? "opacity-50" : ""}`}>
         {shown.map((p) => renderCard(p, res?.category ?? cat, res?.why[p.providerPlaceId]))}
         {res && shown.length === 0 && !busy && <li className="text-sm text-muted-foreground">Nothing found{maxWalk ? ` within a ${maxWalk}-minute walk` : " here"} in the provider&apos;s data.</li>}
       </ul>

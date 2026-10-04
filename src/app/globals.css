@@ -141,3 +141,105 @@ body {
 
 .stack-sections > section { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border); }
 .stack-sections > header + section { margin-top: 24px; }
+
+
+/* =====================================================================================
+   CLOCKWISE DESIGN SYSTEM
+   One set of tokens; components use these instead of ad-hoc numbers.
+   Personality: editorial travel journal (big type, space, one idea per screen) with a
+   playful voice. The clock mark ◷ is the recurring brand device.
+   ===================================================================================== */
+:root {
+  /* spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --gutter: 20px;
+
+  /* radius */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+
+  /* surface hierarchy: page (canvas) < surface (sheet) < raised (the one thing that matters) */
+  --surface-raised: #ffffff;
+  --surface-sunken: #f3f1ec;
+  --rule: #ebe8e1;
+  --shadow-1: 0 1px 2px rgba(20, 24, 26, 0.06);
+  --shadow-2: 0 14px 30px -18px rgba(20, 24, 26, 0.4);
+  --shadow-sheet: 0 -14px 40px -18px rgba(20, 24, 26, 0.45);
+
+  /* icon sizes */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+
+  /* motion: communicates a change of state, never decorates */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 300ms;
+
+  /* touch */
+  --tap: 44px;
+}
+
+/* ---- type roles ---- */
+.t-display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.025em; line-height: 0.98; text-transform: uppercase; }
+.t-number { font-family: var(--font-display); font-variant-numeric: lining-nums tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+.t-voice { font-family: var(--font-display); font-style: italic; color: var(--muted-foreground); }
+
+/* the recurring brand device */
+.cw-mark { display: inline-block; color: var(--accent-strong); font-weight: 600; line-height: 1; transform: translateY(-0.04em); }
+
+/* ---- buttons: one tap size, one press behaviour ---- */
+.btn { min-height: var(--tap); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); border-radius: var(--radius-pill); padding: 0 var(--space-5); font-size: 12.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--accent-foreground); }
+.btn-ghost { border: 1px solid color-mix(in srgb, var(--foreground) 25%, transparent); color: var(--foreground); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--foreground); }
+
+/* every pill-shaped button gets the same press feedback */
+button:not(:disabled):active { transition: transform var(--dur-fast) var(--ease); }
+button.rounded-full:not(:disabled):active, a.rounded-full:active { transform: scale(0.97); }
+
+/* ---- motion ---- */
+@keyframes cw-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes cw-sheet { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes cw-pop { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes cw-pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes cw-shimmer { 0% { background-position: -240px 0; } 100% { background-position: 240px 0; } }
+@keyframes cw-settle { 0% { background-color: var(--success-tint); } 100% { background-color: transparent; } }
+.page-in { animation: cw-fade var(--dur-slow) var(--ease) both; }
+.sheet-in { animation: cw-sheet var(--dur-base) var(--ease) both; }
+.pop { animation: cw-pop var(--dur-base) var(--ease); }
+.vote-in { animation: cw-fade var(--dur-base) var(--ease) both; }
+.settle { animation: cw-settle 1400ms var(--ease) both; }
+.thinking-dot { animation: cw-pulse-soft 1100ms ease-in-out infinite; }
+.skeleton { background: linear-gradient(90deg, var(--surface-sunken) 0%, #fbfaf7 40%, var(--surface-sunken) 80%); background-size: 480px 100%; animation: cw-shimmer 1300ms linear infinite; border-radius: var(--radius-sm); }
+@media (prefers-reduced-motion: reduce) {
+  .page-in, .sheet-in, .pop, .vote-in, .settle, .thinking-dot, .skeleton, .tile-in { animation: none !important; }
+  .btn, button { transition: none !important; }
+  button:active, a:active { transform: none !important; }
+}
+
+/* ---- phone ergonomics ---- */
+/* iOS Safari zooms any field under 16px: on phones every field is at least 16px. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select { font-size: 16px !important; }
+}
+html { -webkit-text-size-adjust: 100%; }
+body { overscroll-behavior-y: none; }
+.safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+/* rows that scroll sideways (chips, anchors) hide the bar and snap */
+.hscroll { display: flex; gap: var(--space-5); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.hscroll::-webkit-scrollbar { display: none; }
+.hscroll > * { flex: 0 0 auto; scroll-snap-align: start; }

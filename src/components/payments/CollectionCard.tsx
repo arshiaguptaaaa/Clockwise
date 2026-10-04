@@ -11,18 +11,17 @@ export function CollectionCard({ c }: { c: CollectionView }) {
   const mine = c.lines.find((l) => l.mine && !l.paid);
   return (
     <div className={`tile-in w-full max-w-md border-l-[3px] py-4 pl-4 pr-3 sm:max-w-lg ${settled ? "border-success bg-success-tint/50" : "border-accent bg-surface-muted/60"}`} data-collection={c.title}>
-      <p className={`eyebrow ${settled ? "!text-success" : "!text-accent-strong"}`}>{settled ? "◷ Everyone's settled ✓" : "◷ Payment's ready"}</p>
+      <p className={`eyebrow ${settled ? "!text-success" : "!text-accent-strong"}`}><span className="cw-mark">◷</span> {settled ? "Everyone's settled ✓" : "Payment's ready"}</p>
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground">{c.title}</p>
-      <p className="mt-0.5 font-display text-[34px] leading-[1.02] tracking-[-0.02em]">{inr(c.totalMinor, c.currency)}</p>
+      <p className="t-number mt-0.5 text-[44px]">{inr(c.totalMinor, c.currency)}</p>
 
       <ul className="mt-3 space-y-2">
         {c.lines.map((l) => (
           <li key={l.userId} className="flex items-center gap-2.5 text-[14px]" data-line={firstName(l.name)}>
-            <PersonFace userId={l.userId} name={l.name} className={`size-7 ${l.paid ? "" : "opacity-60 grayscale"}`} />
-            <span className="font-medium">{firstName(l.name)}{l.mine ? " (you)" : ""}</span>
-            <span className={`ml-auto text-[13px] ${l.paid ? "font-semibold text-success" : "text-muted-foreground"}`}>
-              {l.paid ? "✓ Paid" : `${inr(l.amountMinor, c.currency)} due`}
-            </span>
+            <PersonFace userId={l.userId} name={l.name} className={`size-8 transition-[filter,opacity] duration-300 ${l.paid ? "" : "opacity-60 grayscale"}`} />
+            <span className="text-[11.5px] font-semibold uppercase tracking-[0.14em]">{l.mine ? "You" : firstName(l.name)}</span>
+            <span className={`t-number ml-auto text-[20px] ${l.paid ? "text-success" : ""}`}>{inr(l.amountMinor, c.currency)}</span>
+            <span className={`w-14 text-right text-[10.5px] font-semibold uppercase tracking-[0.12em] ${l.paid ? "text-success" : "text-muted-foreground"}`}>{l.paid ? "Paid ✓" : "Due"}</span>
           </li>
         ))}
       </ul>

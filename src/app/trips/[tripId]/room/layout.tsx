@@ -1,23 +1,4 @@
-import { SubTabs } from "@/components/SubTabs";
-
-export default async function RoomLayout({
-  children,
-  params,
-}: {
-  children: React.ReactNode;
-  params: Promise<{ tripId: string }>;
-}) {
-  const { tripId } = await params;
-  const base = `/trips/${tripId}/room`;
-  const tabs = [
-    { href: base, label: "Chat" },
-    { href: `${base}/files`, label: "Files" },
-  ];
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <SubTabs tabs={tabs} />
-      {children}
-    </div>
-  );
+// The Trip Room is one surface: no tab row. (Files is reachable from the trip header.)
+export default function RoomLayout({ children }: { children: React.ReactNode }) {
+  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
 }

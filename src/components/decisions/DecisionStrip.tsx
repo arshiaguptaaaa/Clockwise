@@ -147,7 +147,7 @@ function Decision({ d, viewerId, organiserId, organiserName, compact, index }: {
     if (isOrganiser) {
       return (
         <div>
-          <p className="eyebrow !text-accent-strong"><ClockMark /> Everyone&apos;s in.</p>
+          <p className="eyebrow !text-accent-strong"><ClockMark /> Everyone&apos;s aligned.</p>
           <div className="mt-1.5">{num}<Subject d={d} /></div>
           <div className="mt-2.5 flex items-center gap-2">
             <span className="mr-1 text-[13px] text-muted-foreground">Make it official?</span>

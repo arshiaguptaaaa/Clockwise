@@ -102,11 +102,12 @@ export default async function PlanOverviewPage({
         </figure>
       )}
 
-      {stay && <StaySection stay={stay} />}
-      <Interlude {...(/bengaluru|bangalore/i.test(heroStop?.name ?? trip.name) ? INTERLUDES.bengaluru : INTERLUDES.impossible)} />
-      <AgreedPlacesSection places={agreed} />
+      {/* The story first: who lands when, how long they take, and what that does to the plan. */}
       <DayTimeline view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />
       {currentUserIdForPlan === trip.createdBy && <AddToPlan tripId={tripId} />}
+      {stay && <StaySection stay={stay} />}
+      <AgreedPlacesSection places={agreed} />
+      <Interlude {...(/bengaluru|bangalore/i.test(heroStop?.name ?? trip.name) ? INTERLUDES.bengaluru : INTERLUDES.impossible)} />
       <RendezvousSection view={rendezvous} />
 
       <section className="section">
@@ -202,12 +203,14 @@ export default async function PlanOverviewPage({
         <div className="mb-3 flex items-center justify-between">
           <p className="eyebrow">Travellers · {trip.members.length}</p>
           <div className="flex items-center gap-3">
-            <Link
-              href={`/trips/${tripId}/agent/trace`}
-              className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-            >
-              Agent trace
-            </Link>
+            {currentUserIdForPlan === trip.createdBy && (
+              <Link
+                href={`/trips/${tripId}/agent/trace`}
+                className="inline-flex min-h-8 cursor-pointer items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                Organiser · Agent trace
+              </Link>
+            )}
             <Link
               href={`/trips/${tripId}/plan/travellers`}
               className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-accent"

@@ -6,7 +6,7 @@ import { ChatThread } from "@/components/trip-room/ChatThread";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { TripHeader } from "@/components/trip-room/TripHeader";
 import { whosHere } from "@/lib/whos-here";
-import { tripTagline } from "@/lib/copy";
+import { heroLine } from "@/lib/copy";
 import { formatDateRange } from "@/lib/format";
 import { collectionsForTrip } from "@/lib/payments/obligations";
 import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
@@ -87,6 +87,7 @@ export default async function TripRoomChatPage({
       headline: d.headline,
       kind: d.kind,
       change: d.change,
+      because: d.because,
       retry: Boolean(p.supersedesId),
       executionResult: p.executionResult,
       failureReason: p.failureReason,
@@ -105,14 +106,16 @@ export default async function TripRoomChatPage({
   const days = trip.coreStartDate && trip.coreEndDate ? Math.round((trip.coreEndDate.getTime() - trip.coreStartDate.getTime()) / 86_400_000) + 1 : null;
   const people = await whosHere(trip.id, trip.members);
   const collections = await collectionsForTrip(trip.id, currentUserId);
+  const late = people.find((p) => p.tone === "late");
+  const voiceLine = late ? `${late.name.split(" ")[0]}'s running late. I'll keep everyone together.` : "Everyone's on a different clock. I'll keep them together.";
   const header = (
     <>
       <TripHeader
         tripId={tripId}
         place={place}
         dates={dates}
-        tripName={trip.name}
-        tagline={tripTagline(trip.id, { days, people: trip.members.length, destination: place })}
+        tagline={heroLine(trip.members.length)}
+        voice={voiceLine}
         people={people}
         isOrganiser={currentUserId === trip.createdBy}
         viewerId={currentUserId}

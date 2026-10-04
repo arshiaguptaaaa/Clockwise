@@ -297,7 +297,7 @@ export async function castApprovalVote(
             recipientIds: members.map((m) => m.userId).filter((id) => id === trip.createdBy),
             severity: "IMPORTANT",
             kind: "DECISION_EVERYONE_IN",
-            title: "Everyone's in",
+            title: "Everyone's aligned",
             body: `${proposal.title} Make it official when you're ready.`,
             href: `/trips/${proposal.tripId}/room`,
           });

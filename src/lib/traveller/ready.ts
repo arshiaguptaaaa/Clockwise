@@ -26,7 +26,7 @@ export type ReadyItem = {
   href?: string;
 };
 
-export type ReadyView = { items: ReadyItem[]; sorted: number; total: number; weatherNote: string | null; vibe: "NONE" | "DEFERRED" | "COMPLETED" };
+export type ReadyView = { items: ReadyItem[]; sorted: number; total: number; weatherNote: string | null; vibe: "NONE" | "DEFERRED" | "COMPLETED"; weather: { minC: number; maxC: number; rainPct: number } | null };
 
 export async function buildReady(tripId: string, userId: string): Promise<ReadyView> {
   const [trip, journey, stay, ticks, vibe, anchors] = await Promise.all([
@@ -58,14 +58,11 @@ export async function buildReady(tripId: string, userId: string): Promise<ReadyV
         : { key: "arrival-route", label: "Arrival → stay", kind: "LIKELY", done: false, auto: true, detail: journey.arrivalLat == null ? "I couldn't pin down where you arrive, so I haven't measured this." : "Not measured yet." }
     );
   }
-  items.push(
-    vibe === "COMPLETED"
-      ? { key: "vibe", label: "Vibe check", kind: "CONFIRMED", done: true, auto: true }
-      : { key: "vibe", label: "Finish your vibe check", kind: "LIKELY", done: false, auto: true, detail: "30 seconds, private.", href: `${base}?vibe=1` }
-  );
+  // (The Vibe Check is optional and no longer part of getting ready.)
 
   // Weather: only the real forecast, only for the trip's own dates.
   let weatherNote: string | null = null;
+  let weather: ReadyView["weather"] = null;
   const where = stay?.latitude != null && stay.longitude != null ? { lat: stay.latitude, lng: stay.longitude } : anchors.find((a) => a.kind === "destination")?.point;
   if (where && trip?.coreStartDate && trip.coreEndDate) {
     try {
@@ -81,6 +78,7 @@ export async function buildReady(tripId: string, userId: string): Promise<ReadyV
         const rain = Math.max(...days.map((d) => d.precipitationProbability ?? 0));
         const src = `Open-Meteo forecast ${from}–${to}: ${Math.round(min)}–${Math.round(max)}°C, rain chance up to ${rain}%`;
         weatherNote = src;
+        weather = { minC: Math.round(min), maxC: Math.round(max), rainPct: rain };
         if (max >= 30) {
           items.push({ key: "sunscreen", label: "Sunscreen", kind: "LIKELY", done: false, auto: false, detail: `Highs of ${Math.round(max)}°C.`, source: src, nearby: "pharmacy" });
           items.push({ key: "water", label: "Water bottle", kind: "LIKELY", done: false, auto: false, source: src, nearby: "convenience" });
@@ -102,5 +100,5 @@ export async function buildReady(tripId: string, userId: string): Promise<ReadyV
 
   for (const it of items) if (!it.auto && tick.get(it.key)) it.done = true;
   const counted = items.filter((i) => i.kind !== "OPTIONAL");
-  return { items, sorted: counted.filter((i) => i.done).length, total: counted.length, weatherNote, vibe };
+  return { items, sorted: counted.filter((i) => i.done).length, total: counted.length, weatherNote, vibe, weather };
 }

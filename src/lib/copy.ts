@@ -11,6 +11,8 @@ function hash(s: string): number {
   return h;
 }
 
+export const countWord = (n: number) => (NUMBER_WORDS[n] ?? String(n)).toLowerCase();
+
 export function tripTagline(seed: string, facts: { days: number | null; people: number; destination: string | null }): string {
   const dest = facts.destination ?? "This trip";
   const bengaluru = /bengaluru|bangalore/i.test(dest);
@@ -39,3 +41,8 @@ export const HUMAN = {
   lookingAt: (name: string) => `We're looking at you, ${name}.`,
   noBrand: (brand: string, city: string | null) => `No ${brand}. ${city ?? "This place"} has other plans.`,
 } as const;
+
+// The hero's small human line, from real counts.
+export function heroLine(people: number): string {
+  return people <= 1 ? "one person · one clock · one trip" : `${countWord(people)} people · ${countWord(people)} clocks · one trip`;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { CardStatus, CardType } from "@prisma/client";
 import { MessageRow, type MessageAttachment, type MessageReactionView } from "./MessageRow";
 import { FailedClockwiseMessage } from "./FailedClockwiseMessage";
@@ -91,12 +91,26 @@ export function ChatThread({
     seen.current = count;
   }, [messages.length]);
 
+  // Whether the person is talking TO Clockwise: always in their private room, and in the group only when they
+  // name it. That decides whether "Clockwise is thinking" appears (background work stays silent).
+  const [awaitingClockwise, setAwaitingClockwise] = useState(false);
+
   function handleSend(formData: FormData) {
+    const content = String(formData.get("content") ?? "");
+    const direct = channel === "PRIVATE" || /\bclockwise\b/i.test(content);
+    if (direct) setAwaitingClockwise(true);
     startSendTransition(async () => {
       const result = await postAction(formData);
-      if (!result) return;
+      if (!result) {
+        setAwaitingClockwise(false);
+        return;
+      }
       startThinkTransition(async () => {
-        await runAgentAction(result.senderId);
+        try {
+          await runAgentAction(result.senderId);
+        } finally {
+          setAwaitingClockwise(false);
+        }
       });
     });
   }
@@ -159,12 +173,12 @@ export function ChatThread({
             />
           );
         })}
-        {messages.length === 0 && !(isThinking && channel === "PRIVATE") && (
+        {messages.length === 0 && !awaitingClockwise && (
           <p className="pt-12 text-center text-sm text-muted-foreground">{emptyText}</p>
         )}
         {/* Group chat is human-first: Clockwise works silently there. A working
             state belongs only to the private Clockwise conversation. */}
-        {isThinking && channel === "PRIVATE" && <ThinkingIndicator />}
+        {(isThinking || isSending) && awaitingClockwise && <ThinkingIndicator />}
         </div>
       </div>
 

@@ -1,4 +1,5 @@
-import { HUMAN } from "@/lib/copy";
+import Link from "next/link";
+import { getTripById } from "@/lib/trip";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
@@ -16,6 +17,8 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
   const { tripId } = await params;
   const userId = await getCurrentUserId();
   if (!userId) return null;
+  const trip = await getTripById(tripId);
+  const place = (trip.destinations[0]?.city ?? trip.destinations[0]?.name ?? "the city").split(",")[0];
   const [rows, overlaps, anchors] = await Promise.all([prisma.savedPlace.findMany({ where: { tripId, userId }, orderBy: { createdAt: "desc" } }), savedOverlaps(tripId, userId), anchorsFor(tripId, userId)]);
   // Measured from the hotel when there is one, else from the destination.
   const fitAnchor = anchors.stay ? ("stay" as const) : anchors.destination ? ("destination" as const) : null;
@@ -47,8 +50,12 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
       {rows.length === 0 ? (
         <section className="section text-center">
           <BengaluruArt scene="saved" className="mx-auto w-56 -rotate-2 shadow-[0_14px_30px_-16px_rgba(20,24,26,0.5)]" />
-          <p className="headline headline-md mt-6">{HUMAN.savedEmpty}</p>
-          <p className="lede mx-auto mt-2 max-w-[17rem]">Tap SAVE on a place in Around You, or on a stay. Only you will see it.</p>
+          <p className="t-display mt-6 text-[30px]">Nothing saved yet.</p>
+          <p className="t-voice mx-auto mt-2 max-w-[17rem] text-[16px]">Find somewhere worth arguing about.</p>
+          <Link href={`/trips/${tripId}/agent/around`} className="btn btn-primary mt-5">
+            Explore {place}
+          </Link>
+          <p className="mx-auto mt-3 max-w-[17rem] text-[12px] text-muted-foreground">Saves are private. Only you see them.</p>
         </section>
       ) : (
         <section className="section">

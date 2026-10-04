@@ -1,15 +1,18 @@
-import { Plane, TrainFront, Bus, Car, BedDouble, CalendarClock, Utensils, ArrowRight } from "lucide-react";
+import { Plane, TrainFront, Bus, Car, BedDouble, CalendarClock, Utensils } from "lucide-react";
 import { timeLabel } from "@/lib/traveller/journey";
 import { HUMAN } from "@/lib/copy";
 import type { RendezvousView } from "@/lib/rendezvous";
 import type { PendingMove } from "./RendezvousSection";
 
+type Kind = "arrive" | "reach" | "together" | "commitment";
 type Item = {
   key: string;
   local: string;
-  kind: "arrive" | "stay" | "commitment";
-  icon: React.ReactNode;
+  kind: Kind;
+  icon?: React.ReactNode;
   title: React.ReactNode;
+  // the travel leg that leads INTO this event ("↓ 39 min to the stay")
+  leg?: string;
   note?: React.ReactNode;
   commitmentName?: string;
   risk?: boolean;
@@ -17,13 +20,14 @@ type Item = {
 };
 
 const modeIcon = (mode: string) => {
-  const c = "size-[18px]";
+  const c = "size-[17px]";
   if (mode === "TRAIN") return <TrainFront className={c} strokeWidth={1.6} />;
   if (mode === "BUS") return <Bus className={c} strokeWidth={1.6} />;
   if (mode === "DRIVE") return <Car className={c} strokeWidth={1.6} />;
   return <Plane className={c} strokeWidth={1.6} />;
 };
 const foodish = /dinner|lunch|breakfast|brunch|cafe|café|meal|supper/i;
+const basisName = (p: string | null) => (p === "delhivery" ? "Delhivery" : p === "geoapify" ? "Geoapify" : "provider route");
 
 const dayHead = (local: string) => {
   const d = new Date(`${local.slice(0, 10)}T00:00:00Z`);
@@ -32,15 +36,15 @@ const dayHead = (local: string) => {
   return `${wd} · ${dm}`;
 };
 
-// THE TRIP'S MEMORY, in order: who lands when, when everyone is together, and what the
-// group agreed. A change doesn't produce a new panel: the row itself shows the proposed
-// time (struck-through original, dashed "not in the Plan yet"), and when the Plan moves the
-// row replays its entrance with the new time.
+// THE TRIP AS A STORY: who lands when, how long each takes to reach the stay, and what that does to the plan.
+// Events are connected by their travel legs, so cause and effect read top to bottom. A pending move shows beside
+// the original time (dashed, "not in the Plan yet"); when the Plan moves, the row replays its entrance.
 export function DayTimeline({ view, pending = {}, organiserName = "the organiser" }: { view: RendezvousView; pending?: Record<string, PendingMove>; organiserName?: string }) {
   const items: Item[] = [];
 
   for (const c of view.clocks) {
     if (!c.arriveLocal) continue;
+    const first = c.name.split(" ")[0];
     items.push({
       key: `arr-${c.userId}`,
       local: c.arriveLocal,
@@ -48,20 +52,32 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
       icon: modeIcon(c.mode),
       title: (
         <>
-          <span className="font-semibold">{c.name.split(" ")[0]}</span> lands{c.arrivalPlace ? <span className="text-muted-foreground"> · {c.arrivalPlace}</span> : null}
+          <span className="font-semibold">{first}</span> lands{c.arrivalPlace ? <span className="text-muted-foreground"> · {c.arrivalPlace.replace(/ International Airport$/, "")}</span> : null}
         </>
       ),
-      note: c.status === "KNOWN" ? <>~{c.routeMinutes} min to {view.stayName}, at the stay by about <span className="font-semibold text-foreground">{timeLabel(c.hotelBy!)}</span></> : undefined,
     });
+    if (c.status === "KNOWN" && c.hotelBy) {
+      items.push({
+        key: `reach-${c.userId}`,
+        local: c.hotelBy,
+        kind: "reach",
+        title: (
+          <>
+            {first} reaches the stay
+          </>
+        ),
+        leg: `${c.routeMinutes} min to the stay · ${basisName(c.routeProvider)}`,
+      });
+    }
   }
 
   if (view.meetAt) {
     items.push({
       key: "together",
       local: view.meetAt,
-      kind: "stay",
-      icon: <BedDouble className="size-[18px]" strokeWidth={1.6} />,
-      title: <span className="font-semibold">{view.meetComplete ? "Everyone at the stay" : "Those with journeys at the stay"}</span>,
+      kind: "together",
+      icon: <BedDouble className="size-[17px]" strokeWidth={1.6} />,
+      title: <span className="font-semibold">{view.meetComplete ? "Everyone at the stay" : "Everyone with a journey, at the stay"}</span>,
       note: view.stayName ?? undefined,
     });
   }
@@ -75,23 +91,24 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
       commitmentName: c.name,
       risk: late,
       pending: pending[c.id],
-      icon: foodish.test(c.name) ? <Utensils className="size-[18px]" strokeWidth={1.6} /> : <CalendarClock className="size-[18px]" strokeWidth={1.6} />,
-      title: <span className="font-semibold">{c.name}</span>,
+      icon: foodish.test(c.name) ? <Utensils className="size-[17px]" strokeWidth={1.6} /> : <CalendarClock className="size-[17px]" strokeWidth={1.6} />,
+      title: <span className="font-semibold">{c.name.toUpperCase()} {!late && c.allAtHotelBy ? <span className="text-accent-strong">✦</span> : null}</span>,
       note: late ? (
-        <span className="font-semibold text-danger">
-          <span className="mr-1.5 rounded-full bg-danger-tint px-2 py-0.5 text-[10px] tracking-[0.14em]">AT RISK</span>
-          {c.late.map((l) => `${l.name} can't be at the stay before ${timeLabel(l.hotelBy)}`).join("; ")}
+        <span className="text-danger">
+          <span className="mr-1.5 rounded-full bg-danger-tint px-2 py-0.5 text-[10px] font-semibold tracking-[0.14em]">AT RISK</span>
+          {c.late.map((l) => `${l.name.split(" ")[0]} can't be at the stay before ${timeLabel(l.hotelBy)}`).join("; ")}
         </span>
       ) : c.allAtHotelBy ? (
-        "Everyone can be at the stay in time ✓"
+        "Everyone can make it ✓"
       ) : (
-        "Can't tell yet: someone's clock is unknown"
+        "Someone's clock is still unknown"
       ),
     });
   }
 
   if (items.length === 0) return null;
-  items.sort((a, b) => (a.local < b.local ? -1 : a.local > b.local ? 1 : a.kind === "arrive" ? -1 : 1));
+  const order: Record<Kind, number> = { arrive: 0, reach: 1, together: 2, commitment: 3 };
+  items.sort((a, b) => (a.local < b.local ? -1 : a.local > b.local ? 1 : order[a.kind] - order[b.kind]));
   const days = [...new Set(items.map((i) => i.local.slice(0, 10)))];
   const allClear = view.commitments.length > 0 && view.commitments.every((c) => c.allAtHotelBy) && view.clocks.every((c) => c.status === "KNOWN");
 
@@ -99,37 +116,44 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
     <section className="section" data-day-timeline data-shared-plan>
       <p className="eyebrow">The plan so far</p>
       {days.map((day) => (
-        <div key={day} className="mt-5">
-          <p className="font-display text-[15px] uppercase tracking-[0.08em] text-muted-foreground">{dayHead(`${day}T00:00`)}</p>
-          <ol className="mt-1 border-l border-border">
+        <div key={day} className="mt-6">
+          <h2 className="t-display text-[26px]">{dayHead(`${day}T00:00`)}</h2>
+          <ol className="relative mt-4">
+            {/* the spine that connects the day */}
+            <span aria-hidden className="absolute bottom-3 left-[5.6rem] top-3 w-px bg-border" />
             {items
               .filter((i) => i.local.startsWith(day))
               .map((i) => (
-                <li key={i.key} className={`relative py-3.5 pl-7 ${i.kind === "commitment" ? "tile-in" : ""}`} {...(i.commitmentName ? { "data-commitment": i.commitmentName } : {})}>
-                  <span className={`absolute -left-[9px] top-[1.15rem] flex size-[18px] items-center justify-center rounded-full bg-page ${i.risk ? "text-danger" : "text-foreground"}`}>{i.icon}</span>
-                  <div className="grid grid-cols-[5.2rem_1fr] gap-x-2">
-                    <p className={`whitespace-nowrap font-display text-[20px] leading-[1.1] tracking-[-0.01em] ${i.risk ? "text-danger" : ""}`}>{timeLabel(i.local)}</p>
-                    <div className="min-w-0">
-                      <p className="text-[15px] leading-snug">{i.title}</p>
-                      {i.note && <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{i.note}</p>}
-                      {i.pending && (
-                        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[12.5px] leading-snug" data-pending-move>
-                          <span className="rounded-full border border-dashed border-foreground/40 px-2 py-0.5 text-[10px] tracking-[0.14em]">{i.pending.stage === "AGREED" ? "AGREED" : "PROPOSED"}</span>
-                          <ArrowRight className="size-3 text-muted-foreground" />
-                          <span className="font-display text-[16px]">{timeLabel(i.pending.to)} ?</span>
-                          <span className="text-muted-foreground">
-                            {i.pending.stage === "AGREED" ? `Everyone accepted · the Plan changes when ${organiserName.split(" ")[0]} confirms.` : "Not in the Plan yet · waiting for the group."}
-                          </span>
-                        </p>
-                      )}
-                    </div>
+                <li key={i.key} className={`relative grid grid-cols-[5rem_1fr] gap-x-[1.1rem] ${i.kind === "reach" ? "py-1.5" : i.kind === "commitment" ? "tile-in py-5" : "py-3"}`} {...(i.commitmentName ? { "data-commitment": i.commitmentName } : {})}>
+                  <p className={`t-number whitespace-nowrap text-right ${i.kind === "commitment" ? "text-[24px]" : i.kind === "reach" ? "text-[14px] text-muted-foreground" : "text-[19px]"} ${i.risk ? "text-danger" : ""}`}>{timeLabel(i.local)}</p>
+                  <span aria-hidden className={`absolute left-[5.6rem] top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${i.kind === "commitment" ? `size-3 ${i.risk ? "bg-danger" : "bg-accent"}` : i.kind === "reach" ? "size-1.5 bg-border" : "size-2 bg-foreground"}`} />
+                  <div className="min-w-0 pl-1">
+                    {i.leg && (
+                      <p className="mb-0.5 text-[11.5px] text-muted-foreground" data-leg>
+                        ↓ {i.leg}
+                      </p>
+                    )}
+                    <p className={`flex items-center gap-2 leading-snug ${i.kind === "commitment" ? "font-display text-[22px] tracking-[-0.01em]" : i.kind === "reach" ? "text-[13px] text-muted-foreground" : "text-[15px]"}`}>
+                      {i.kind !== "reach" && i.icon && <span className="shrink-0 text-muted-foreground">{i.icon}</span>}
+                      <span>{i.title}</span>
+                    </p>
+                    {i.note && <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{i.note}</p>}
+                    {i.pending && (
+                      <p className="mt-2 text-[13px] leading-snug" data-pending-move>
+                        <span className="rounded-full border border-dashed border-foreground/40 px-2 py-0.5 text-[10px] font-semibold tracking-[0.14em]">{i.pending.stage === "AGREED" ? "AGREED" : "PROPOSED"}</span>{" "}
+                        <span className="t-number text-[20px]">{timeLabel(i.pending.to)} ?</span>
+                        <span className="mt-1 block text-[12px] text-muted-foreground">
+                          {i.pending.stage === "AGREED" ? `Everyone accepted · the Plan changes when ${organiserName.split(" ")[0]} confirms.` : "Not in the Plan yet · waiting for the group."}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 </li>
               ))}
           </ol>
         </div>
       ))}
-      {allClear && <p className="mt-3 font-display text-[18px] italic text-muted-foreground" data-clocks-agree>{HUMAN.clocksAgree}</p>}
+      {allClear && <p className="t-voice mt-4 text-[18px]" data-clocks-agree>{HUMAN.clocksAgree}</p>}
     </section>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { ClockwiseMark } from "@/components/ClockwiseMark";
 import { Paperclip, ArrowUp, Mic, Square, Loader2, X } from "lucide-react";
 import { uploadAttachment, deleteAttachment } from "@/app/attachment-actions";
 import { recordingToWav } from "@/lib/audio/to-wav";
@@ -14,7 +15,7 @@ function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
       type="submit"
       disabled={pending || externallyDisabled}
       aria-label="Send message"
-      className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <ArrowUp className="size-4" strokeWidth={2.25} />
     </button>
@@ -307,12 +308,12 @@ export function Composer({
       )}
 
       {voiceState === "recording" ? (
-        <div className="flex items-center gap-3 px-4 py-3" role="status" aria-live="polite">
+        <div className="flex min-h-[68px] items-center gap-3 px-4 py-3" role="status" aria-live="polite">
           <button
             type="button"
             onClick={cancelRecording}
             aria-label="Cancel recording"
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
           >
             <X className="size-4" />
           </button>
@@ -328,14 +329,15 @@ export function Composer({
             type="button"
             onClick={stopRecording}
             aria-label="Stop recording"
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-danger text-white transition-opacity hover:opacity-90"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-danger text-white transition-opacity hover:opacity-90"
           >
             <Square className="size-3.5" fill="currentColor" />
           </button>
         </div>
       ) : voiceState === "transcribing" ? (
-        <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground" role="status">
-          <Loader2 className="size-4 animate-spin" /> Transcribing…
+        <div className="vote-in flex min-h-[68px] items-center gap-3 px-4 py-3" role="status" aria-live="polite">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground"><ClockwiseMark size={18} working /></span>
+          <p className="font-display text-[17px] italic text-muted-foreground">Turning that into words…</p>
         </div>
       ) : (
         <form
@@ -352,14 +354,14 @@ export function Composer({
             setText("");
             await action(formData);
           }}
-          className="flex items-center gap-2 px-4 py-3"
+          className="flex items-center gap-1.5 px-3 py-2"
         >
           <button
             type="button"
             aria-label="Attach"
             disabled={disabled || isAttaching}
             onClick={() => fileInputRef.current?.click()}
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isAttaching ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
           </button>
@@ -378,14 +380,14 @@ export function Composer({
             autoComplete="off"
             placeholder={placeholder}
             disabled={disabled}
-            className="flex-1 rounded-full border border-border bg-page px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-11 min-w-0 flex-1 rounded-full border border-border bg-page px-4 py-2 text-base text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="button"
             aria-label="Record voice message"
             disabled={disabled}
             onClick={startRecording}
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Mic className="size-4" />
           </button>

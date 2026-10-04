@@ -41,24 +41,28 @@ export function FitCheck({
 
   if (!r) {
     return (
-      <button type="button" onClick={run} disabled={pending} data-fit-button className="mt-3 cursor-pointer rounded-full border border-foreground/25 px-4 py-1.5 text-[11.5px] font-semibold tracking-[0.12em] hover:border-foreground disabled:opacity-60">
-        {pending ? "CHECKING YOUR CLOCK…" : "DOES THIS FIT?"}
+      <button type="button" onClick={run} disabled={pending} data-fit-button className="btn btn-ghost mt-3 !px-4 !text-[11.5px]">
+        <span className="cw-mark">◷</span>
+        {pending ? "Checking your clock…" : "Does this fit?"}
       </button>
     );
   }
   if (!r.ok) {
     return (
-      <p className="mt-3 text-[12.5px] text-danger" data-fit-error>
-        {r.error}
-      </p>
+      <div className="vote-in mt-3" data-fit-error>
+        <p className="font-display text-[18px] leading-snug">Couldn&apos;t work that out just now.</p>
+        <button type="button" onClick={run} className="btn btn-ghost mt-2 !px-4 !text-[11.5px]">
+          Retry
+        </button>
+      </div>
     );
   }
   const ok: Ok = r;
   const head = ok.verdict === "YES" ? "Yes. You have time." : ok.verdict === "TIGHT" ? "Tight, but it works." : ok.verdict === "NO" ? `Not before ${ok.commitment?.name.toLowerCase() ?? "your next plan"}.` : "Nothing to be late for.";
   const tone = ok.verdict === "YES" ? "text-success" : ok.verdict === "TIGHT" ? "text-foreground" : ok.verdict === "NO" ? "text-danger" : "text-muted-foreground";
   return (
-    <div className="mt-3 border-l-2 border-accent pl-3.5" data-fit={ok.verdict}>
-      <p className={`font-display text-[22px] leading-[1.1] tracking-[-0.01em] ${tone}`}>{head.toUpperCase()}</p>
+    <div className="vote-in mt-4 border-l-2 border-accent pl-3.5" data-fit={ok.verdict}>
+      <p className={`t-display text-[24px] ${tone}`}>{head}</p>
       <p className="mt-1.5 text-[13px] leading-snug">{ok.reason}</p>
       <ul className="mt-2 space-y-0.5 text-[12.5px] text-muted-foreground">
         {ok.toMin != null && (
