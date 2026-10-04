@@ -452,7 +452,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                   o.category,
                   o.why,
                   <p className="mt-1 text-xs" data-fits>
-                    <span className="font-semibold text-accent-strong">Fits ✓</span> · {o.hours.state === "open" ? `open for your visit${o.hours.until ? ` (until ${o.hours.until})` : ""}` : "hours unavailable, check before you go"} · {o.walkToMin} min away · ~{o.stayMin} min there (assumed) · {o.walkOnMin} min {free.windowSource === "next-commitment" && free.next ? `to ${free.next.name} afterwards` : "back afterwards"} · {o.spareMin} min spare
+                    <span className="font-semibold text-accent-strong">Fits ✓</span> · {o.hours.state === "open" ? `open for your visit${o.hours.until ? ` (until ${o.hours.until})` : ""}` : (o.place.openingHours ? "hours unclear (holiday rules), check before you go" : "hours unavailable, check before you go")} · {o.walkToMin} min away · ~{o.stayMin} min there (assumed) · {o.walkOnMin} min {free.windowSource === "next-commitment" && free.next ? `to ${free.next.name} afterwards` : "back afterwards"} · {o.spareMin} min spare
                   </p>
                 )
               )}

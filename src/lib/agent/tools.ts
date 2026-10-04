@@ -1593,7 +1593,7 @@ async function searchNearbyTool(input: Record<string, unknown>, ctx: AgentContex
   if (!anchorKind && /^(me|my location|where i am|here|near me|my place)$/i.test(nearText)) anchorKind = "user_location";
   if (!anchorKind && /^(our|the|my) (hotel|stay)$|^hotel$/i.test(nearText)) anchorKind = "hotel";
   if (anchorKind === "user_location") {
-    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION themselves (the browser asks permission; it stays private to them). Do NOT search, name any place, or guess where they are. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION. It stays private to you. Or I can search around your hotel instead."` };
+    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION themselves (the browser asks permission; it stays private to them). Do NOT search, name any place, or guess where they are. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION. It stays private to you. Or name a place or area and I'll search around that."` };
   }
   let located: { point: LatLng; label: string } | { error: string };
   if (anchorKind === "hotel" || anchorKind === "arrival") {
@@ -1706,7 +1706,7 @@ async function findSavedOverlapTool(ctx: AgentContext): Promise<ToolExecutionRes
 async function freeTimeTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) return { output: "Live place search isn't connected, so I can't work out what fits. Do not name any places from memory." };
   if (input.anchor === "user_location") {
-    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION, then WHAT CAN I DO NOW? It stays private to you. Or I can work it out from your hotel."` };
+    return { output: `Clockwise can't see anyone's current location unless they press USE MY LOCATION. Say exactly: "I'd need your location for that. Open My Clockwise, then Around You, and tap USE MY LOCATION, then WHAT CAN I DO NOW? It stays private to you. Or I can work it out from your hotel or the destination."` };
   }
   const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
   const want = input.anchor === "arrival" ? a.arrival : input.anchor === "destination" ? a.destination : (a.stay ?? a.destination);
