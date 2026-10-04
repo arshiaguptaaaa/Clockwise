@@ -32,6 +32,7 @@ import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
 import { timeLabel } from "@/lib/traveller/journey";
 import { brandSearch, anchorsFor, orderCategories } from "@/lib/travel/around";
 import { freeTimeOptions } from "@/lib/travel/window";
+import { driveRoute } from "@/lib/travel/route-provider";
 import { getPrefs } from "@/lib/traveller/vibe";
 import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
 import { tripWindow } from "@/lib/stays";
@@ -472,6 +473,15 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     parameters: { type: "object", properties: {} },
   },
   {
+    name: "arrival_to_stay",
+    description:
+      "Read-only: 'how long will Shreya take to reach our stay after she lands?'. Returns the traveller's confirmed arrival, the provider-measured arrival-point -> stay route (with which provider produced it), and the earliest realistic time they can be at the stay. Numbers come from the stored provider route; never estimate them yourself.",
+    parameters: {
+      type: "object",
+      properties: { travellerName: { type: "string", description: "Which traveller. Omit for the person asking." } },
+    },
+  },
+  {
     name: "get_route",
     description:
       "Read-only: get the REAL distance and travel time between two places (walking, driving, or transit). Use for any 'how far'/'how long' question. Never estimate this yourself — always call this tool.",
@@ -557,6 +567,8 @@ export async function executeTool(
       return searchHotelsTool(input, ctx);
     case "search_nearby":
       return searchNearbyTool(input, ctx);
+    case "arrival_to_stay":
+      return arrivalToStayTool(input, ctx);
     case "free_time_options":
       return freeTimeTool(input, ctx);
     case "find_saved_overlap":
@@ -1739,6 +1751,18 @@ async function freeTimeTool(input: Record<string, unknown>, ctx: AgentContext): 
   };
 }
 
+async function arrivalToStayTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const named = typeof input.travellerName === "string" ? input.travellerName.trim().toLowerCase() : "";
+  const view = await buildRendezvousView(ctx.trip.id);
+  const clock = named ? view.clocks.find((c) => c.name.toLowerCase() === named || c.name.toLowerCase().startsWith(named)) : view.clocks.find((c) => c.userId === ctx.actingUserId);
+  if (!clock) return { output: named ? `${input.travellerName} hasn't confirmed a journey, so there's no arrival to measure from. Say so.` : "You haven't confirmed a journey yet. Say so." };
+  if (clock.status !== "KNOWN") return { output: `No stay-time yet for ${clock.name}: ${clock.status === "NO_STAY" ? "the group has no confirmed stay" : clock.status === "NO_ROUTE" ? "no provider route has been measured yet" : clock.status === "NO_ARRIVAL_POINT" ? "their arrival point isn't resolved" : "no arrival time"}. Say exactly that; do not estimate.` };
+  const provider = clock.routeProvider === "delhivery" ? "Delhivery Maps (a traffic-aware, hour-of-day estimate for the time they would leave the airport, not live traffic)" : clock.routeProvider === "geoapify" ? "Geoapify (a free-flow driving route, no traffic model)" : "the route provider";
+  return {
+    output: `${clock.name} lands at ${clock.arrivalPlace ?? "their arrival point"} at ${timeLabel(clock.arriveLocal)}. ${provider} measures ${clock.routeKm} km, about ${clock.routeMinutes} minutes to ${view.stayName}. With a 15-minute allowance for bags and exits, the earliest realistic time at the stay is ${timeLabel(clock.hotelBy)}. State these numbers and the provider's own basis in one or two sentences; do not call it live traffic.`,
+  };
+}
+
 async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   if (!isGeoapifyConfigured()) {
     return { output: "Live routing is temporarily unavailable — I can't measure real distance/time right now. Do not estimate any travel time or distance." };
@@ -1761,7 +1785,14 @@ async function getRouteTool(input: Record<string, unknown>, ctx: AgentContext): 
   let toUsed = to;
   const snapNotes: string[] = [];
   try {
-    route = await geoapifyGetRoute(from.point, to.point, mode);
+    if (mode === "drive") {
+      // India drives are measured by Delhivery Maps when available (stated on the card); elsewhere Geoapify.
+      const d = await driveRoute(from.point, to.point, { decision: "Route question asked in chat" });
+      route = { mode, distanceMeters: d.distanceMeters, durationSeconds: d.durationSeconds, provider: d.provider, retrievedAt: d.retrievedAt };
+      if (d.provider === "delhivery") snapNotes.push(d.basis);
+    } else {
+      route = await geoapifyGetRoute(from.point, to.point, mode);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown error";
     // The router rejected a raw point (typically the centre of a lake, park or

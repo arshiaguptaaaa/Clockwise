@@ -21,7 +21,7 @@ export function RendezvousSection({ view }: { view: RendezvousView }) {
               </p>
               {c.status === "KNOWN" ? (
                 <p className="text-xs text-muted-foreground">
-                  {c.routeKm} km · ~{c.routeMinutes} min to {view.stayName} (provider route) → at the stay by about <span className="font-semibold text-foreground">{hhmm(c.hotelBy!)}</span>
+                  {c.routeKm} km · ~{c.routeMinutes} min to {view.stayName} ({c.routeProvider === "delhivery" ? "Delhivery, traffic-aware estimate" : c.routeProvider === "geoapify" ? "Geoapify driving route" : "provider route"}) → at the stay by about <span className="font-semibold text-foreground">{hhmm(c.hotelBy!)}</span>
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -51,7 +51,7 @@ export function RendezvousSection({ view }: { view: RendezvousView }) {
           ))}
         </ul>
       )}
-      <p className="mt-3 text-[10px] text-muted-foreground">Arrival → stay uses provider-measured driving routes plus a 15-minute allowance for bags and exits. No ticket details are shown.</p>
+      <p className="mt-3 text-[10px] text-muted-foreground">Arrival → stay uses provider-measured driving routes (Delhivery in India, Geoapify elsewhere) plus a 15-minute allowance for bags and exits. Estimates, not live traffic. No ticket details are shown.</p>
     </section>
   );
 }

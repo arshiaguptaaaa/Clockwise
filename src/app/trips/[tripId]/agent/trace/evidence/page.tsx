@@ -24,7 +24,7 @@ export default async function RailEvidencePage({ params }: { params: Promise<{ t
       </Link>
       <h1 className="mt-3 font-display text-2xl">DEVELOPER EVIDENCE · RAIL CALLS</h1>
       <p className="mt-1 text-xs text-muted-foreground">
-        Organiser only. Sanitised: API keys, Authorization headers, client secrets, access tokens and cookies are redacted; emails and phone numbers are masked. Gnani transcripts appear here exactly as returned. No Delhivery call exists — it is not integrated.
+        Organiser only. Sanitised: API keys, Authorization headers, client secrets, access tokens and cookies are redacted; emails and phone numbers are masked. Gnani transcripts appear here exactly as returned.
       </p>
       <div className="mt-2 flex gap-2">
         <CopyJson value={calls} label="Copy all as JSON" />

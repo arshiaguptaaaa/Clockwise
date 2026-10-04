@@ -4,7 +4,8 @@
 // each person can realistically be at the stay and what that means for shared
 // commitments. It never invents a route time: no provider route => UNKNOWN.
 import { prisma } from "./prisma";
-import { getRoute } from "./travel/geoapify-provider";
+import { driveRoute } from "./travel/route-provider";
+import { isDelhiveryConfigured, inIndia } from "./delhivery/client";
 import { notify } from "./notifications";
 
 // A stated assumption (collecting bags, leaving the terminal, finding the car).
@@ -23,12 +24,18 @@ export async function recomputeRendezvous(tripId: string) {
   const stay = await confirmedStay(tripId);
   const journeys = await prisma.travellerJourney.findMany({ where: { tripId, status: "CONFIRMED" } });
   let routed = 0;
+  const providersUsed = new Set<string>();
   if (stay?.latitude != null && stay.longitude != null) {
     for (const j of journeys) {
       if (j.arrivalLat == null || j.arrivalLng == null) continue;
-      if (j.routeStayBookingId === stay.id && j.routeToStaySeconds != null) continue;
+      // Keep a fresh route for THIS stay, unless Delhivery is available for these Indian points and the stored route came from elsewhere.
+      const wantDelhivery = isDelhiveryConfigured() && inIndia({ lat: j.arrivalLat, lng: j.arrivalLng }) && inIndia({ lat: stay.latitude, lng: stay.longitude });
+      if (j.routeStayBookingId === stay.id && j.routeToStaySeconds != null && (!wantDelhivery || j.routeProvider === "delhivery")) continue;
       try {
-        const r = await getRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, "drive");
+        // The traveller leaves the airport after the allowance for bags and exits: that is the departure time to price.
+        const departLocal = j.arriveLocal ? toLocal(toMs(j.arriveLocal) + ARRIVAL_BUFFER_MIN * 60_000) : null;
+        const r = await driveRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, { departLocal, decision: `Arrival-to-stay time for ${j.userId}: feeds readiness, rendezvous and commitment feasibility` });
+        providersUsed.add(r.provider);
         await prisma.travellerJourney.update({
           where: { id: j.id },
           data: { routeToStayMeters: Math.round(r.distanceMeters), routeToStaySeconds: Math.round(r.durationSeconds), routeProvider: r.provider, routeComputedAt: new Date(r.retrievedAt), routeStayBookingId: stay.id },
@@ -46,7 +53,7 @@ export async function recomputeRendezvous(tripId: string) {
       scope: "GROUP",
       sourceChannel: "SYSTEM",
       confidence: "HIGH",
-      payload: JSON.stringify({ journeys: journeys.length, routedNow: routed, stay: stay?.placeName ?? null, provider: "geoapify", bufferMinutes: ARRIVAL_BUFFER_MIN }),
+      payload: JSON.stringify({ journeys: journeys.length, routedNow: routed, stay: stay?.placeName ?? null, provider: [...providersUsed].join("+") || null, bufferMinutes: ARRIVAL_BUFFER_MIN }),
       propagation: JSON.stringify(["plan", "notifications"]),
     },
   });
@@ -61,6 +68,7 @@ export type TravellerClock = {
   arrivalPlace: string | null;
   routeMinutes: number | null;
   routeKm: number | null;
+  routeProvider: string | null;
   hotelBy: string | null; // local YYYY-MM-DDTHH:mm
   status: "KNOWN" | "NO_STAY" | "NO_ARRIVAL_TIME" | "NO_ARRIVAL_POINT" | "NO_ROUTE";
 };
@@ -96,12 +104,12 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
   const nameOf = new Map(members.map((m) => [m.userId, m.user.name]));
   const clocks: TravellerClock[] = journeys.map((j) => {
     const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName };
-    if (!stay) return { ...base, routeMinutes: null, routeKm: null, hotelBy: null, status: "NO_STAY" as const };
-    if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
-    if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
-    if (j.routeToStaySeconds == null || j.routeStayBookingId !== stay.id) return { ...base, routeMinutes: null, routeKm: null, hotelBy: null, status: "NO_ROUTE" as const };
+    if (!stay) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_STAY" as const };
+    if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
+    if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
+    if (j.routeToStaySeconds == null || j.routeStayBookingId !== stay.id) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ROUTE" as const };
     const hotelBy = toLocal(toMs(j.arriveLocal) + (j.routeToStaySeconds + ARRIVAL_BUFFER_MIN * 60) * 1000);
-    return { ...base, routeMinutes: Math.round(j.routeToStaySeconds / 60), routeKm: Math.round(((j.routeToStayMeters ?? 0) / 1000) * 10) / 10, hotelBy, status: "KNOWN" as const };
+    return { ...base, routeMinutes: Math.round(j.routeToStaySeconds / 60), routeKm: Math.round(((j.routeToStayMeters ?? 0) / 1000) * 10) / 10, routeProvider: j.routeProvider, hotelBy, status: "KNOWN" as const };
   });
   const have = new Set(journeys.map((j) => j.userId));
   const noJourney = members.filter((m) => !have.has(m.userId)).map((m) => m.user.name);

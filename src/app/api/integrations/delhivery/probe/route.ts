@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/session";
-import { compactForEvidence, delhiveryGeocode, delhiveryRoute, delhiveryMatrix, isDelhiveryConfigured, delhiveryBase } from "@/lib/delhivery/client";
+import { compactForEvidence, extractMatrixCell, delhiveryGeocode, delhiveryRoute, delhiveryMatrix, isDelhiveryConfigured, delhiveryBase } from "@/lib/delhivery/client";
 import { resolveLocationText } from "@/lib/travel/geoapify-provider";
 
 // Signed-in, read-only capability probe. Calls the documented endpoints for a Bengaluru airport->Indiranagar
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     const m = await delhiveryMatrix([gf], [gt], "auto", "probe");
     out.routeFreeFlow = { ok: r1.ok, status: r1.httpStatus, ms: r1.latencyMs, parsed: r1.route, data: compactForEvidence(r1.ok ? r1.data : (r1 as { data?: unknown }).data) };
     out.routeTrafficAware = { ok: r2.ok, status: r2.httpStatus, ms: r2.latencyMs, departure: dep, parsed: r2.route, data: compactForEvidence(r2.ok ? r2.data : (r2 as { data?: unknown }).data) };
-    out.matrix = { ok: m.ok, status: m.httpStatus, ms: m.latencyMs, data: compactForEvidence(m.ok ? m.data : (m as { data?: unknown }).data) };
+    out.matrix = { ok: m.ok, status: m.httpStatus, ms: m.latencyMs, parsed: m.ok ? extractMatrixCell(m.data) : null, data: compactForEvidence(m.ok ? m.data : (m as { data?: unknown }).data) };
   }
   return NextResponse.json(out);
 }

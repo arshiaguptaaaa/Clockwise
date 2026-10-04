@@ -87,19 +87,15 @@ export async function delhiveryGeocode(address: string, decision?: string) {
 
 export type DelhiveryRoute = { distanceMeters: number; durationSeconds: number; trafficAware: boolean; departureTime: string | null; evidenceId: string | null; latencyMs: number };
 
-// Pull distance (m) and duration (s) out of a /route response. Valhalla-style summaries
-// (trip.summary / legs[].summary with length in km and time in s) and flat shapes are handled;
-// the units are fixed by the docs for the matrix ("distance (km), duration (seconds)") and by the
-// response itself for routes (checked in the probe before this is trusted).
+// Pull distance (m) and duration (s) out of a /route response. Observed shape (real response):
+//   { recommended_route: { distance: 38.2 (km), duration: 3998.0 (s), legs: [{ summary: { length (km), time (s), has_toll… } }] }, alternates: [] }
+// so distance is kilometres and duration is seconds, matching the documented matrix units
+// ("distance (km), duration (seconds)"). Nothing is returned unless both numbers exist.
 export function extractRouteSummary(data: unknown): { distanceMeters: number; durationSeconds: number } | null {
-  const candidates: unknown[] = [pick(data, ["routes", "0"]), pick(data, ["trip"]), pick(data, ["route"]), data];
-  for (const c of candidates) {
-    const summary = pick(c, ["summary"]) ?? c;
-    const dur = num(pick(summary, ["time"])) ?? num(pick(summary, ["duration"])) ?? num(pick(summary, ["duration_seconds"]));
-    const lenKm = num(pick(summary, ["length"])) ?? num(pick(summary, ["distance_km"]));
-    const distM = num(pick(summary, ["distance"])) ?? num(pick(summary, ["distance_meters"]));
-    if (dur != null && (lenKm != null || distM != null)) return { durationSeconds: dur, distanceMeters: lenKm != null ? lenKm * 1000 : distM! };
-  }
+  const rr = pick(data, ["recommended_route"]);
+  const dur = num(pick(rr, ["duration"])) ?? num(pick(rr, ["legs", "0", "summary", "time"]));
+  const km = num(pick(rr, ["distance"])) ?? num(pick(rr, ["legs", "0", "summary", "length"]));
+  if (dur != null && km != null) return { durationSeconds: dur, distanceMeters: km * 1000 };
   return null;
 }
 
@@ -122,4 +118,12 @@ export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "a
 
 export async function delhiveryMatrix(sources: LatLng[], targets: LatLng[], mode: "auto" | "motorcycle" | "pedestrian" = "auto", decision?: string) {
   return delhiveryCall("maps.matrix", "POST", "/matrix", { sources: sources.map((p) => [p.lat, p.lng]), targets: targets.map((p) => [p.lat, p.lng]), travel_mode: mode }, decision);
+}
+
+// First cell of a /matrix response: distance in km, time in seconds.
+export function extractMatrixCell(data: unknown): { distanceMeters: number; durationSeconds: number } | null {
+  const cell = pick(data, ["sources_to_targets", "0", "0"]);
+  const km = num(pick(cell, ["distance"]));
+  const t = num(pick(cell, ["time"]));
+  return km != null && t != null ? { distanceMeters: km * 1000, durationSeconds: t } : null;
 }
