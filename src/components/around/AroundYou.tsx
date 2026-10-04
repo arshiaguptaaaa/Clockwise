@@ -5,14 +5,18 @@ import { Heart } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { HUMAN } from "@/lib/copy";
-import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import { suggestPlacesAction, chooseSuggestionAction, reverseLocalityAction, meetupAction, aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import { FitCheck } from "./FitCheck";
+import type { SuggestedPlace } from "@/lib/travel/locate";
+import type { MeetupResult } from "@/lib/travel/meetup";
 import type { NextUp, FreeTime } from "@/lib/travel/window";
 import type { AroundPlace } from "@/lib/travel/around";
 import { AROUND_CATEGORIES, CATEGORY_HEADLINE, countWordTitle } from "@/lib/travel/around-categories";
 
 type Ok = Extract<AroundResponse, { ok: true }>;
 type RouteOk = Extract<RouteResponse, { ok: true }>;
-type Anchor = "me" | "stay" | "arrival" | "destination";
+type Anchor = "me" | "stay" | "arrival" | "destination" | "anywhere";
+type Custom = { lat: number; lng: number; label: string };
 // Current location lives ONLY in this component's memory: never stored, never sent to the group.
 type Fix = { lat: number; lng: number; at: number };
 
@@ -83,6 +87,13 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
   const [routeErr, setRouteErr] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busy, start] = useTransition();
+  // ANYWHERE: a place the traveller typed and picked. DESTINATION is the default; only ME asks the browser.
+  const [custom, setCustom] = useState<Custom | null>(null);
+  const [anyQ, setAnyQ] = useState("");
+  const [sugg, setSugg] = useState<{ provider: string; note: string | null; items: SuggestedPlace[] } | null>(null);
+  const [suggErr, setSuggErr] = useState<string | null>(null);
+  const [locality, setLocality] = useState<{ locality: string | null; city: string | null; state: string | null } | null>(null);
+  const [meet, setMeet] = useState<MeetupResult | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -124,15 +135,17 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       else setAnchor("me");
       return;
     }
+    if (a === "anywhere") setRes(null);
     setAnchor(a);
   };
 
-  const me = anchor === "me" && fix ? { lat: fix.lat, lng: fix.lng } : null;
+  const me = anchor === "me" && fix ? { lat: fix.lat, lng: fix.lng } : anchor === "anywhere" && custom ? custom : null;
 
   const run = (c: string, a: Anchor, diet?: "vegetarian") =>
     start(async () => {
       setErr(null);
       setRouteFor(null);
+      setMeet(null);
       const r = await aroundSearchAction(tripId, c, { diet, anchor: a, me });
       if (r.ok) {
         setRes(r);
@@ -144,13 +157,48 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
     });
 
   useEffect(() => {
-    if (!anchor) return;
+    if (!anchor || (anchor === "anywhere" && !custom)) return;
     run(cat, anchor, veg && (cat === "restaurant" || cat === "cafe") ? "vegetarian" : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cat, veg, anchor, fix?.at]);
+  }, [cat, veg, anchor, fix?.at, custom?.label]);
+
+  // ME -> a readable place name ("Indiranagar, Bengaluru"). The position is used for this call only.
+  useEffect(() => {
+    if (anchor !== "me" || !fix) return;
+    let alive = true;
+    void reverseLocalityAction(tripId, { lat: fix.lat, lng: fix.lng }).then((r) => {
+      if (alive) setLocality(r.ok ? r.locality : null);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor, fix?.at]);
+
+  // ANYWHERE autosuggest (debounced; Delhivery first, labelled Geoapify fallback).
+  useEffect(() => {
+    if (anchor !== "anywhere" || anyQ.trim().length < 3 || custom?.label === anyQ) {
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      void suggestPlacesAction(tripId, anyQ).then((r) => {
+        if (!alive) return;
+        if (r.ok) {
+          setSugg({ provider: r.provider, note: r.note, items: r.suggestions });
+          setSuggErr(null);
+        } else setSuggErr(r.error);
+      });
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyQ, anchor]);
 
   useEffect(() => {
-    if (!anchor) return;
+    if (!anchor || (anchor === "anywhere" && !custom)) return;
     let alive = true;
     void nextUpAction(tripId, { anchor, me }).then((r) => {
       if (alive) setNextUp(r.ok ? r.nextUp : { none: r.error });
@@ -159,17 +207,28 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, fix?.at]);
+  }, [anchor, fix?.at, custom?.label]);
 
   const shown = res?.places.filter((p) => maxWalk == null || (p.walkMinutes != null && p.walkMinutes <= maxWalk)) ?? [];
   const anchorChips: { id: Anchor; icon: string; label: string; ok: boolean; why?: string }[] = [
-    { id: "me", icon: "📍", label: "ME", ok: true },
-    { id: "stay", icon: "🏨", label: "HOTEL", ok: anchors.stay.available, why: "No confirmed stay yet" },
-    { id: "arrival", icon: "✈", label: "ARRIVAL", ok: anchors.arrival.available, why: "Confirm your journey first" },
     { id: "destination", icon: "◎", label: "DESTINATION", ok: anchors.destination.available, why: "No destination yet" },
+    { id: "stay", icon: "🏨", label: "STAY", ok: anchors.stay.available, why: "No confirmed stay yet" },
+    { id: "arrival", icon: "✈", label: "ARRIVAL", ok: anchors.arrival.available, why: "Confirm your journey first" },
+    { id: "me", icon: "📍", label: "ME", ok: true },
+    { id: "anywhere", icon: "⌕", label: "ANYWHERE", ok: true },
   ];
   const whereText =
-    anchor === "me" ? "where you are" : anchor === "stay" ? "your hotel" : anchor === "arrival" ? "your arrival point" : anchor === "destination" ? (anchors.destination.label ?? "the destination").split(",")[0] : "";
+    anchor === "me"
+      ? (locality?.locality ?? locality?.city ?? "where you are")
+      : anchor === "anywhere"
+        ? (custom?.label ?? "anywhere").split(",")[0]
+        : anchor === "stay"
+          ? "your hotel"
+          : anchor === "arrival"
+            ? "your arrival point"
+            : anchor === "destination"
+              ? (anchors.destination.label ?? "the destination").split(",")[0]
+              : "";
 
   // ---- Step 1: nothing is known about where the traveller is until they say so.
   if (!anchor) {
@@ -285,6 +344,20 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                   Open in Maps
                 </a>
               </div>
+              <FitCheck
+                tripId={tripId}
+                place={{ name: p.name, lat: p.lat, lng: p.lng }}
+                kind={catKey}
+                anchor={anchor}
+                me={me}
+                saved={on}
+                onSave={() =>
+                  start(async () => {
+                    const r = await toggleSavePlaceAction(tripId, p, cat);
+                    if (r.ok && r.saved) setSaved((x) => [...x, p.providerPlaceId]);
+                  })
+                }
+              />
               {extra}
               {open && (
                 <div className="mt-3 space-y-2 rounded-2xl bg-surface-muted p-3.5" data-route-panel>
@@ -321,7 +394,17 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           </span>
           Around you
         </p>
-        <h1 className="headline headline-xl mt-2">Around {whereText}.</h1>
+        {anchor === "me" && locality && (
+          <p className="eyebrow mt-2" data-youre-around>
+            You&apos;re around
+          </p>
+        )}
+        <h1 className="headline headline-xl mt-2">{anchor === "me" && locality ? `${whereText}.` : anchor === "anywhere" && !custom ? "Anywhere." : `Around ${whereText}.`}</h1>
+        {anchor === "me" && locality && (locality.city || locality.state) && (
+          <p className="lede mt-1" data-locality>
+            {[locality.locality ? locality.city : null, locality.state].filter(Boolean).join(", ")}
+          </p>
+        )}
         <p className="lede mt-2" data-anchor-note>
           {anchor === "me" && fix
             ? `Location from ${minutesAgo(fix.at, now)}. Private to you.`
@@ -329,7 +412,11 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
               ? anchors.stay.label
               : anchor === "arrival"
                 ? anchors.arrival.label
-                : "Based around the destination. It isn't your hotel or where you are."}
+                : anchor === "anywhere"
+                  ? custom
+                    ? `Searching around ${custom.label}. Nothing about where you actually are.`
+                    : "Type any place in India and pick it. Your location isn't used."
+                  : "Based around the destination. It isn't your hotel or where you are."}
           {anchor === "me" && fix && (
             <button type="button" onClick={requestMyLocation} className="ml-2 cursor-pointer font-semibold text-accent">
               REFRESH
@@ -357,6 +444,53 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
             </button>
           ))}
         </div>
+        {anchor === "anywhere" && (
+          <div className="mt-3" data-anywhere>
+            <input
+              value={anyQ}
+              onChange={(e) => {
+                setAnyQ(e.target.value);
+                if (custom && e.target.value !== custom.label) setCustom(null);
+                setSuggErr(null);
+              }}
+              autoFocus
+              placeholder="Indiranagar, Cubbon Park, Hawa Mahal, Bangalore airport…"
+              className="w-full border-b border-foreground/30 bg-transparent py-2 font-display text-[20px] tracking-[-0.01em] outline-none placeholder:text-muted-foreground/50 focus:border-accent"
+            />
+            {suggErr && <p className="mt-2 text-xs text-danger">{suggErr}</p>}
+            {sugg && !custom && anyQ.trim().length >= 3 && (
+              <div className="mt-1">
+                {sugg.note && <p className="mt-1 text-[11.5px] text-muted-foreground" data-suggest-note>{sugg.note}</p>}
+                <ul className="row-rule">
+                  {sugg.items.length === 0 && <li className="py-2.5 text-sm text-muted-foreground">No match. Try a fuller name.</li>}
+                  {sugg.items.map((it) => (
+                    <li key={it.id}>
+                      <button
+                        type="button"
+                        data-suggestion
+                        onClick={() =>
+                          start(async () => {
+                            const r = await chooseSuggestionAction(tripId, it);
+                            if (r.ok) {
+                              setCustom({ lat: r.lat, lng: r.lng, label: it.label });
+                              setAnyQ(it.label);
+                              setSugg(null);
+                            } else setSuggErr(r.error);
+                          })
+                        }
+                        className="block w-full cursor-pointer py-2.5 text-left"
+                      >
+                        <span className="block text-[14.5px] font-semibold leading-snug">{it.label}</span>
+                        {it.secondary && <span className="block text-[12px] leading-snug text-muted-foreground">{it.secondary}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground">Suggestions · {sugg.provider === "delhivery" ? "Delhivery Maps" : "Geoapify"}</p>
+              </div>
+            )}
+          </div>
+        )}
         {(loc === "denied" || loc === "failed") && (
           <p className="mt-3 font-display text-[18px] leading-snug tracking-[-0.01em]" data-location-off>
             {loc === "denied" ? "Location's off." : "I couldn't get a fix on your location."} {anchors.stay.available ? "I can search around your hotel instead." : "Pick another anchor above."}
@@ -540,6 +674,54 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
 
       {res && shown.length > 0 && CATEGORY_HEADLINE[res.category] && (
         <h2 className="headline headline-lg mt-2" data-around-headline>{CATEGORY_HEADLINE[res.category]}</h2>
+      )}
+      {res && shown.length >= 2 && (
+        <div data-meetup>
+          {!meet ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                start(async () => {
+                  setMeet(await meetupAction(tripId, shown.slice(0, 6), { me: anchor === "me" ? me : null }));
+                })
+              }
+              className="cursor-pointer rounded-full border border-foreground/25 px-4 py-2 text-[11.5px] font-semibold tracking-[0.12em] hover:border-foreground disabled:opacity-60"
+            >
+              EASIEST FOR EVERYONE ✦
+            </button>
+          ) : !meet.ok ? (
+            <p className="text-[12.5px] text-muted-foreground" data-meetup-error>
+              {meet.error}{" "}
+              <button type="button" onClick={() => setMeet(null)} className="cursor-pointer underline underline-offset-4">
+                Close
+              </button>
+            </p>
+          ) : (
+            <div className="border-l-2 border-accent pl-3.5" data-meetup-result>
+              <p className="eyebrow text-accent">Easiest for everyone ✦</p>
+              <p className="headline headline-lg mt-1">{meet.ranked[0].candidate.name}</p>
+              <ul className="mt-2 space-y-0.5 text-[13px]">
+                {meet.people.map((pp) => (
+                  <li key={pp.userId}>
+                    <span className="font-semibold">{pp.firstName}</span> · {meet.ranked[0].minutes[pp.userId]} min <span className="text-[11.5px] text-muted-foreground">({pp.basis})</span>
+                  </li>
+                ))}
+              </ul>
+              {meet.ranked.length > 1 && (
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  Next: {meet.ranked.slice(1, 3).map((r) => `${r.candidate.name} (longest ${r.worst} min)`).join(" · ")}
+                </p>
+              )}
+              <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                Ranked by the longest single journey, then the total, not by the midpoint. {meet.note} {meet.provider === "delhivery" ? "Delhivery Maps." : "Geoapify."}
+              </p>
+              <button type="button" onClick={() => setMeet(null)} className="mt-1 cursor-pointer text-[11.5px] text-muted-foreground underline underline-offset-4">
+                Close
+              </button>
+            </div>
+          )}
+        </div>
       )}
       <ul className="row-rule">
         {shown.map((p) => renderCard(p, res?.category ?? cat, res?.why[p.providerPlaceId]))}

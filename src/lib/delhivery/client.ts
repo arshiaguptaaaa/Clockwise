@@ -25,24 +25,33 @@ export function compactForEvidence(v: unknown, depth = 0): unknown {
 
 export type DelhiveryOutcome =
   | { ok: true; httpStatus: number; latencyMs: number; data: unknown; evidenceId: string | null }
-  | { ok: false; blocked: "DELHIVERY_CREDENTIALS_REQUIRED" | "DELHIVERY_TOKEN_REJECTED" | null; httpStatus: number | null; latencyMs: number; error: string; data?: unknown; evidenceId: string | null };
+  | { ok: false; blocked: "DELHIVERY_CREDENTIALS_REQUIRED" | "DELHIVERY_TOKEN_REJECTED" | "DELHIVERY_RATE_LIMITED" | null; httpStatus: number | null; latencyMs: number; error: string; data?: unknown; evidenceId: string | null };
+
+// After a 429 this server instance stops asking for a while, so a rate-limited token isn't burned
+// further by retries. The window follows Retry-After when Delhivery sends it.
+let rateLimitedUntil = 0;
+export const delhiveryRateLimitedFor = () => Math.max(0, rateLimitedUntil - Date.now());
 
 export type EvidenceCtx = { tripId?: string | null; userId?: string | null; decision?: string };
 
 // `evidenceOverride` replaces what is RECORDED (never what is sent): used so a live location or a
 // resolved home address never lands in the evidence log.
-export type EvidenceOverride = { request?: unknown; response?: unknown };
+export type EvidenceOverride = { request?: unknown; response?: unknown | ((data: unknown) => unknown) };
 
 export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string, evidenceOverride?: EvidenceOverride): Promise<DelhiveryOutcome> {
   const evCtx: EvidenceCtx = typeof ctx === "string" ? { decision: ctx } : (ctx ?? {});
   const token = process.env.DELHIVERY_MAPS_TOKEN?.trim();
   if (!token) return { ok: false, blocked: "DELHIVERY_CREDENTIALS_REQUIRED", httpStatus: null, latencyMs: 0, error: "DELHIVERY_MAPS_TOKEN is not set", evidenceId: null };
+  if (Date.now() < rateLimitedUntil) {
+    return { ok: false, blocked: "DELHIVERY_RATE_LIMITED", httpStatus: 429, latencyMs: 0, error: `Delhivery rate limit: not retried for another ${Math.ceil((rateLimitedUntil - Date.now()) / 1000)}s`, evidenceId: null };
+  }
   const url = new URL(`${delhiveryBase()}${path}`);
   if (method === "GET") for (const [k, v] of Object.entries(payload)) if (v != null) url.searchParams.set(k, String(v));
   const started = Date.now();
   let status: number | null = null;
   let data: unknown = null;
   let error = "";
+  let rateHeaders: Record<string, string> | null = null;
   try {
     const res = await fetch(url, {
       method,
@@ -51,6 +60,15 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
       signal: AbortSignal.timeout(15_000),
     });
     status = res.status;
+    if (res.status === 429) {
+      const ra = Number(res.headers.get("retry-after"));
+      rateLimitedUntil = Date.now() + (ra > 0 && ra < 3600 ? ra * 1000 : 60_000);
+    }
+    // Only rate-limit headers (never auth or cookies) are kept, so the evidence shows the actual limit.
+    rateHeaders = {};
+    res.headers.forEach((v, k) => {
+      if (/^(retry-after|x-ratelimit|ratelimit)/i.test(k)) rateHeaders![k] = v;
+    });
     const text = await res.text();
     try {
       data = text ? JSON.parse(text) : null;
@@ -68,7 +86,7 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
     endpoint: `${method} ${url.origin}${url.pathname}`,
     method,
     request: evidenceOverride?.request ?? (method === "GET" ? Object.fromEntries(url.searchParams) : payload),
-    response: evidenceOverride?.response ?? compactForEvidence(data ?? { error }),
+    response: (typeof evidenceOverride?.response === "function" ? (evidenceOverride.response as (d: unknown) => unknown)(data) : evidenceOverride?.response) ?? compactForEvidence(rateHeaders && Object.keys(rateHeaders).length ? { ...(data && typeof data === "object" ? (data as object) : { value: data }), _rateLimitHeaders: rateHeaders } : (data ?? { error })),
     httpStatus: status,
     durationMs: latencyMs,
     context: evCtx,
@@ -145,10 +163,137 @@ export async function delhiverySearchRaw(query: string, bias?: LatLng | null, ct
 // POST /rvg {req_id, lat, lng} - coordinates -> structured address. A LIVE location is the traveller's
 // private state: the evidence record keeps neither the coordinates nor the full address (see redact).
 export async function delhiveryReverseRaw(p: LatLng, ctx?: EvidenceCtx | string, redact = false) {
-  return delhiveryCall("maps.reverse_geocode", "POST", "/rvg", { req_id: `clockwise-${Date.now()}`, lat: p.lat, lng: p.lng }, ctx, redact ? { request: { lat: "[not stored: live location]", lng: "[not stored: live location]" } } : undefined);
+  return delhiveryCall("maps.reverse_geocode", "POST", "/rvg", { req_id: `clockwise-${Date.now()}`, lat: p.lat, lng: p.lng }, ctx, redact ? { request: { lat: "[not stored: live location]", lng: "[not stored: live location]" }, response: (d: unknown) => ({ stored: "locality only (live location is private)", locality: parseReverse(d)?.locality ?? null, city: parseReverse(d)?.city ?? null, state: parseReverse(d)?.state ?? null }) } : undefined);
 }
 
 // POST /isochrone {origin:[lat,lng], cost_type:"time"|"distance", cost_value, travel_mode, direction, encode_geojson}
 export async function delhiveryIsochroneRaw(origin: LatLng, seconds: number, mode: "auto" | "motorcycle" | "pedestrian" = "auto", ctx?: EvidenceCtx | string) {
   return delhiveryCall("maps.isochrone", "POST", "/isochrone", { origin: [origin.lat, origin.lng], cost_type: "time", cost_value: Math.round(seconds), travel_mode: mode, direction: "outbound", encode_geojson: false }, ctx);
+}
+
+// ---- Parsed views (tolerant: numbers/labels are only taken from fields that exist) ----
+
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+const firstStr = (o: unknown, keys: string[]): string | null => {
+  for (const k of keys) {
+    const v = str(pick(o, k.split(".")));
+    if (v) return v;
+  }
+  return null;
+};
+
+export type Suggestion = { id: string; label: string; secondary: string | null; point: LatLng | null };
+
+// Pulls a coordinate out of a suggestion in whichever of the common shapes it uses.
+function suggestionPoint(o: unknown): LatLng | null {
+  const pairs: [string[], string[]][] = [
+    [["lat"], ["lng"]],
+    [["lat"], ["lon"]],
+    [["latitude"], ["longitude"]],
+    [["location", "lat"], ["location", "lng"]],
+    [["geometry", "location", "lat"], ["geometry", "location", "lng"]],
+    [["coordinates", "lat"], ["coordinates", "lng"]],
+  ];
+  for (const [a, b] of pairs) {
+    const lat = num(pick(o, a));
+    const lng = num(pick(o, b));
+    if (lat != null && lng != null) return { lat, lng };
+  }
+  const arr = pick(o, ["coordinates"]);
+  if (Array.isArray(arr) && arr.length >= 2 && typeof arr[0] === "number" && typeof arr[1] === "number") return { lat: arr[1] as number, lng: arr[0] as number };
+  return null;
+}
+
+export function parseSuggestions(data: unknown): Suggestion[] {
+  const list = Array.isArray(data) ? data : ([pick(data, ["results"]), pick(data, ["suggestions"]), pick(data, ["data"]), pick(data, ["predictions"]), pick(data, ["items"])].find((x) => Array.isArray(x)) as unknown[] | undefined) ?? [];
+  const out: Suggestion[] = [];
+  for (const [i, item] of list.entries()) {
+    const label = firstStr(item, ["name", "title", "display_name", "displayName", "label", "main_text", "description", "formatted_address", "address", "text"]);
+    if (!label) continue;
+    const secondary = firstStr(item, ["secondary_text", "subtitle", "locality", "city", "formatted_address", "address", "description"]);
+    out.push({ id: firstStr(item, ["id", "place_id", "placeId", "uid"]) ?? `s${i}`, label, secondary: secondary && secondary !== label ? secondary : null, point: suggestionPoint(item) });
+  }
+  return out;
+}
+
+export async function delhiverySuggest(query: string, bias?: LatLng | null, ctx?: EvidenceCtx | string) {
+  const r = await delhiverySearchRaw(query, bias, ctx);
+  return { ...r, suggestions: r.ok ? parseSuggestions(r.data) : ([] as Suggestion[]) };
+}
+
+export type ReverseGeocoded = { locality: string | null; city: string | null; state: string | null; formatted: string | null };
+
+// /rvg answers in Google Geocoding format: results[].address_components[{long_name, types[]}], formatted_address.
+export function parseReverse(data: unknown): ReverseGeocoded | null {
+  const results = pick(data, ["results"]);
+  const first = Array.isArray(results) ? results[0] : data;
+  const comps = pick(first, ["address_components"]);
+  const find = (...types: string[]) => {
+    if (!Array.isArray(comps)) return null;
+    for (const t of types) {
+      const c = comps.find((x) => Array.isArray((x as { types?: unknown }).types) && ((x as { types: string[] }).types).includes(t));
+      const v = str((c as { long_name?: unknown } | undefined)?.long_name);
+      if (v) return v;
+    }
+    return null;
+  };
+  const out: ReverseGeocoded = {
+    locality: find("sublocality_level_1", "sublocality", "neighborhood", "locality"),
+    city: find("locality", "administrative_area_level_2"),
+    state: find("administrative_area_level_1"),
+    formatted: str(pick(first, ["formatted_address"])),
+  };
+  return out.locality || out.city || out.state || out.formatted ? out : null;
+}
+
+export async function delhiveryReverse(p: LatLng, ctx?: EvidenceCtx | string, live = false) {
+  // For a live location the recorded evidence keeps only the locality, never the coordinates or the full address.
+  const r = await delhiveryReverseRaw(p, ctx, live);
+  const parsed = r.ok ? parseReverse(r.data) : null;
+  return { ...r, place: parsed };
+}
+
+// GeoJSON from /isochrone with encode_geojson:false: features[0].geometry is a Polygon or MultiPolygon in [lng, lat].
+export type Ring = [number, number][];
+export function parseIsochrone(data: unknown): Ring[][] | null {
+  const geom = pick(data, ["features", "0", "geometry"]);
+  const type = str(pick(geom, ["type"]));
+  const coords = pick(geom, ["coordinates"]);
+  if (!Array.isArray(coords)) return null;
+  const toRing = (r: unknown): Ring | null => (Array.isArray(r) && r.every((c) => Array.isArray(c) && typeof c[0] === "number" && typeof c[1] === "number") ? (r as Ring) : null);
+  if (type === "Polygon") {
+    const rings = coords.map(toRing).filter((r): r is Ring => Boolean(r));
+    return rings.length ? [rings] : null;
+  }
+  if (type === "MultiPolygon") {
+    const polys = coords.map((poly) => (Array.isArray(poly) ? poly.map(toRing).filter((r): r is Ring => Boolean(r)) : [])).filter((p) => p.length);
+    return polys.length ? polys : null;
+  }
+  return null;
+}
+
+function inRing(x: number, y: number, ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// A point is reachable if it is inside an outer ring and not inside one of that polygon's holes.
+export function pointInIsochrone(p: LatLng, polys: Ring[][]): boolean {
+  return polys.some(([outer, ...holes]) => inRing(p.lng, p.lat, outer) && !holes.some((h) => inRing(p.lng, p.lat, h)));
+}
+
+export async function delhiveryIsochrone(origin: LatLng, seconds: number, mode: "auto" | "motorcycle" | "pedestrian" = "auto", ctx?: EvidenceCtx | string) {
+  const r = await delhiveryIsochroneRaw(origin, seconds, mode, ctx);
+  return { ...r, polygons: r.ok ? parseIsochrone(r.data) : null };
+}
+
+// /matrix sources_to_targets[i][j] = { distance (km), time (s) } -> seconds grid; null where no number came back.
+export function parseMatrix(data: unknown, rows: number, cols: number): (number | null)[][] | null {
+  const m = pick(data, ["sources_to_targets"]);
+  if (!Array.isArray(m)) return null;
+  return Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => num(pick(m, [String(i), String(j), "time"]))));
 }

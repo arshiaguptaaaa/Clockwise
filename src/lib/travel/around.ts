@@ -15,7 +15,7 @@ import type { HoursStatus } from "./hours";
 
 export { AROUND_CATEGORIES } from "./around-categories";
 
-export type AnchorType = "me" | "stay" | "arrival" | "destination";
+export type AnchorType = "me" | "stay" | "arrival" | "destination" | "anywhere";
 export type AroundAnchor = { kind: AnchorType; label: string; point: LatLng };
 
 // Back-compat: the default anchor is the confirmed stay, else the destination.
@@ -47,10 +47,15 @@ const validCoord = (v: unknown, min: number, max: number): v is number => typeof
 
 // Resolve ONE requested anchor. A missing anchor is reported; the destination
 // centre is never substituted for it.
-export async function resolveAnchor(tripId: string, userId: string, type: AnchorType, me?: { lat: number; lng: number } | null): Promise<{ ok: true; anchor: AroundAnchor } | { ok: false; error: string }> {
+export async function resolveAnchor(tripId: string, userId: string, type: AnchorType, me?: { lat: number; lng: number; label?: string } | null): Promise<{ ok: true; anchor: AroundAnchor } | { ok: false; error: string }> {
   if (type === "me") {
     if (!me || !validCoord(me.lat, -90, 90) || !validCoord(me.lng, -180, 180)) return { ok: false, error: "I don't have your location. Tap USE MY LOCATION and allow it, or search around your hotel instead." };
     return { ok: true, anchor: { kind: "me", label: "where you are", point: { lat: me.lat, lng: me.lng } } };
+  }
+  // ANYWHERE: a place the traveller typed and picked (Delhivery autosuggest/geocode). The point rides along with the request.
+  if (type === "anywhere") {
+    if (!me || !validCoord(me.lat, -90, 90) || !validCoord(me.lng, -180, 180)) return { ok: false, error: "Pick a place from the suggestions first." };
+    return { ok: true, anchor: { kind: "anywhere", label: (me.label ?? "that place").slice(0, 80), point: { lat: me.lat, lng: me.lng } } };
   }
   const a = await anchorsFor(tripId, userId);
   if (type === "stay") return a.stay ? { ok: true, anchor: a.stay } : { ok: false, error: "There's no confirmed stay yet, so there's no hotel to search around." };

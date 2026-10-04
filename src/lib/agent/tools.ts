@@ -8,6 +8,7 @@ import {
   nearestMappedPlace,
   isGeoapifyConfigured,
   NEARBY_CATEGORIES,
+  searchPlaceByText,
 } from "@/lib/travel/geoapify-provider";
 import { getWeather as fetchWeather } from "@/lib/travel/open-meteo-weather";
 import {
@@ -32,6 +33,7 @@ import { buildRendezvousView, appliesTo } from "@/lib/rendezvous";
 import { timeLabel } from "@/lib/traveller/journey";
 import { brandSearch, anchorsFor, orderCategories } from "@/lib/travel/around";
 import { freeTimeOptions } from "@/lib/travel/window";
+import { doesThisFit } from "@/lib/travel/fit";
 import { driveRoute } from "@/lib/travel/route-provider";
 import { getPrefs } from "@/lib/traveller/vibe";
 import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
@@ -467,6 +469,19 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "does_this_fit",
+    description:
+      "Read-only: 'can we do Cubbon Park before dinner?', 'is Nandi Hills doable today?'. Decides, deterministically, whether ONE named real place fits before the traveller's next shared commitment: Delhivery drive time there and back (traffic-aware for the departure time), the area reachable in the time left (Delhivery IsoSuite), and a stated time-at-place assumption. Returns YES / TIGHT / NO with a leave-by time. Never judge this yourself and never name a leave-by time that this tool did not return.",
+    parameters: {
+      type: "object",
+      properties: {
+        placeName: { type: "string", description: "The place, as the user named it, e.g. 'Cubbon Park'." },
+        category: { type: "string", enum: ["park", "attraction", "museum", "cafe", "restaurant", "shopping"], description: "What kind of place it is, for the time-at-place assumption. Default attraction." },
+      },
+      required: ["placeName"],
+    },
+  },
+  {
     name: "find_saved_overlap",
     description:
       "Read-only: 'find somewhere all of us saved'. Looks at places travellers saved PRIVATELY in Around You and reports overlap as a COUNT only. In the group chat it returns only places EVERY traveller saved; never who saved what.",
@@ -571,6 +586,8 @@ export async function executeTool(
       return arrivalToStayTool(input, ctx);
     case "free_time_options":
       return freeTimeTool(input, ctx);
+    case "does_this_fit":
+      return doesThisFitTool(input, ctx);
     case "find_saved_overlap":
       return findSavedOverlapTool(ctx);
     case "get_route":
@@ -1532,7 +1549,7 @@ async function resolveSearchPoint(
 // Provider-backed answers leave evidence in Agent Trace: which provider, when it
 // was fetched, what was asked, how many results (or the measured numbers).
 // Gemini only narrates these; it never supplies them.
-async function recordLookup(ctx: AgentContext, kind: "PLACES_SEARCH_COMPLETED" | "ROUTE_COMPLETED" | "ROUTE_PLAUSIBILITY_FAILED", payload: Record<string, unknown>) {
+async function recordLookup(ctx: AgentContext, kind: "PLACES_SEARCH_COMPLETED" | "ROUTE_COMPLETED" | "ROUTE_PLAUSIBILITY_FAILED" | "FIT_CHECKED", payload: Record<string, unknown>) {
   await prisma.tripEvent
     .create({
       data: {
@@ -1748,6 +1765,25 @@ async function freeTimeTool(input: Record<string, unknown>, ctx: AgentContext): 
   return {
     output: `Posted ${r.options.length} option(s) that fit a ${r.windowMinutes}-minute window${r.rainyMode ? " (rain likely, so indoor-type places only)" : ""}. Each includes real walking time there and onward. Say in ONE short line how long the window is and that the card shows what fits; do not list places or add any that are not on the card. Time at each place is an assumption; say so if asked.`,
     posted: true,
+  };
+}
+
+async function doesThisFitTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const name = String(input.placeName ?? "").trim();
+  if (!name) return { output: "Need the place's name." };
+  const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
+  const origin = a.stay ?? a.destination;
+  if (!origin) return { output: "There's no stay or destination to measure from yet. Say so." };
+  const found = await searchPlaceByText(name, origin.point).catch(() => []);
+  if (!found[0]) return { output: `I couldn't find "${name}" on the map, so I can't say whether it fits. Say so; don't guess.` };
+  const place = found[0];
+  const kind = typeof input.category === "string" ? input.category : "attraction";
+  const r = await doesThisFit({ tripId: ctx.trip.id, userId: ctx.actingUserId, place: { name: place.name, lat: place.latitude, lng: place.longitude }, kind, origin: { label: origin.kind === "stay" ? "the hotel" : origin.label, point: origin.point } });
+  if (!r.ok) return { output: r.error };
+  await recordLookup(ctx, "FIT_CHECKED", { place: r.place, verdict: r.verdict, routeProvider: r.routeProvider, reachChecked: r.reach.checked, reachInside: r.reach.inside, reachProvider: r.reach.provider, toMin: r.toMin, onMin: r.onMin, spareMin: r.spareMin, commitment: r.commitment?.name ?? null, whatIf: r.whatIf, evidenceIds: r.evidenceIds, tool: "does_this_fit" });
+  const t12 = (l: string) => timeLabel(l);
+  return {
+    output: `${r.verdict} for ${r.place}${r.commitment ? ` before ${r.commitment.name} at ${t12(r.commitment.targetLocal)}` : ""}. ${r.reason} ${r.toMin != null ? `${r.toMin} min there from ${r.originLabel}${r.onMin != null ? `, ${r.onMin} min back` : ""}. ` : ""}${r.verdict !== "NO" && r.leaveByLocal ? `Leave by ${t12(r.leaveByLocal)}. ` : ""}${r.reach.checked ? `IsoSuite: ${r.reach.inside ? "inside" : "outside"} the ${r.reach.budgetMin}-minute reach. ` : ""}${r.whatIf ? `This is a what-if for setting off at ${t12(r.leaveLocal)}, because the next plan is far off; say so. ` : ""}Basis: ${r.basis.join(" ")} Report this in two short sentences; use only these numbers.`,
   };
 }
 

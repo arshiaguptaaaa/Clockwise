@@ -36,6 +36,20 @@ export async function recomputeRendezvous(tripId: string) {
         const departLocal = j.arriveLocal ? toLocal(toMs(j.arriveLocal) + ARRIVAL_BUFFER_MIN * 60_000) : null;
         const r = await driveRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, { departLocal, tripId, userId: j.userId, decision: "Arrival point to confirmed stay: feeds readiness, rendezvous and commitment feasibility" });
         providersUsed.add(r.provider);
+        const nm = await prisma.user.findUnique({ where: { id: j.userId }, select: { name: true } });
+        await prisma.tripEvent.create({
+          data: {
+            tripId,
+            kind: "DELHIVERY_ROUTE_COMPLETED",
+            scope: "GROUP",
+            actorUserId: j.userId,
+            subjectUserId: j.userId,
+            sourceChannel: "SYSTEM",
+            confidence: "HIGH",
+            payload: JSON.stringify({ provider: r.provider, traveller: nm?.name ?? null, from: j.arrivalPlaceName ?? "arrival point", to: stay.placeName, minutes: Math.round(r.durationSeconds / 60), km: Math.round(r.distanceMeters / 100) / 10, trafficAware: r.trafficAware, departure: r.departureTime, fellBackFrom: r.fellBackFrom ?? null, evidenceId: r.evidenceId }),
+            propagation: JSON.stringify(["plan", "rendezvous"]),
+          },
+        }).catch(() => undefined);
         await prisma.travellerJourney.update({
           where: { id: j.id },
           data: { routeToStayMeters: Math.round(r.distanceMeters), routeToStaySeconds: Math.round(r.durationSeconds), routeProvider: r.provider, routeComputedAt: new Date(r.retrievedAt), routeStayBookingId: stay.id },
@@ -144,6 +158,9 @@ async function warnAtRisk(tripId: string) {
       await prisma.tripEvent.create({
         data: { tripId, kind: "RENDEZVOUS_AT_RISK", scope: "GROUP", sourceChannel: "SYSTEM", confidence: "MEDIUM", payload: JSON.stringify({ key, commitment: c.name, target: c.target, traveller: l.name, hotelBy: l.hotelBy }), propagation: JSON.stringify(["plan", "notifications"]) },
       });
+      await prisma.tripEvent.create({
+        data: { tripId, kind: "RENDEZVOUS_CONFLICT_DETECTED", scope: "GROUP", sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify({ commitment: c.name, target: c.target, traveller: l.name, hotelBy: l.hotelBy }), propagation: JSON.stringify(["plan", "proposals"]) },
+      }).catch(() => undefined);
       await notify({
         tripId,
         recipientIds: [trip.createdBy],

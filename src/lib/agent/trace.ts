@@ -179,6 +179,23 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         state: "Shown as a route card; no model estimate involved.",
       };
     }
+    case "DELHIVERY_ROUTE_COMPLETED":
+      return {
+        understanding: `DELHIVERY_ROUTE_COMPLETED — ${str(p.traveller)}: ${str(p.from)} → ${str(p.to)}, ${str(p.km)} km, ${str(p.minutes)} min${p.trafficAware ? ` (traffic-aware estimate for a ${str(p.departure).slice(11)} departure, hour-of-day model, not live traffic)` : ""}${p.fellBackFrom ? `; Delhivery wasn't available (${str(p.fellBackFrom)}) so ${str(p.provider)} answered` : ""}. Provider-returned numbers. Exact request and response: Developer Evidence${p.evidenceId ? ` (${str(p.evidenceId)})` : ""}.`,
+        state: "Stored on the traveller's journey as arrival → stay time; feeds the earliest-at-stay time used for every shared commitment.",
+      };
+    case "RENDEZVOUS_CONFLICT_DETECTED":
+      return { understanding: `RENDEZVOUS_CONFLICT_DETECTED — ${str(p.traveller)} can't be at the stay before ${str(p.hotelBy).slice(11)}, but ${str(p.commitment)} is at ${str(p.target).slice(11)}.`, state: "Deterministic comparison of the provider route time with the commitment time. The organiser was told; a reschedule proposal may follow." };
+    case "GROUP_APPROVED":
+      return { understanding: `GROUP_APPROVED — every traveller accepted "${str(p.title)}" (${str(p.approved)} of ${str(p.voters)}).`, state: "The Plan is still unchanged: the organiser makes it official." };
+    case "LOCATION_REVERSE_GEOCODED":
+      return { understanding: `A traveller pressed ME; their position was turned into a place name by ${str(p.provider) || "no provider"} (${p.resolved ? "resolved" : "not resolved"}).`, state: "Coordinates and the resulting locality were not stored, and no location trail is kept." };
+    case "ANYWHERE_RESOLVED":
+      return { understanding: `ANYWHERE — the traveller picked "${str(p.label)}" (${str(p.provider)}) as the place to search around.`, state: "Delhivery resolves the place first; Geoapify then finds the real cafés, restaurants and sights around it." };
+    case "FIT_CHECKED":
+      return { understanding: `FIT_CHECKED — "${str(p.place)}": ${str(p.verdict)}${p.commitment ? ` before ${str(p.commitment)}` : ""}${p.whatIf ? " (what-if departure, labelled as such)" : ""}. ${str(p.toMin)} min there, ${str(p.onMin)} min back${p.spareMin != null ? `, ${str(p.spareMin)} min spare` : ""}. Routes: ${str(p.routeProvider)}. IsoSuite reachability: ${p.reachChecked ? (p.reachInside ? "inside" : "outside") + ` (${str(p.reachProvider)})` : "not checked"}.`, state: "Deterministic: provider travel times + the Plan's next commitment + a stated time-at-place assumption. No coordinates recorded." };
+    case "MEETUP_RANKED":
+      return { understanding: `MEETUP_RANKED — ${str(p.candidates)} real places compared for ${str(p.travellers)} travellers using the ${str(p.provider)} distance matrix; best: ${str(p.best)} (longest journey ${str(p.bestWorstMinutes)} min).`, state: "Ranked by the longest single journey, then the total — not a geometric midpoint. No one's position is recorded here." };
     case "LOCATION_REQUESTED":
       return { understanding: "A traveller pressed USE MY LOCATION; the browser was asked for permission.", state: "Private. Nothing is tracked in the background and no coordinates are recorded here." };
     case "LOCATION_PERMISSION_GRANTED":

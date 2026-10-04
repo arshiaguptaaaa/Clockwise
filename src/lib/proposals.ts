@@ -270,6 +270,18 @@ export async function castApprovalVote(
     if (claimed.count > 0) {
       proposalStatus = nextAggregate;
       if (nextAggregate === "APPROVED") {
+        await prisma.tripEvent.create({
+          data: {
+            tripId: proposal.tripId,
+            kind: "GROUP_APPROVED",
+            scope: "GROUP",
+            actorUserId: actorId,
+            sourceChannel: "HUMAN",
+            confidence: "HIGH",
+            payload: JSON.stringify({ proposalId, title: proposal.title, voters: allApprovals.length, approved: allApprovals.filter((a) => a.decision === "APPROVED").length }),
+            propagation: JSON.stringify(["decision-strip", "notifications"]),
+          },
+        }).catch(() => undefined);
         // Everyone is in. The Plan has NOT changed: the organiser still makes it official.
         const trip = await prisma.trip.findUnique({ where: { id: proposal.tripId }, select: { createdBy: true } });
         const members = await prisma.tripMember.findMany({ where: { tripId: proposal.tripId }, select: { userId: true } });

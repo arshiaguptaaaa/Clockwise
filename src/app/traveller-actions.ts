@@ -14,6 +14,9 @@ import { savedOverlaps } from "@/lib/travel/saved-overlap";
 import { proposePlace, type PlaceRef } from "@/lib/places/place-proposals";
 import type { TravelMode } from "@/lib/travel/types";
 import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
+import { suggestPlaces, pointForSuggestion, reverseLocality, type SuggestOutcome, type SuggestedPlace, type Locality } from "@/lib/travel/locate";
+import { doesThisFit, type FitResult } from "@/lib/travel/fit";
+import { easiestForEveryone, type MeetupResult, type MeetCandidate } from "@/lib/travel/meetup";
 
 async function member(tripId: string) {
   const userId = await getCurrentUserId();
@@ -115,7 +118,7 @@ export async function toggleChecklistAction(tripId: string, key: string, done: b
 // logged or shown to the group. Trace events record THAT a search happened and
 // from which kind of anchor, never the coordinates.
 
-export type Me = { lat: number; lng: number } | null;
+export type Me = { lat: number; lng: number; label?: string } | null;
 
 async function personalEvent(tripId: string, userId: string, kind: string, payload: Record<string, unknown>) {
   await prisma.tripEvent
@@ -275,4 +278,74 @@ export async function freeTimeAction(tripId: string, opts: { anchor: AnchorType;
   if (!r.ok) return r;
   await personalEvent(tripId, userId, "FREE_TIME_COMPUTED", { provider: "geoapify", weather: "open-meteo", anchorType: a.anchor.kind, windowMinutes: r.windowMinutes, windowSource: r.windowSource, considered: r.considered, fitting: r.options.length, rainyMode: r.rainyMode, retrievedAt: r.retrievedAt });
   return { ...r, anchorType: a.anchor.kind };
+}
+
+
+// ---- Anywhere, reverse geocoding, "does this fit?", "easiest for everyone" ----------------------
+
+// ANYWHERE: type "Indiranagar" / "Hawa Mahal" / "Bangalore airport". Delhivery autosuggest answers first;
+// the answer says if Geoapify had to step in. Biased to the destination so "Indiranagar" means Bengaluru's.
+export async function suggestPlacesAction(tripId: string, query: string): Promise<SuggestOutcome> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const a = await anchorsFor(tripId, userId);
+  return suggestPlaces(query.slice(0, 80), { bias: a.destination?.point ?? null, tripId, userId });
+}
+
+export async function chooseSuggestionAction(tripId: string, s: SuggestedPlace): Promise<{ ok: true; lat: number; lng: number; label: string; provider: string } | { ok: false; error: string }> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const known = s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : null;
+  const r = await pointForSuggestion(s.label, known, { tripId, userId });
+  if (!r) return { ok: false, error: "I couldn't place that on the map. Try a more specific name." };
+  await personalEvent(tripId, userId, "ANYWHERE_RESOLVED", { label: s.label.slice(0, 80), provider: r.provider });
+  return { ok: true, lat: r.point.lat, lng: r.point.lng, label: s.label, provider: r.provider };
+}
+
+// ME -> "YOU'RE AROUND Indiranagar". The coordinates are used for this one call and are neither stored nor logged.
+export async function reverseLocalityAction(tripId: string, me: { lat: number; lng: number }): Promise<{ ok: true; locality: Locality } | { ok: false; error: string }> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  if (!Number.isFinite(me?.lat) || !Number.isFinite(me?.lng)) return { ok: false, error: "No position." };
+  const loc = await reverseLocality({ lat: me.lat, lng: me.lng }, { tripId, userId });
+  await personalEvent(tripId, userId, "LOCATION_REVERSE_GEOCODED", { provider: loc?.provider ?? null, resolved: Boolean(loc), coordinatesStored: false, localityStored: false });
+  return loc ? { ok: true, locality: loc } : { ok: false, error: "I couldn't turn your position into a place name." };
+}
+
+export async function fitCheckAction(tripId: string, place: { name: string; lat: number; lng: number; kind: string }, opts: { anchor: AnchorType; me?: Me; leaveLocal?: string | null }): Promise<FitResult> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const a = await resolveAnchor(tripId, userId, opts.anchor, opts.me);
+  if (!a.ok) return a;
+  const leave = opts.leaveLocal && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(opts.leaveLocal) ? opts.leaveLocal : null;
+  const r = await doesThisFit({ tripId, userId, place: { name: place.name.slice(0, 120), lat: place.lat, lng: place.lng }, kind: place.kind, origin: { label: a.anchor.kind === "me" ? "where you are" : a.anchor.label, point: a.anchor.point }, leaveLocal: leave });
+  if (r.ok) {
+    await personalEvent(tripId, userId, "FIT_CHECKED", { place: r.place, verdict: r.verdict, routeProvider: r.routeProvider, reachChecked: r.reach.checked, reachInside: r.reach.inside, reachProvider: r.reach.provider, toMin: r.toMin, onMin: r.onMin, spareMin: r.spareMin, commitment: r.commitment?.name ?? null, whatIf: r.whatIf, evidenceIds: r.evidenceIds, anchorType: a.anchor.kind });
+  }
+  return r;
+}
+
+export async function meetupAction(tripId: string, places: AroundPlace[], opts: { me?: Me }): Promise<MeetupResult> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const candidates: MeetCandidate[] = places.slice(0, 6).map((p) => ({ providerPlaceId: p.providerPlaceId, name: p.name, lat: p.lat, lng: p.lng }));
+  const r = await easiestForEveryone({ tripId, requesterId: userId, candidates, me: opts.me && Number.isFinite(opts.me.lat) ? { lat: opts.me.lat, lng: opts.me.lng } : null });
+  if (r.ok) {
+    await prisma.tripEvent
+      .create({
+        data: {
+          tripId,
+          kind: "MEETUP_RANKED",
+          scope: "PERSONAL",
+          actorUserId: userId,
+          subjectUserId: userId,
+          sourceChannel: "SYSTEM",
+          confidence: "HIGH",
+          payload: JSON.stringify({ provider: r.provider, travellers: r.people.length, candidates: candidates.length, best: r.ranked[0]?.candidate.name ?? null, bestWorstMinutes: r.ranked[0]?.worst ?? null, evidenceId: r.evidenceId }),
+          propagation: JSON.stringify(["around-you"]),
+        },
+      })
+      .catch(() => undefined);
+  }
+  return r;
 }

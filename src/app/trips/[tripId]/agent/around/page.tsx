@@ -21,7 +21,7 @@ export default async function AroundPage({ params, searchParams }: { params: Pro
   };
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-      <AroundYou tripId={tripId} ordered={ordered} initialCategory={cat} anchors={status} wantsMe={anchor === "me"} defaultAnchor={status.stay.available ? "stay" : null} />
+      <AroundYou tripId={tripId} ordered={ordered} initialCategory={cat} anchors={status} wantsMe={anchor === "me"} defaultAnchor={status.destination.available ? "destination" : status.stay.available ? "stay" : null} />
     </div>
   );
 }

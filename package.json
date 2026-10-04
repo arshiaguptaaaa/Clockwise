@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
-    "test:regression": "tsx scripts/regression/gemini-history.ts && tsx scripts/regression/location-and-vibe.ts && tsx scripts/regression/arrival-and-evidence.ts && tsx scripts/regression/location-aware.ts && tsx scripts/regression/delhivery.ts && tsx scripts/regression/decisions.ts"
+    "test:regression": "tsx scripts/regression/gemini-history.ts && tsx scripts/regression/location-and-vibe.ts && tsx scripts/regression/arrival-and-evidence.ts && tsx scripts/regression/location-aware.ts && tsx scripts/regression/delhivery.ts && tsx scripts/regression/decisions.ts && tsx scripts/regression/delhivery-location.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

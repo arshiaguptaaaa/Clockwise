@@ -4,6 +4,8 @@ import { getCurrentUserId } from "@/lib/session";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
 import { countWordTitle } from "@/lib/travel/around-categories";
 import { ProposeSaved } from "@/components/around/ProposeSaved";
+import { FitCheck } from "@/components/around/FitCheck";
+import { anchorsFor } from "@/lib/travel/around";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,9 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
   const { tripId } = await params;
   const userId = await getCurrentUserId();
   if (!userId) return null;
-  const [rows, overlaps] = await Promise.all([prisma.savedPlace.findMany({ where: { tripId, userId }, orderBy: { createdAt: "desc" } }), savedOverlaps(tripId, userId)]);
+  const [rows, overlaps, anchors] = await Promise.all([prisma.savedPlace.findMany({ where: { tripId, userId }, orderBy: { createdAt: "desc" } }), savedOverlaps(tripId, userId), anchorsFor(tripId, userId)]);
+  // Measured from the hotel when there is one, else from the destination.
+  const fitAnchor = anchors.stay ? ("stay" as const) : anchors.destination ? ("destination" as const) : null;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-6">
       <header>
@@ -57,6 +61,7 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
                   <span className="mr-2 uppercase tracking-[0.14em] text-[10.5px] text-foreground/70">{KIND_LABEL[r.kind] ?? r.kind.toLowerCase()}</span>
                   {r.address ?? ""}
                 </p>
+                {fitAnchor && r.latitude != null && r.longitude != null && <FitCheck tripId={tripId} place={{ name: r.name, lat: r.latitude, lng: r.longitude }} kind={r.kind} anchor={fitAnchor} saved />}
               </li>
             ))}
           </ul>
