@@ -29,7 +29,11 @@ export type DelhiveryOutcome =
 
 export type EvidenceCtx = { tripId?: string | null; userId?: string | null; decision?: string };
 
-export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string): Promise<DelhiveryOutcome> {
+// `evidenceOverride` replaces what is RECORDED (never what is sent): used so a live location or a
+// resolved home address never lands in the evidence log.
+export type EvidenceOverride = { request?: unknown; response?: unknown };
+
+export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string, evidenceOverride?: EvidenceOverride): Promise<DelhiveryOutcome> {
   const evCtx: EvidenceCtx = typeof ctx === "string" ? { decision: ctx } : (ctx ?? {});
   const token = process.env.DELHIVERY_MAPS_TOKEN?.trim();
   if (!token) return { ok: false, blocked: "DELHIVERY_CREDENTIALS_REQUIRED", httpStatus: null, latencyMs: 0, error: "DELHIVERY_MAPS_TOKEN is not set", evidenceId: null };
@@ -63,8 +67,8 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
     operation: op,
     endpoint: `${method} ${url.origin}${url.pathname}`,
     method,
-    request: method === "GET" ? Object.fromEntries(url.searchParams) : payload,
-    response: compactForEvidence(data ?? { error }),
+    request: evidenceOverride?.request ?? (method === "GET" ? Object.fromEntries(url.searchParams) : payload),
+    response: evidenceOverride?.response ?? compactForEvidence(data ?? { error }),
     httpStatus: status,
     durationMs: latencyMs,
     context: evCtx,
@@ -129,4 +133,22 @@ export function extractMatrixCell(data: unknown): { distanceMeters: number; dura
   const km = num(pick(cell, ["distance"]));
   const t = num(pick(cell, ["time"]));
   return km != null && t != null ? { distanceMeters: km * 1000, durationSeconds: t } : null;
+}
+
+// ---- Autosuggest, reverse geocode, IsoSuite (documented at delhivery.com/maps/reference) ----
+
+// GET /search?query=&lat=&lng=  - ranked suggestions across India, optionally biased to a point.
+export async function delhiverySearchRaw(query: string, bias?: LatLng | null, ctx?: EvidenceCtx | string) {
+  return delhiveryCall("maps.autosuggest", "GET", "/search", { query, ...(bias ? { lat: bias.lat, lng: bias.lng } : {}) }, ctx);
+}
+
+// POST /rvg {req_id, lat, lng} - coordinates -> structured address. A LIVE location is the traveller's
+// private state: the evidence record keeps neither the coordinates nor the full address (see redact).
+export async function delhiveryReverseRaw(p: LatLng, ctx?: EvidenceCtx | string, redact = false) {
+  return delhiveryCall("maps.reverse_geocode", "POST", "/rvg", { req_id: `clockwise-${Date.now()}`, lat: p.lat, lng: p.lng }, ctx, redact ? { request: { lat: "[not stored: live location]", lng: "[not stored: live location]" } } : undefined);
+}
+
+// POST /isochrone {origin:[lat,lng], cost_type:"time"|"distance", cost_value, travel_mode, direction, encode_geojson}
+export async function delhiveryIsochroneRaw(origin: LatLng, seconds: number, mode: "auto" | "motorcycle" | "pedestrian" = "auto", ctx?: EvidenceCtx | string) {
+  return delhiveryCall("maps.isochrone", "POST", "/isochrone", { origin: [origin.lat, origin.lng], cost_type: "time", cost_value: Math.round(seconds), travel_mode: mode, direction: "outbound", encode_geojson: false }, ctx);
 }

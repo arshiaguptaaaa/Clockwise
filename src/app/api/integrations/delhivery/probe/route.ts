@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/session";
 import { compactForEvidence, extractMatrixCell, delhiveryGeocode, delhiveryRoute, delhiveryMatrix, isDelhiveryConfigured, delhiveryBase } from "@/lib/delhivery/client";
+import { delhiverySearchRaw, delhiveryReverseRaw, delhiveryIsochroneRaw } from "@/lib/delhivery/client";
 import { resolveLocationText } from "@/lib/travel/geoapify-provider";
 
 // Signed-in, read-only capability probe. Calls the documented endpoints for a Bengaluru airport->Indiranagar
@@ -9,6 +10,20 @@ export async function GET(request: NextRequest) {
   if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   if (!isDelhiveryConfigured()) return NextResponse.json({ blocked: "DELHIVERY_CREDENTIALS_REQUIRED", note: "Set DELHIVERY_MAPS_TOKEN (Get Access Token at delhivery.com/maps/developer)." }, { status: 503 });
   const q = request.nextUrl.searchParams;
+  // ?op=suggest&q=Indiranagar | ?op=reverse&lat=&lng= | ?op=iso&lat=&lng=&seconds=  (raw, sanitised shapes)
+  const op = q.get("op");
+  if (op === "suggest") {
+    const r = await delhiverySearchRaw(q.get("q") ?? "Indiranagar", q.get("lat") ? { lat: Number(q.get("lat")), lng: Number(q.get("lng")) } : null, "probe");
+    return NextResponse.json({ ok: r.ok, status: r.httpStatus, ms: r.latencyMs, data: compactForEvidence(r.data) });
+  }
+  if (op === "reverse") {
+    const r = await delhiveryReverseRaw({ lat: Number(q.get("lat") ?? 12.9784), lng: Number(q.get("lng") ?? 77.6408) }, "probe", false);
+    return NextResponse.json({ ok: r.ok, status: r.httpStatus, ms: r.latencyMs, data: compactForEvidence(r.data) });
+  }
+  if (op === "iso") {
+    const r = await delhiveryIsochroneRaw({ lat: Number(q.get("lat") ?? 12.9784), lng: Number(q.get("lng") ?? 77.6408) }, Number(q.get("seconds") ?? 900), "auto", "probe");
+    return NextResponse.json({ ok: r.ok, status: r.httpStatus, ms: r.latencyMs, data: compactForEvidence(r.data) });
+  }
   const fromText = q.get("from") ?? "Kempegowda International Airport, Bengaluru";
   const toText = q.get("to") ?? "Indiranagar, Bengaluru";
   const out: Record<string, unknown> = { base: delhiveryBase(), from: fromText, to: toText };
