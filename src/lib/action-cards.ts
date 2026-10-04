@@ -37,7 +37,9 @@ export type ActionCardData = {
   proposerId?: string;
   // "Pay her the remaining amount": a confirmation to RECORD that the debtor has paid, from the confirmed ledger. It moves no
   // money and creates no expense. Only `fromId` can confirm it.
-  settlement?: { fromId: string; toId: string; fromName: string; toName: string; amountMinor: number; currency: string };
+  settlement?: { fromId: string; toId: string; fromName: string; toName: string; amountMinor: number; currency: string; statedByUser?: boolean; collectionId?: string; pine?: { bookingId: string; status: string; url: string | null } };
+  // "X owes Y": a single debt, shown as such (one debtor, one creditor, never a split).
+  debt?: boolean;
   // A Pine Labs payment-link card: the button opens the hosted checkout for
   // this Booking and can ask Pine Labs for the current status.
   payLink?: boolean;

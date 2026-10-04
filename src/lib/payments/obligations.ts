@@ -10,7 +10,7 @@
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
 import { postActionCard } from "@/lib/action-cards";
-import { createExpense } from "@/lib/budget/ledger";
+import { createExpense, recordSettlement } from "@/lib/budget/ledger";
 import { createTripPaymentRequest } from "@/lib/trip-payments";
 import { isPineLabsConfigured } from "./pine-labs-provider";
 import { validatePineMinor, PAYMENT_FAILED_TITLE, PAYMENT_FAILED_BODY } from "./amount";
@@ -115,6 +115,7 @@ export async function payObligation(obligationId: string, actorId: string): Prom
 export async function syncObligationFromBooking(bookingId: string, liveStatus: string): Promise<boolean> {
   const o = await prisma.paymentObligation.findFirst({ where: { bookingId }, include: { collection: true } });
   if (!o) return false;
+  if (o.collection.payeeUserId) return syncDirectPayment(o, liveStatus);
   if (liveStatus === "PROCESSED") {
     const claimed = await prisma.paymentObligation.updateMany({ where: { id: o.id, status: { not: "PAID" } }, data: { status: "PAID", paidAt: new Date(), lastError: null } });
     if (claimed.count === 0) return true;
@@ -181,4 +182,45 @@ export async function bookingIdForReference(reference: string): Promise<string |
   const base = reference.replace(/-\d+$/, "");
   const o = await prisma.paymentObligation.findFirst({ where: { merchantRef: { in: [reference, base] } }, select: { bookingId: true } });
   return o?.bookingId ?? null;
+}
+
+// "@Clockwise pay Ridhima ₹1,000": ONE obligation (the payer's) with a named payee. The card follows Pine Labs' own status word for
+// word; only an authoritative PROCESSED records the payment as made (a settlement payer -> payee), and only once.
+type DirectObligation = NonNullable<Awaited<ReturnType<typeof prisma.paymentObligation.findFirst>>> & { collection: NonNullable<Awaited<ReturnType<typeof prisma.paymentCollection.findFirst>>> };
+
+async function syncDirectPaymentCard(o: DirectObligation, liveStatus: string) {
+  const msgs = await prisma.message.findMany({ where: { tripId: o.tripId, cardData: { contains: `"collectionId":"${o.collectionId}"` } }, select: { id: true, cardData: true } });
+  for (const m of msgs) {
+    try {
+      const data = JSON.parse(m.cardData ?? "{}") as { settlement?: { pine?: { bookingId: string; status: string; url: string | null } } };
+      if (!data.settlement) continue;
+      data.settlement.pine = { bookingId: o.bookingId ?? data.settlement.pine?.bookingId ?? "", status: liveStatus, url: o.paymentUrl ?? data.settlement.pine?.url ?? null };
+      await prisma.message.update({ where: { id: m.id }, data: { cardData: JSON.stringify(data), ...(liveStatus === "PROCESSED" ? { cardStatus: "CONFIRMED" as const } : {}) } });
+    } catch {
+      // an unreadable card is left as it is
+    }
+  }
+}
+
+async function syncDirectPayment(o: DirectObligation, liveStatus: string): Promise<boolean> {
+  await syncDirectPaymentCard(o, liveStatus);
+  const payeeId = o.collection.payeeUserId!;
+  if (liveStatus === "PROCESSED") {
+    const claimed = await prisma.paymentObligation.updateMany({ where: { id: o.id, status: { not: "PAID" } }, data: { status: "PAID", paidAt: new Date(), lastError: null } });
+    if (claimed.count === 0) return true;
+    const names = new Map((await prisma.user.findMany({ where: { id: { in: [o.userId, payeeId] } }, select: { id: true, name: true } })).map((u) => [u.id, first(u.name)]));
+    await recordSettlement({ tripId: o.tripId, actorUserId: o.userId, fromUserId: o.userId, toUserId: payeeId, amountMinor: o.amountMinor, currency: o.collection.currency, method: "PINE_LABS", note: `Paid through Pine Labs (link ${o.paymentLinkId ?? "?"}); PROCESSED confirmed by a status fetch from Pine Labs.` });
+    await prisma.paymentCollection.update({ where: { id: o.collectionId }, data: { status: "SETTLED" } });
+    await prisma.tripEvent.create({
+      data: { tripId: o.tripId, kind: "PAYMENT_OBLIGATION_PAID", scope: "GROUP", actorUserId: o.userId, subjectUserId: payeeId, sourceChannel: "PINELABS", confidence: "HIGH", payload: JSON.stringify({ collectionId: o.collectionId, payer: names.get(o.userId), payee: names.get(payeeId), amountMinor: o.amountMinor, currency: o.collection.currency, verifiedBy: "pinelabs_api_fetch", bookingId: o.bookingId, direct: true }), propagation: JSON.stringify(["payments", "budget"]) },
+    });
+    await notify({ tripId: o.tripId, recipientIds: [payeeId], severity: "IMPORTANT", kind: "PAYMENT_PAID", title: `${names.get(o.userId)} paid you ${formatINR(o.amountMinor, o.collection.currency)}`, body: "Confirmed by Pine Labs.", href: `/trips/${o.tripId}/budget` });
+    return true;
+  }
+  if (liveStatus === "EXPIRED" || liveStatus === "CANCELLED") {
+    await prisma.paymentObligation.updateMany({ where: { id: o.id, status: { not: "PAID" } }, data: { status: "DUE" } });
+    return true;
+  }
+  await prisma.paymentObligation.updateMany({ where: { id: o.id, status: { in: ["DUE", "PAYING"] } }, data: { status: "PAYING" } });
+  return true;
 }

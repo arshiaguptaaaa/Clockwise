@@ -27,6 +27,22 @@ export default async function RailEvidencePage({ params, searchParams }: { param
     if (c.partner === "DELHIVERY" && c.operation === "maps.route" && r?.recommended_route?.distance != null && r.recommended_route.duration != null) {
       return `${r.recommended_route.distance} km · ${Math.round(r.recommended_route.duration / 60)} min · ${req?.traffic_aware ? `traffic-aware estimate for a ${req.departure_time?.slice(11) ?? "?"} departure` : "no traffic model"}`;
     }
+    if (c.partner === "GEOAPIFY") {
+      const g = c.response as { distance_m?: number; duration_s?: number } | null;
+      if (g?.distance_m != null && g.duration_s != null) return `${(g.distance_m / 1000).toFixed(1)} km · ${Math.round(g.duration_s / 60)} min · free-flow driving route`;
+    }
+    if (c.partner === "DELHIVERY" && (c.response as { sent?: boolean } | null)?.sent === false) return "Not sent: Delhivery is cooling down after an earlier real HTTP 429";
+    return null;
+  };
+  // What each row IS, in one word, so a skipped call or a fallback can never be mistaken for a fresh success.
+  const stamp = (c: (typeof all)[number]) => {
+    const note = c.decisionNote ?? "";
+    if ((c.response as { sent?: boolean } | null)?.sent === false) return { text: "NOT SENT · COOL-DOWN", tone: "bg-danger-tint text-danger" };
+    if (c.httpStatus === 429) return { text: "HTTP 429 · RATE LIMITED", tone: "bg-danger-tint text-danger" };
+    if (c.partner === "GEOAPIFY" && /FAILED/.test(note)) return { text: "FAILED", tone: "bg-danger-tint text-danger" };
+    if (c.partner === "GEOAPIFY" && /FALLBACK/.test(note)) return { text: "FALLBACK", tone: "bg-tint-honey text-foreground" };
+    if (/SERVED FROM SAVED REAL RESPONSE/.test(note)) return { text: "SAVED REAL RESPONSE", tone: "bg-surface-muted text-foreground" };
+    if (c.httpStatus != null && c.httpStatus >= 400) return { text: `HTTP ${c.httpStatus} · FAILED`, tone: "bg-danger-tint text-danger" };
     return null;
   };
   return (
@@ -53,12 +69,13 @@ export default async function RailEvidencePage({ params, searchParams }: { param
           Open JSON
         </a>
       </div>
-      {calls.length === 0 && <p className="mt-6 text-sm text-muted-foreground">No Gnani, Delhivery or Pine Labs calls recorded for this trip yet.</p>}
+      {calls.length === 0 && <p className="mt-6 text-sm text-muted-foreground">No Gnani, Delhivery, Geoapify or Pine Labs calls recorded for this trip yet.</p>}
       <ol className="row-rule mt-4">
         {calls.map((c, i) => (
           <li key={c.id} className="py-5" data-rail-call={c.partner}>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="rounded-full bg-accent px-2 py-0.5 font-semibold text-accent-foreground">{c.partner}</span>
+              {stamp(c) && <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.1em] ${stamp(c)!.tone}`} data-rail-stamp>{stamp(c)!.text}</span>}
               <span className="font-semibold">#{i + 1} {c.operation}</span>
               <span className="text-muted-foreground">{c.method} · HTTP {c.httpStatus ?? "—"} · {c.durationMs ?? "?"} ms · {c.at.replace("T", " ").slice(0, 19)} UTC</span>
             </div>

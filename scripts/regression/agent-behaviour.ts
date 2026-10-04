@@ -475,3 +475,21 @@ ok("an expense is titled from the speaker's own words", () => {
   assert.equal(groundedTitle("Pay her the remaining amount.", "Dinner", "Ridhima").title, "Expense paid by Ridhima");
 });
 console.log(`\n${n} agent-behaviour checks passed`);
+
+import { parseOwes } from "../../src/lib/reply-talk";
+ok("a speech engine's '08:15 tonight' is the evening hour; a morning cue or an explicit am/pm still wins", () => {
+  const n = localNow(new Date("2026-10-05T14:00:00Z"));
+  assert.deepEqual(parseOwnArrival("guys my flight got delayed by two hours i'll reach around 08:15 tonight", n), { kind: "time", arrivalTime: "20:15" });
+  assert.deepEqual(parseOwnArrival("guys my flight got delayed by two hours i'll reach around 8:15 pm tonight", n), { kind: "time", arrivalTime: "20:15" });
+  assert.deepEqual(parseOwnArrival("I'll land around 08:15 tomorrow morning", n), { kind: "time", arrivalTime: "08:15", arrivalDate: "2026-10-06" });
+  assert.equal(parseOwnArrival("@Arshia my flight got delayed by 2 hours. I'll reach around 8:15 pm now.", n)?.kind, "time");
+});
+ok("'X owes me ₹N' is one debt with a direction; nothing here is a split", () => {
+  const names = ["Arshia", "Ridhima"];
+  assert.deepEqual(parseOwes("Ridhima owes me ₹1,000.", names), { debtorWord: "Ridhima", creditorWord: "me", amountMinor: 100000 });
+  assert.deepEqual(parseOwes("I owe Ridhima ₹500", names), { debtorWord: "me", creditorWord: "Ridhima", amountMinor: 50000 });
+  assert.equal(parseOwes("Ridhima owes me", names), null); // no amount: nothing invented
+  assert.equal(parseOwes("Priya owes me ₹100", names), null); // not on the trip
+  assert.deepEqual(parsePayDirective("@Clockwise pay Ridhima ₹1,000.", names), { recipientWord: "Ridhima", amountMinor: 100000, remaining: false });
+});
+console.log(`\n${n} agent-behaviour checks passed`);

@@ -21,13 +21,14 @@ import { moveCommitmentChecked, cancelCommitmentChecked } from "@/lib/plan/apply
 import { resolveTripLocationText, isResolveFailure } from "@/lib/travel/resolve";
 import { humanMoment } from "@/lib/when";
 import { timeLabel } from "@/lib/traveller/journey";
+import { providerLabel } from "@/lib/travel/provider-label";
 import { isAgreement } from "@/lib/pointers/extract";
 import { resolveReplyTarget, clarifyYes } from "@/lib/reply-target";
 
 const toMs = (l: string) => new Date(`${l}:00.000Z`).getTime();
 const toLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
 const first = (n: string) => n.split(/\s+/)[0] ?? n;
-const providerName = (p: string | null) => (p === "delhivery" ? "Delhivery" : p === "geoapify" ? "Geoapify" : "the routing provider");
+const providerName = (p: string | null, fell?: string | null) => (p ? providerLabel(p, fell) : "the routing provider");
 const anchorWords = (kind: string | null, label: string | null) => (kind === "stay" || !kind ? "the stay" : label ?? "the meeting point");
 
 async function ev(tripId: string, kind: string, actorUserId: string | null, subjectUserId: string | null, sourceMessageId: string | null, payload: Record<string, unknown>, propagation: string[] = ["plan", "chat"]) {
@@ -205,6 +206,7 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
         allowanceMin: lowerBound ? 0 : Math.round(((clock.outAtLocal ? toMs(clock.outAtLocal) : toMs(clock.arriveLocal ?? readyHere)) - toMs(clock.arriveLocal ?? readyHere)) / 60_000),
         routeMinutes: viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes ?? 0,
         routeProvider: viaDirect ? null : clock.routeProvider,
+        routeFellBackFrom: viaDirect ? null : clock.routeFellBackFrom,
         anchorKind: lowerBound ? "unknown-route" : viaDirect ? "venue" : view.anchorKind ?? "stay",
         anchorLabel: viaDirect ? whereLabel : view.stayName ?? "the stay",
         readyAt: readyHere,
@@ -220,7 +222,7 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
       replaced ? `This replaces the earlier ${c.name} card${prior?.proposalId ? ", and that proposal is withdrawn (votes on the old terms do not count)" : ""}.` : "",
       lowerBound
         ? `${me}'s flight lands around ${timeLabel(clock.arriveLocal!)}, after ${c.name} has already started. I can't measure the trip to ${whereLabel} right now, so travel time is unknown, but this can't work however the roads are. Because I have no travel data I can't suggest another time; you could inform them, cancel it or leave it.`
-        : `${me}'s flight now lands around ${timeLabel(clock.arriveLocal!)}. ${clock.outFloor ? `${me} said they were still inside the airport at ${timeLabel(clock.outFloor)}, so I counted the exit from then` : `After ${clock.allowanceMin} min for bags and exits (a stated assumption)`} and about ${viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes} min to ${viaDirect ? whereLabel : anchorLabel} (${providerName(viaDirect ? null : clock.routeProvider)}): ${me} can realistically be there around ${timeLabel(readyHere)}${clock.outFloor ? " at the earliest, an estimate" : ""}.`,
+        : `${me}'s flight now lands around ${timeLabel(clock.arriveLocal!)}. ${clock.outFloor ? `${me} said they were still inside the airport at ${timeLabel(clock.outFloor)}, so I counted the exit from then` : `After ${clock.allowanceMin} min for bags and exits (a stated assumption)`} and about ${viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes} min to ${viaDirect ? whereLabel : anchorLabel} (${providerName(viaDirect ? null : clock.routeProvider, clock.routeFellBackFrom)}): ${me} can realistically be there around ${timeLabel(readyHere)}${clock.outFloor ? " at the earliest, an estimate" : ""}.`,
       lowerBound ? "" : suggested ? `I can move ${c.name} to ${timeLabel(suggested)}, which works for ${unmeasured.length ? "everyone I can measure" : "everyone"}${unmeasured.length ? ` (not yet measured: ${unmeasured.join(", ")})` : ""}. Should I propose that?` : `I couldn't find a time that works for everyone's stated limits. What should I do?`,
     ].filter(Boolean).join(" ");
     const msg = await postActionCard({ tripId, channel: "GROUP", type: "DECISION", status: "PENDING", data: { title: "CLOCKWISE CAUGHT A CLASH ✦", context, clash: { clashId: clash.id } } });

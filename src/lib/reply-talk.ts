@@ -56,3 +56,22 @@ export function parseFitQuestion(raw: string): { place: string; relation: "befor
   if (/^(move|shift|push|swap|cancel|skip|have|eat|do)\b/i.test(place) || /^(dinner|lunch|breakfast|brunch|coffee|drinks|tea)$/i.test(place)) return null;
   return { place, relation: m[2].toLowerCase() as "before" | "after", anchor: m[3].trim() };
 }
+
+// "Ridhima owes me ₹1,000." / "I owe Ridhima ₹500." -> who owes whom, and how much. Direction is part of the meaning: the debtor
+// pays the creditor, the amount is the amount said, and nobody else is dragged into a split.
+export type Owes = { debtorWord: string; creditorWord: string; amountMinor: number };
+export function parseOwes(raw: string, firstNames: string[]): Owes | null {
+  const t = squash(raw);
+  const known = (w: string) => /^(me|i)$/i.test(w) || firstNames.some((n) => n.toLowerCase() === w.toLowerCase());
+  let m = /^(?:hey\s+)?@?([A-Za-z]+)\s+(?:still\s+)?owes\s+me\b(.*)$/i.exec(t);
+  if (m && known(m[1]) && !/^(me|i)$/i.test(m[1])) {
+    const a = statedAmounts(m[2] ?? "")[0];
+    return a ? { debtorWord: m[1], creditorWord: "me", amountMinor: a } : null;
+  }
+  m = /^(?:hey\s+)?i\s+(?:still\s+)?owe\s+@?([A-Za-z]+)\b(.*)$/i.exec(t);
+  if (m && known(m[1]) && !/^(me|i)$/i.test(m[1])) {
+    const a = statedAmounts(m[2] ?? "")[0];
+    return a ? { debtorWord: "me", creditorWord: m[1], amountMinor: a } : null;
+  }
+  return null;
+}

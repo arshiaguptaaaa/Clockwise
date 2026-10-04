@@ -48,6 +48,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ features: [f("p1", "Vidyarthi Bhavan Dosa Corner", "dosa;south_indian", 77.572, 12.943), f("p2", "Koshy's", "continental", 77.601, 12.975), f("p3", "Truffles Burger Cafe", "burger", 77.6, 12.971), f("p4", "Udupi Grand", "south_indian;dosa", 77.58, 12.96)] });
   }
   if (u.startsWith("https://pine.test/api/auth/v1/token")) return json({ access_token: "tok", expires_in: 3600 });
+  if (u === "https://pine.test/api/pay/v1/paymentlink" && init?.method === "POST") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { merchant_payment_link_reference?: string; amount?: { value?: number; currency?: string } };
+    pineLink = { status: "CREATED", amount: body.amount?.value ?? 0, currency: body.amount?.currency ?? "INR", id: `pl-v1-stub-${Math.random().toString(36).slice(2, 8)}`, ref: body.merchant_payment_link_reference ?? null };
+    return json({ payment_link_id: pineLink.id, payment_link: `https://pine.test/pay/${pineLink.id}`, status: "CREATED" }, 201);
+  }
   if (u.startsWith("https://pine.test/api/pay/v1/paymentlink/") && (init?.method ?? "GET") === "GET" && pineLink) {
     return json({ payment_link_id: pineLink.id, merchant_payment_link_reference: pineLink.ref, status: pineLink.status, amount: { value: pineLink.amount, currency: pineLink.currency } });
   }
@@ -507,9 +512,11 @@ async function main() {
     await createExpense({ tripId: trip.id, actorUserId: R.id, title: "Cab", amountMinor: 200000, currency: "INR", stage: "PAID", status: "ACTIVE", paidByUserId: R.id, source: "MANUAL", splitMethod: "EXACT", participants: [{ userId: R.id, value: 100000 }, { userId: S.id, value: 100000 }] });
     const one = await payDirectiveReply(trip.id, S.id, { recipientWord: "her", amountMinor: null, remaining: true });
     assert.match(one, /you owe Ridhima ₹1,000/);
-    assert.match(one, /haven't paid anyone or created an expense/);
+    assert.match(one, /counts as paid only when Pine Labs confirms/);
     const wrong = await payDirectiveReply(trip.id, S.id, { recipientWord: "Ridhima", amountMinor: 50000, remaining: false });
-    assert.match(wrong, /You said ₹500; the confirmed expenses say ₹1,000/);
+    assert.match(wrong, /Confirmed expenses say you owe Ridhima ₹1,000; you asked for ₹500/);
+    const partial = await (await import("../../src/lib/agent/money-talk")).payDirectiveOutcome(trip.id, S.id, { recipientWord: "Ridhima", amountMinor: 50000, remaining: false });
+    assert.equal(partial.settlement?.amountMinor, 50000, "the amount said wins; the ledger is only compared");
     assert.equal(await prisma.booking.count({ where: { tripId: trip.id, type: "PAYMENT_REQUEST" } }), 0);
     assert.equal(await prisma.settlement.count({ where: { tripId: trip.id } }), 0);
   });
@@ -827,6 +834,118 @@ async function main() {
     assert.equal((await prisma.booking.findUnique({ where: { id: bk3.id } }))!.status, "PROCESSED");
     assert.equal(await prisma.expense.count({ where: { tripId: trip.id, idempotencyKey: `pay:${bk3.id}` } }), 1);
     assert.equal(await prisma.tripEvent.count({ where: { tripId: trip.id, kind: "PAYMENT_CONFIRMED", payload: { contains: bk3.id } } }), 1);
+  });
+
+  // ============================== 11. THE THREE RAILS, TOLD TRUTHFULLY ==============================
+  const { proposeDebt, payDirectiveOutcome: payOutcome } = await import("../../src/lib/agent/money-talk");
+  const { confirmExpense } = await import("../../src/lib/budget/ledger");
+  const { loadBudget } = await import("../../src/lib/budget/ledger");
+  const { authorisePineSettlementAction, checkPineSettlementAction } = await import("../../src/app/settlement-actions");
+  await t("'Ridhima owes me ₹1,000' is ONE debt Ridhima -> Arshia: never ₹500 each, never a group split, and not a debt until confirmed", async () => {
+    await prisma.expense.deleteMany({ where: { tripId: trip.id } });
+    await prisma.settlement.deleteMany({ where: { tripId: trip.id } });
+    const reply = await proposeDebt(trip.id, A.id, { debtorWord: "Ridhima", creditorWord: "me", amountMinor: 100000 }, "msg-owes-1");
+    assert.match(reply, /Ridhima owes Arshia ₹1,000/);
+    assert.match(reply, /not a split/);
+    const e = (await prisma.expense.findFirst({ where: { tripId: trip.id }, include: { participants: true } }))!;
+    assert.equal(e.status, "PROPOSED");
+    assert.equal(e.paidByUserId, A.id);
+    assert.deepEqual(e.participants.map((p) => [p.userId, p.shareMinor]), [[R.id, 100000]]);
+    const before = await loadBudget(trip.id, A.id);
+    assert.equal(before.balances.length, 0, "unconfirmed: no debt in the ledger yet");
+    await confirmExpense(e.id, A.id);
+    const after = await loadBudget(trip.id, A.id);
+    assert.deepEqual(after.balances[0].transfers, [{ fromUserId: R.id, toUserId: A.id, amountMinor: 100000 }]);
+  });
+  await t("'@Clockwise pay Arshia ₹1,000' (Ridhima): payer = Ridhima, payee = Arshia, amount = ₹1,000 — and a payment never runs backwards", async () => {
+    const ok = await payOutcome(trip.id, R.id, { recipientWord: "Arshia", amountMinor: 100000, remaining: false });
+    assert.ok(ok.settlement);
+    assert.deepEqual([ok.settlement!.fromId, ok.settlement!.toId, ok.settlement!.amountMinor], [R.id, A.id, 100000]);
+    assert.match(ok.reply, /from Ridhima to Arshia, not split with anyone/);
+    assert.match(ok.reply, /matches what confirmed expenses say/);
+    assert.match(ok.reply, /not the payment|counts as paid only when Pine Labs confirms/);
+    const backwards = await payOutcome(trip.id, A.id, { recipientWord: "Ridhima", amountMinor: 100000, remaining: false });
+    assert.equal(backwards.settlement, undefined);
+    assert.match(backwards.reply, /owes YOU/);
+  });
+  let payCard: { id: string } | null = null;
+  await t("authorising creates ONE Pine UAT link: link created is NOT paid — the debt stays, no settlement, the card says so", async () => {
+    const { reply } = await (async () => {
+      sessionUser = R.id;
+      return say(R, "@Clockwise pay Arshia ₹1,000");
+    })();
+    assert.match(reply ?? "", /from Ridhima to Arshia/);
+    payCard = (await prisma.message.findFirst({ where: { tripId: trip.id, cardData: { contains: '"settlement"' } }, orderBy: { timestamp: "desc" } }))!;
+    assert.ok(payCard);
+    sessionUser = A.id;
+    assert.equal((await authorisePineSettlementAction(payCard.id)).ok, false, "only the payer can authorise");
+    sessionUser = R.id;
+    const [x, y] = await Promise.all([authorisePineSettlementAction(payCard.id), authorisePineSettlementAction(payCard.id)]);
+    assert.ok(x.ok && y.ok);
+    assert.equal(await prisma.paymentCollection.count({ where: { tripId: trip.id, payeeUserId: A.id } }), 1, "two taps, one payment");
+    const card = JSON.parse((await prisma.message.findUnique({ where: { id: payCard.id } }))!.cardData!);
+    assert.equal(card.settlement.pine.status, "CREATED");
+    assert.match(card.settlement.pine.url, /^https:\/\/pine\.test\/pay\//);
+    assert.equal((await prisma.message.findUnique({ where: { id: payCard.id } }))!.cardStatus, "PENDING");
+    assert.equal(await prisma.settlement.count({ where: { tripId: trip.id } }), 0);
+    const owedStill = (await loadBudget(trip.id, R.id)).balances[0].transfers;
+    assert.deepEqual(owedStill, [{ fromUserId: R.id, toUserId: A.id, amountMinor: 100000 }], "the debt is untouched by a link");
+    const ev = await prisma.tripEvent.findFirst({ where: { tripId: trip.id, kind: "PAYMENT_AUTHORISED" } });
+    assert.equal(JSON.parse(ev!.payload).paid, false);
+    // evidence: the Pine create call is on record with the request amount in paise
+    const rc = await prisma.railCall.findFirst({ where: { tripId: trip.id, partner: "PINELABS", operation: { contains: "paymentlink" }, method: "POST" }, orderBy: { createdAt: "desc" } });
+    assert.ok(rc);
+    assert.equal(JSON.parse(rc!.requestJson).body.amount.value, 100000);
+    assert.equal(rc!.httpStatus, 201);
+  });
+  await t("checking status: opened/started is still NOT paid; a PROCESSED answer for the wrong amount is ignored; the real one records ONE settlement and the card says paid", async () => {
+    const data = JSON.parse((await prisma.message.findUnique({ where: { id: payCard!.id } }))!.cardData!);
+    const linkId = (pineLink as { id: string }).id;
+    for (const st of ["CLICKED", "PAYMENT_INITIATED"]) {
+      pineLink = { status: st, amount: 100000, currency: "INR", id: linkId, ref: (pineLink as { ref: string | null }).ref };
+      const r = await checkPineSettlementAction(payCard!.id);
+      assert.ok(r.ok && r.status === st);
+      assert.equal(await prisma.settlement.count({ where: { tripId: trip.id } }), 0);
+      assert.equal(JSON.parse((await prisma.message.findUnique({ where: { id: payCard!.id } }))!.cardData!).settlement.pine.status, st);
+    }
+    pineLink = { status: "PROCESSED", amount: 50000, currency: "INR", id: linkId, ref: (pineLink as { ref: string | null }).ref };
+    assert.equal((await checkPineSettlementAction(payCard!.id)).ok, false);
+    assert.equal(await prisma.settlement.count({ where: { tripId: trip.id } }), 0, "wrong amount: nothing recorded");
+    pineLink = { status: "PROCESSED", amount: 100000, currency: "INR", id: linkId, ref: (pineLink as { ref: string | null }).ref };
+    await Promise.all([checkPineSettlementAction(payCard!.id), checkPineSettlementAction(payCard!.id)]);
+    await checkPineSettlementAction(payCard!.id);
+    const sets = await prisma.settlement.findMany({ where: { tripId: trip.id } });
+    assert.equal(sets.length, 1);
+    assert.deepEqual([sets[0].fromUserId, sets[0].toUserId, sets[0].amountMinor, sets[0].method], [R.id, A.id, 100000, "PINE_LABS"]);
+    assert.equal((await prisma.message.findUnique({ where: { id: payCard!.id } }))!.cardStatus, "CONFIRMED");
+    assert.equal(JSON.parse((await prisma.message.findUnique({ where: { id: payCard!.id } }))!.cardData!).settlement.pine.status, "PROCESSED");
+    assert.equal((await loadBudget(trip.id, R.id)).balances[0].transfers.length, 0, "now, and only now, the debt is cleared");
+    sessionUser = null;
+    void data;
+  });
+  await t("provider truth: a Delhivery cool-down is recorded as NOT SENT (not a fake 429); Geoapify's answer is its own row labelled FALLBACK", async () => {
+    process.env.DELHIVERY_MAPS_TOKEN = "stub-token-not-real";
+    await prisma.delhiveryCache.upsert({ where: { key: "__ratelimit__" }, create: { key: "__ratelimit__", op: "ratelimit", requestJson: "{}", responseJson: "{}", expiresAt: new Date(Date.now() + 3600_000) }, update: { expiresAt: new Date(Date.now() + 3600_000) } });
+    const { driveRoute } = await import("../../src/lib/travel/route-provider");
+    const { withRailContext } = await import("../../src/lib/rails/evidence");
+    const { providerLabel } = await import("../../src/lib/travel/provider-label");
+    routeMode = "ok";
+    const r = await withRailContext({ tripId: trip.id, userId: R.id }, () => driveRoute({ lat: 13.2, lng: 77.7 }, { lat: 12.97, lng: 77.59 }, { tripId: trip.id, userId: R.id, decision: "Arrival point to confirmed stay" }));
+    assert.equal(r.provider, "geoapify");
+    assert.match(r.fellBackFrom ?? "", /DELHIVERY_RATE_LIMITED/);
+    const rows = await prisma.railCall.findMany({ where: { tripId: trip.id, partner: { in: ["DELHIVERY", "GEOAPIFY"] } }, orderBy: { createdAt: "desc" }, take: 2 });
+    const del = rows.find((x) => x.partner === "DELHIVERY")!;
+    const geo = rows.find((x) => x.partner === "GEOAPIFY")!;
+    assert.equal(del.httpStatus, null, "a skipped call is not a 429");
+    assert.equal(JSON.parse(del.responseJson!).sent, false);
+    assert.match(del.decision ?? "", /NOT SENT/);
+    assert.match(geo.decision ?? "", /FALLBACK/);
+    assert.equal(geo.httpStatus, 200);
+    assert.equal(providerLabel(r.provider, r.fellBackFrom), "Geoapify · FALLBACK (Delhivery 429 · rate-limited)");
+    assert.equal(providerLabel("delhivery"), "Delhivery");
+    delete process.env.DELHIVERY_MAPS_TOKEN;
+    process.env.DELHIVERY_MAPS_TOKEN = "";
+    await prisma.delhiveryCache.deleteMany({ where: { key: "__ratelimit__" } });
   });
 
   console.log(`\n${passed} integration checks passed${failed ? `, ${failed} FAILED` : ""}`);

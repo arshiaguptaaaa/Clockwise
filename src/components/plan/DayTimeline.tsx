@@ -1,3 +1,4 @@
+import { providerLabel } from "@/lib/travel/provider-label";
 import { Plane, TrainFront, Bus, Car, BedDouble, CalendarClock, Utensils } from "lucide-react";
 import { timeLabel } from "@/lib/traveller/journey";
 import { HUMAN } from "@/lib/copy";
@@ -27,7 +28,7 @@ const modeIcon = (mode: string) => {
   return <Plane className={c} strokeWidth={1.6} />;
 };
 const foodish = /dinner|lunch|breakfast|brunch|cafe|café|meal|supper/i;
-const basisName = (p: string | null) => (p === "delhivery" ? "Delhivery" : p === "geoapify" ? "Geoapify" : "provider route");
+const basisName = (p: string | null, fell?: string | null) => providerLabel(p, fell);
 
 const dayHead = (local: string) => {
   const d = new Date(`${local.slice(0, 10)}T00:00:00Z`);
@@ -67,7 +68,7 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
             {first} is realistically {view.anchorKind === "stay" || !view.anchorKind ? "at the stay" : `at ${view.stayName}`}
           </>
         ),
-        leg: `${ARRIVAL_BUFFER_MIN} min bags & exits + ${c.routeMinutes} min to ${view.anchorKind === "stay" || !view.anchorKind ? "the stay" : view.stayName} · ${basisName(c.routeProvider)}`,
+        leg: `${ARRIVAL_BUFFER_MIN} min bags & exits + ${c.routeMinutes} min to ${view.anchorKind === "stay" || !view.anchorKind ? "the stay" : view.stayName} · ${basisName(c.routeProvider, c.routeFellBackFrom)}`,
       });
     }
   }

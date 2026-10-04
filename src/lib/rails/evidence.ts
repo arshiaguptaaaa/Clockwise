@@ -47,7 +47,7 @@ export function sanitize(value: unknown, key = ""): unknown {
 }
 
 export type RailRecord = {
-  partner: "GNANI" | "PINELABS" | "DELHIVERY";
+  partner: "GNANI" | "PINELABS" | "DELHIVERY" | "GEOAPIFY";
   operation: string;
   endpoint: string;
   method: string;

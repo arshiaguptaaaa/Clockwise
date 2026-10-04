@@ -16,6 +16,7 @@ export function ExpenseCard({
   context,
   values,
   canAct,
+  debt,
 }: {
   tripId: string;
   messageId: string;
@@ -25,19 +26,20 @@ export function ExpenseCard({
   context?: string;
   values?: { label: string; value: string }[];
   canAct: boolean;
+  debt?: boolean;
 }) {
   const router = useRouter();
   return (
     <ClockwiseActionCard
       type="DECISION"
       title={title}
-      context={status === "CONFIRMED" ? "Added to Budget." : status === "DISMISSED" ? "Not added." : (context ?? "Nothing is recorded until it's confirmed.")}
+      context={status === "CONFIRMED" ? (debt ? "Recorded as a single debt in Budget." : "Added to Budget.") : status === "DISMISSED" ? (debt ? "Not recorded." : "Not added.") : (context ?? "Nothing is recorded until it's confirmed.")}
       values={values}
       status={status}
       primaryAction={
         canAct && status === "PENDING"
           ? {
-              label: "Add expense",
+              label: debt ? "Record this debt" : "Add expense",
               pendingLabel: "Adding…",
               run: async () => {
                 const r = await confirmExpenseAction(expenseId, messageId);
@@ -66,7 +68,7 @@ export function ExpenseCard({
           }}
           className="mt-2 cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:underline"
         >
-          Not an expense
+          {debt ? "Not owed" : "Not an expense"}
         </button>
       )}
     </ClockwiseActionCard>

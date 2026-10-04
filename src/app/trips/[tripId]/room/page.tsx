@@ -1,3 +1,4 @@
+import { providerLabel } from "@/lib/travel/provider-label";
 import { prisma } from "@/lib/prisma";
 import { getTripById } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
@@ -139,7 +140,7 @@ export default async function TripRoomChatPage({
       allowanceMin: c.allowanceMin,
       unknownTravel: c.anchorKind === "unknown-route",
       routeMinutes: c.routeMinutes,
-      providerLabel: c.routeProvider === "delhivery" ? "Delhivery" : c.routeProvider === "geoapify" ? "Geoapify" : "provider route",
+      providerLabel: providerLabel(c.routeProvider, c.routeFellBackFrom),
       anchorLabel: c.anchorKind === "stay" ? "the stay" : c.anchorLabel,
       suggestedLocal: c.suggestedLocal,
       suggestedLabel: c.suggestedLocal ? timeLabel(c.suggestedLocal) : null,

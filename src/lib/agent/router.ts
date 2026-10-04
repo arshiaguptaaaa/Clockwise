@@ -17,8 +17,8 @@ import { observeMessage, loadPointers, pointerLine } from "@/lib/pointers/store"
 import { parseOwnArrival } from "@/lib/traveller/arrival-parse";
 import { parseTravellerStatus } from "@/lib/traveller/status-parse";
 import { handleTravellerStatus } from "@/lib/traveller/status";
-import { parseConditionalYes, parsePayDirective, parseSelfReportedPayment, parseFitQuestion } from "@/lib/reply-talk";
-import { payDirectiveOutcome, selfReportedReply } from "./money-talk";
+import { parseConditionalYes, parsePayDirective, parseSelfReportedPayment, parseFitQuestion, parseOwes } from "@/lib/reply-talk";
+import { payDirectiveOutcome, selfReportedReply, proposeDebt } from "./money-talk";
 import { rupees } from "@/lib/private-tell";
 import { attachCondition } from "@/lib/proposal-conditions";
 import { parseTransientAvoid, recordMealMood } from "@/lib/pointers/mood";
@@ -152,6 +152,8 @@ export async function routeAddressed(ctx: AgentContext, last: ConversationTurn, 
   const names = ctx.trip.members.map((m) => first(m.user.name));
   const cond = parseConditionalYes(text);
   if (cond) return { handled: true, reply: await conditionalReply(ctx, cond, last.id), calls: [{ name: "conditional_approval_noted", input: { counted: false } }] };
+  const owes = parseOwes(text, names);
+  if (owes) return { handled: true, reply: await proposeDebt(ctx.trip.id, ctx.actingUserId, owes, last.id), calls: [{ name: "debt_proposed", input: { split: false } }] };
   const pay = parsePayDirective(text, names);
   if (pay) {
     const out = await payDirectiveOutcome(ctx.trip.id, ctx.actingUserId, pay);
@@ -163,10 +165,10 @@ export async function routeAddressed(ctx: AgentContext, last: ConversationTurn, 
         type: "DECISION",
         status: "PENDING",
         data: {
-          title: "PAYMENT TO CONFIRM ✦",
-          context: `${s.fromName} owes ${s.toName} ${s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}`} on confirmed expenses${s.basis.length ? ` (${s.basis.join(", ")})` : ""}. Tap only after you've actually paid ${s.toName} outside Clockwise: it records the settlement and tells ${s.toName}. It moves no money and adds no expense.`,
-          values: [{ label: "From", value: s.fromName }, { label: "To", value: s.toName }, { label: "Amount", value: s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}` }],
-          settlement: { fromId: s.fromId, toId: s.toId, fromName: s.fromName, toName: s.toName, amountMinor: s.amountMinor, currency: s.currency },
+          title: "PAYMENT TO AUTHORISE ✦",
+          context: `${s.fromName} pays ${s.toName} ${s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}`}: one payment, not split.${s.basis.length ? ` (Confirmed expenses: ${s.basis.join(", ")}.)` : ""} Authorising creates a Pine Labs UAT payment link. A link is not a payment: it counts as paid only when Pine Labs confirms it.`,
+          values: [{ label: "Payer", value: s.fromName }, { label: "Payee", value: s.toName }, { label: "Amount", value: s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}` }],
+          settlement: { fromId: s.fromId, toId: s.toId, fromName: s.fromName, toName: s.toName, amountMinor: s.amountMinor, currency: s.currency, statedByUser: s.statedByUser },
         },
       });
     }
@@ -278,6 +280,13 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
       const cr = await conditionalReply(ctx, cond, last.id);
       calls.push({ name: "conditional_approval_noted", input: { counted: false } });
       return { calls, needsModel: false, reply: cr ?? undefined };
+    }
+    const owesP = parseOwes(text, names);
+    if (owesP) {
+      // A plain statement of a debt in the group: caught quietly as ONE debt to confirm (card only; no chat reply).
+      await proposeDebt(ctx.trip.id, ctx.actingUserId, owesP, last.id);
+      calls.push({ name: "debt_proposed", input: { split: false } });
+      return { calls, needsModel: false };
     }
     if (parseSelfReportedPayment(text, names)) {
       await selfReportedReply(ctx.trip.id, ctx.actingUserId, parseSelfReportedPayment(text, names)!, last.id);

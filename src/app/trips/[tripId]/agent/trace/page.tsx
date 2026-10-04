@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { getTripById } from "@/lib/trip";
 import { buildAgentTrace, type TraceEntry } from "@/lib/agent/trace";
 import { getCurrentUserId } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
 
 // This page makes the agent's real, checkable decision chain legible. Every row comes from buildAgentTrace,
 // which only merges real rows (Message.toolCalls, Decision,
@@ -54,6 +55,16 @@ export default async function AgentTracePage({
   const { tripId } = await params;
   const viewerId = await getCurrentUserId();
   const [trip, entries] = await Promise.all([getTripById(tripId), buildAgentTrace(tripId, viewerId)]);
+  // A voice note's own trace events are private to the person who spoke. The organiser still sees the Gnani rail call (the
+  // sanitised request and the exact response), so the first step of the chain is read from that real record when it exists.
+  const gnani = viewerId === trip.createdBy ? await prisma.railCall.findFirst({ where: { tripId, partner: "GNANI" }, orderBy: { createdAt: "desc" }, select: { createdAt: true, httpStatus: true, responseJson: true } }) : null;
+  const gnaniTranscript = (() => {
+    try {
+      return gnani?.responseJson ? ((JSON.parse(gnani.responseJson) as { transcript?: string }).transcript ?? "") : "";
+    } catch {
+      return "";
+    }
+  })();
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-12 pt-6">
@@ -80,13 +91,15 @@ export default async function AgentTracePage({
           <ol className="mt-3">
             {CHAIN.map((step, i) => {
               const hit = [...entries].reverse().find((e) => e.title.startsWith(step.kind) || (step.alt ? e.title.startsWith(step.alt) : false));
+              const viaGnaniRail = !hit && step.kind === "GNANI_STT_COMPLETED" && gnani ? gnani : null;
               return (
                 <li key={step.kind} className="relative grid grid-cols-[1.5rem_1fr] gap-x-3 pb-5 last:pb-0">
                   {i < CHAIN.length - 1 && <span aria-hidden className="absolute bottom-0 left-[0.55rem] top-5 w-px bg-border" />}
-                  <span aria-hidden className={`mt-1 flex size-[1.1rem] items-center justify-center rounded-full text-[10px] ${hit ? "bg-accent text-accent-foreground" : "border border-border text-transparent"}`}>✓</span>
-                  <div className={hit ? "" : "opacity-45"}>
+                  <span aria-hidden className={`mt-1 flex size-[1.1rem] items-center justify-center rounded-full text-[10px] ${hit || viaGnaniRail ? "bg-accent text-accent-foreground" : "border border-border text-transparent"}`}>✓</span>
+                  <div className={hit || viaGnaniRail ? "" : "opacity-45"}>
                     <p className="font-display text-[19px] leading-tight tracking-[-0.01em]">{step.label}</p>
-                    <p className="mt-0.5 font-mono text-[11px] tracking-tight text-muted-foreground">{hit && step.alt && hit.title.startsWith(step.alt) ? step.alt : step.kind}{hit ? ` · ${formatTimestamp(hit.timestamp)}` : " · not yet"}</p>
+                    <p className="mt-0.5 font-mono text-[11px] tracking-tight text-muted-foreground">{hit && step.alt && hit.title.startsWith(step.alt) ? step.alt : step.kind}{hit ? ` · ${formatTimestamp(hit.timestamp)}` : viaGnaniRail ? ` · GNANI HTTP ${viaGnaniRail.httpStatus ?? "?"} · ${formatTimestamp(viaGnaniRail.createdAt)}` : " · not yet"}</p>
+                    {viaGnaniRail && gnaniTranscript && <p className="mt-1 text-[12.5px] text-muted-foreground">Gnani returned: &ldquo;{gnaniTranscript}&rdquo;</p>}
                   </div>
                 </li>
               );

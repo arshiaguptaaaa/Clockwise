@@ -103,6 +103,10 @@ export function parseTime(text: string, hint = ""): ParsedTime | null {
   }
   const h24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(t);
   // 13:00-23:59 and 0X:XX are unmistakably 24-hour. "9:15" is not: it still needs its meridiem from the words.
+  // A speech-to-text engine writes "eight fifteen tonight" as "08:15 tonight": a leading zero there is formatting, not a 24-hour
+  // clock. With an evening cue and no am/pm it is the evening hour; with a morning cue (or none) it stays as written.
+  const eveningCue = /\b(tonight|this evening|evening|night|late)\b/.test(`${hint} ${t}`) && !/\b(morning|a\.?m\.?)\b/.test(`${hint} ${t}`);
+  if (h24 && /^0[1-9]$/.test(h24[1]) && eveningCue) return { time: `${pad(Number(h24[1]) + 12)}:${h24[2]}`, matched: h24[0], guessedMeridiem: false };
   if (h24 && (Number(h24[1]) > 12 || /^0\d/.test(h24[1]) || Number(h24[1]) === 12 || Number(h24[1]) === 0)) return { time: `${pad(Number(h24[1]))}:${h24[2]}`, matched: h24[0], guessedMeridiem: false };
 
   // Bare hour: "at 8", "to 10", "for 9".

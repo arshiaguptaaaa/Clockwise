@@ -1256,6 +1256,8 @@ model TravellerJourney {
   routeProvider      String?
   routeComputedAt    DateTime?
   routeStayBookingId String?
+  // Set only when Delhivery was asked first and did not answer, so Geoapify's number is shown as a labelled fallback.
+  routeFellBackFrom  String?
   // The arrival printed on the ticket / first confirmed, kept when a delay moves arriveLocal, so a disruption is
   // visible as scheduled -> expected and never overwrites what the ticket said.
   scheduledArriveLocal String?
@@ -1353,6 +1355,9 @@ model PaymentCollection {
   status           String              @default("ACTIVE")
   createdBy        String
   sourceProposalId String?
+  // "@Clockwise pay Ridhima ₹1,000": the collection has ONE obligation (the payer's) and a payee. When Pine Labs reports it PROCESSED,
+  // a settlement payer -> payee is recorded; nothing is recorded as paid before that.
+  payeeUserId      String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   obligations      PaymentObligation[]
@@ -1456,6 +1461,7 @@ model TripClash {
   allowanceMin  Int
   routeMinutes  Int
   routeProvider String?
+  routeFellBackFrom String?
   anchorKind    String
   anchorLabel   String
   readyAt       String

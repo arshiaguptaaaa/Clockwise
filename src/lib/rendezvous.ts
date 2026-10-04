@@ -105,7 +105,7 @@ export async function recomputeRendezvous(tripId: string) {
         }).catch(() => undefined);
         await prisma.travellerJourney.update({
           where: { id: j.id },
-          data: { routeToStayMeters: Math.round(r.distanceMeters), routeToStaySeconds: Math.round(r.durationSeconds), routeProvider: r.provider, routeComputedAt: new Date(r.retrievedAt), routeStayBookingId: stay.id },
+          data: { routeToStayMeters: Math.round(r.distanceMeters), routeToStaySeconds: Math.round(r.durationSeconds), routeProvider: r.provider, routeFellBackFrom: r.fellBackFrom ?? null, routeComputedAt: new Date(r.retrievedAt), routeStayBookingId: stay.id },
         });
         routed++;
       } catch {
@@ -140,6 +140,7 @@ export type TravellerClock = {
   routeMinutes: number | null;
   routeKm: number | null;
   routeProvider: string | null;
+  routeFellBackFrom: string | null;
   hotelBy: string | null; // local YYYY-MM-DDTHH:mm
   // The earliest the traveller can be OUT of the airport: landing + the stated allowance, or later if they said they are
   // still inside. `outFloor` is set only when what they said is what decides it.
@@ -189,12 +190,12 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
   const nameOf = new Map(members.map((m) => [m.userId, m.user.name]));
   const clocks: TravellerClock[] = journeys.map((j) => {
     const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName, scheduledArrive: j.scheduledArriveLocal && j.scheduledArriveLocal !== j.arriveLocal ? j.scheduledArriveLocal : null, allowanceMin: ARRIVAL_BUFFER_MIN, ...outAt(j), direct: j.directToCommitmentId ? { commitmentId: j.directToCommitmentId, seconds: j.directRouteSeconds ?? null } : null };
-    if (!stay) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_STAY" as const };
-    if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
-    if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
-    if (j.routeToStaySeconds == null || j.routeStayBookingId !== stay.id) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ROUTE" as const };
+    if (!stay) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, routeFellBackFrom: null, hotelBy: null, status: "NO_STAY" as const };
+    if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, routeFellBackFrom: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
+    if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, routeFellBackFrom: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
+    if (j.routeToStaySeconds == null || j.routeStayBookingId !== stay.id) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, routeFellBackFrom: null, hotelBy: null, status: "NO_ROUTE" as const };
     const hotelBy = toLocal(toMs(outAt(j).outAtLocal!) + j.routeToStaySeconds * 1000);
-    return { ...base, routeMinutes: Math.round(j.routeToStaySeconds / 60), routeKm: Math.round(((j.routeToStayMeters ?? 0) / 1000) * 10) / 10, routeProvider: j.routeProvider, hotelBy, status: "KNOWN" as const };
+    return { ...base, routeMinutes: Math.round(j.routeToStaySeconds / 60), routeKm: Math.round(((j.routeToStayMeters ?? 0) / 1000) * 10) / 10, routeProvider: j.routeProvider, routeFellBackFrom: j.routeFellBackFrom ?? null, hotelBy, status: "KNOWN" as const };
   });
   const have = new Set(journeys.map((j) => j.userId));
   const noJourney = members.filter((m) => !have.has(m.userId)).map((m) => m.user.name);

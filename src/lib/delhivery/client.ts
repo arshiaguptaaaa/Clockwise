@@ -106,6 +106,20 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
   }
   const until = await sharedRateLimitUntil();
   if (until > Date.now()) {
+    // No request is sent during a cool-down, and the record says exactly that: it is NOT a fresh HTTP 429. It names the earlier
+    // real 429 that started the cool-down, so the evidence trail shows why Delhivery was not asked and what answered instead.
+    const lastReal = await prisma.railCall.findFirst({ where: { partner: "DELHIVERY", httpStatus: 429 }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }).catch(() => null);
+    await logRailCall({
+      partner: "DELHIVERY",
+      operation: op,
+      endpoint: `${method} ${url.origin}${url.pathname}`,
+      method,
+      request: method === "GET" ? { ...payload } : payload,
+      response: { sent: false, blocked: "DELHIVERY_RATE_LIMITED", cooldownUntil: new Date(until).toISOString(), lastRealHttp429At: lastReal?.createdAt.toISOString() ?? null, note: "Not sent. An earlier real request returned HTTP 429, so this token is cooling down. This row is a skipped call, not a new 429." },
+      httpStatus: null,
+      durationMs: 0,
+      context: { ...evCtx, decision: `${evCtx.decision ?? op} · NOT SENT: Delhivery is rate-limited (cool-down until ${new Date(until).toISOString()}), so a labelled fallback is used` },
+    });
     return { ok: false, blocked: "DELHIVERY_RATE_LIMITED", httpStatus: 429, latencyMs: 0, error: `Delhivery rate limit (50 calls per window on this token): not retried until ${new Date(until).toISOString()}`, evidenceId: null };
   }
   if (method === "GET") for (const [k, v] of Object.entries(payload)) if (v != null) url.searchParams.set(k, String(v));

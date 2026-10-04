@@ -59,7 +59,7 @@ export function ActionCardMessage({
   }
 
   if (data.settlement) {
-    return <SettlementCard messageId={messageId} status={cardStatus} title={data.title} context={data.context} values={data.values} canAct={Boolean(currentUserId && currentUserId === data.settlement.fromId)} toName={data.settlement.toName} />;
+    return <SettlementCard messageId={messageId} status={cardStatus} title={data.title} context={data.context} values={data.values} canAct={Boolean(currentUserId && currentUserId === data.settlement.fromId)} toName={data.settlement.toName} pine={data.settlement.pine} />;
   }
 
   if (data.expenseId) {
@@ -73,6 +73,7 @@ export function ActionCardMessage({
         context={data.context}
         values={data.values}
         canAct={Boolean(currentUserId && (currentUserId === data.proposerId || currentUserId === data.payerId))}
+        debt={Boolean(data.debt)}
       />
     );
   }
