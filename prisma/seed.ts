@@ -44,6 +44,7 @@ async function main() {
     await prisma.settlement.deleteMany({ where: { tripId: demoTripId } });
     await prisma.tripBudget.deleteMany({ where: { tripId: demoTripId } });
     await prisma.notification.deleteMany({ where: { tripId: demoTripId } });
+    await prisma.privateNote.deleteMany({ where: { tripId: demoTripId } });
     await prisma.travellerReadiness.deleteMany({ where: { tripId: demoTripId } });
     await prisma.travellerLocation.deleteMany({ where: { tripId: demoTripId } });
     await prisma.scheduledJob.deleteMany({ where: { tripId: demoTripId } });

@@ -34,17 +34,33 @@ export function IdeaCard({ idea }: { idea: IdeaView }) {
     );
   }
 
+  const stops = idea.steps.filter((s) => s.kind !== "return");
+  const back = idea.steps.find((s) => s.kind === "return");
   return (
-    <div className="vote-in w-full max-w-md border-l-[3px] border-accent-strong bg-surface-muted/50 py-5 pl-4 pr-3 sm:max-w-lg" data-idea-card data-idea-status={status}>
-      <p className="eyebrow !text-accent-strong">
-        <span className="cw-mark">◷</span> Clockwise has an idea ✦
-      </p>
+    <div id={`idea-${idea.suggestionId}`} className="vote-in w-full max-w-md rounded-[18px] border border-cw-line bg-tint-honey/70 px-4 py-5 sm:max-w-lg" data-idea-card data-idea-status={status}>
+      <p className="eyebrow !text-accent-strong">✦ Clockwise has an idea</p>
       {idea.intro && <p className="mt-2 text-[14px] leading-snug">{idea.intro}</p>}
-      <p className="mt-2.5 font-display text-[24px] leading-[1.1] tracking-[-0.015em]">{idea.title}</p>
-      <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{idea.why}</p>
+
+      <ol className="mt-3 font-display text-[26px] leading-[1.1] tracking-[-0.015em]" data-idea-flow>
+        {stops.map((s, i) => (
+          <li key={i}>
+            {i > 0 && <span aria-hidden className="block py-0.5 text-[18px] text-muted-foreground">↓</span>}
+            {s.name}
+          </li>
+        ))}
+        {back && (
+          <li className="text-[15px] text-muted-foreground">
+            <span aria-hidden className="block py-0.5 text-[18px]">↓</span>
+            {back.name}
+          </li>
+        )}
+      </ol>
+
+      <p className="eyebrow mt-4">Why this works</p>
+      <p className="mt-1 text-[13.5px] leading-snug text-foreground/80">{idea.why}</p>
 
       {open && (
-        <ol className="mt-3 space-y-2" data-idea-steps>
+        <ol className="mt-3 space-y-2 border-t border-border/70 pt-3" data-idea-steps>
           {idea.steps.map((s, i) => (
             <li key={i} className="flex items-baseline gap-3 text-[14px]">
               <span className="t-number w-[4.5rem] shrink-0 text-right text-[15px] text-muted-foreground">{s.at ? clock(s.at) : "↓"}</span>
@@ -60,17 +76,18 @@ export function IdeaCard({ idea }: { idea: IdeaView }) {
 
       {status === "OPEN" && (
         <>
-          <p className="mt-3 text-[12px] text-muted-foreground">Just an idea. The Plan hasn&apos;t changed and nobody has been asked yet.</p>
+          <p className="mt-4 font-display text-[19px] leading-snug">Should I propose this?</p>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">Just an idea. The Plan hasn&apos;t changed and nobody has been asked yet.</p>
           {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
-            {!open && (
-              <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost" data-see-idea>
-                See the idea
-              </button>
-            )}
             <button type="button" disabled={pending} onClick={() => run(() => proposeIdeaAction(idea.suggestionId))} className="btn btn-primary" data-propose-idea>
               {pending ? "Proposing…" : "Propose to group"}
             </button>
+            {!open && (
+              <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost" data-see-idea>
+                See the times
+              </button>
+            )}
             <button type="button" disabled={pending} onClick={() => run(async () => ({ ok: (await dismissIdeaAction(idea.suggestionId)).ok }))} className="btn btn-ghost" data-dismiss-idea>
               Not now
             </button>
@@ -78,7 +95,10 @@ export function IdeaCard({ idea }: { idea: IdeaView }) {
         </>
       )}
       {status === "PROPOSED" && <p className="mt-3 text-[12.5px] font-medium">Proposed to the group ✓ <span className="font-normal text-muted-foreground">· the votes are in the card below. The Plan changes only after everyone&apos;s in and it&apos;s confirmed.</span></p>}
-      {status === "CONFIRMED" && <p className="mt-3 text-[12.5px] font-medium text-success">In the Plan ✓</p>}
+      {status === "CONFIRMED" && <p className="mt-3 text-[12.5px] font-medium text-success">✓ In the Plan</p>}
+      {!open && status !== "OPEN" && (
+        <button type="button" onClick={() => setOpen(true)} className="mt-2 cursor-pointer text-[12px] underline underline-offset-4">See the times</button>
+      )}
     </div>
   );
 }

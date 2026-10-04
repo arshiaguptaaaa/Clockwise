@@ -238,3 +238,72 @@ ok("'dinner moved to 9?' (passive voice, said to the group) is read as a move", 
   if (c?.kind === "move") assert.equal(c.time, "21:00");
 });
 console.log(`\n${n} agent-behaviour checks passed`);
+
+import { parsePrivateTell, noteHeadline, thirdPerson, amountIn } from "../../src/lib/private-tell";
+const crew = [
+  { id: "u-arshia", name: "Arshia Gupta" },
+  { id: "u-ridhima", name: "Ridhima Sharma" },
+  { id: "u-shreya", name: "Shreya Rao" },
+  { id: "u-eva", name: "Eva Kaur" },
+];
+const tell = (s: string, me = "u-arshia") => parsePrivateTell(s, crew, me);
+ok("private tell: TELL vs KNOW vs REMEMBER vs 'don't tell'", () => {
+  const t = tell("Tell Ridhima I want vegetarian food for dinner.");
+  assert.equal(t.type, "TELL");
+  if (t.type === "TELL") {
+    assert.deepEqual(t.recipientIds, ["u-ridhima"]);
+    assert.equal(t.needsConfirm, false);
+    assert.equal(noteHeadline("Arshia Gupta", t.message, t.lead, t.kind, t.amountMinor, t.subject), "Arshia wants vegetarian food for dinner.");
+  }
+  for (const s of ["Can you let Ridhima know I'll meet her downstairs at 7?", "Clockwise, tell @Ridhima I'll meet her downstairs at 7", "please tell ridhima I'd really like vegetarian dinner tonight"]) assert.equal(tell(s).type, "TELL", s);
+  // for Clockwise only: nothing is passed on
+  for (const s of ["Clockwise, just so you know, I want vegetarian food.", "Remember that I want vegetarian food", "Just remember that I like vegetarian food."]) assert.deepEqual(tell(s), { type: "KEEP", secret: false }, s);
+  assert.deepEqual(tell("Don't tell anyone, but remember that I want vegetarian food."), { type: "KEEP", secret: true });
+  assert.deepEqual(tell("Remember I want to surprise Ridhima for her birthday, don't tell her"), { type: "KEEP", secret: true });
+  // talking to Clockwise is not a hand-off
+  for (const s of ["Tell me what's near our hotel", "Remind me to call mom at 6", "what should I tell Ridhima?", "Show me coffee near the stay", "Ridhima told me she's vegetarian"]) assert.equal(tell(s).type, "NONE", s);
+});
+ok("private tell: a reminder keeps its meaning and the sender is always named", () => {
+  const t = tell("Remind Ridhima that she has my charger", "u-arshia");
+  assert.equal(t.type, "TELL");
+  if (t.type === "TELL") {
+    assert.equal(t.lead, "reminds");
+    // 'she' / 'my' cannot be mapped safely, so the sender's own words are quoted, never rewritten
+    assert.equal(noteHeadline("Arshia Gupta", t.message, t.lead, t.kind, t.amountMinor, t.subject), "Arshia is reminding you: “she has my charger”.");
+  }
+  assert.equal(thirdPerson("Arshia Gupta", "I'll be downstairs at 7"), "Arshia will be downstairs at 7.");
+  assert.equal(thirdPerson("Arshia Gupta", "dinner is at 8"), null);
+});
+ok("private tell: money is the sender's claim, never a fact, never a Pine payment", () => {
+  const t = tell("Tell Ridhima she owes me ₹2,000 for the hotel.");
+  assert.equal(t.type, "TELL");
+  if (t.type === "TELL") {
+    assert.equal(t.kind, "MONEY_TO_SENDER");
+    assert.equal(t.amountMinor, 200000);
+    const line = noteHeadline("Arshia Gupta", t.message, t.lead, t.kind, t.amountMinor, t.subject);
+    assert.equal(line, "Arshia says your share of the hotel is ₹2,000.");
+    assert.ok(!/you owe/i.test(line));
+  }
+  const p = tell("Tell @Ridhima I'll pay her ₹2,000 tonight");
+  if (p.type === "TELL") { assert.equal(p.kind, "MONEY_PLEDGE"); assert.equal(noteHeadline("Arshia Gupta", p.message, p.lead, p.kind, p.amountMinor, p.subject), "Arshia says they'll pay you ₹2,000 tonight."); } else assert.fail("pledge");
+  assert.equal(amountIn("2k for cab"), null);
+  assert.equal(amountIn("Rs 1,500 for cab"), 150000);
+  assert.equal(amountIn("it was 2000 rupees"), 200000);
+});
+ok("private tell: group scopes are confirmed, names are never guessed", () => {
+  const all = tell("Tell @all I'll be downstairs at 7");
+  assert.equal(all.type, "TELL");
+  if (all.type === "TELL") { assert.equal(all.scope, "ALL"); assert.deepEqual(all.recipientIds.sort(), ["u-eva", "u-ridhima", "u-shreya"]); assert.equal(all.needsConfirm, true); }
+  const ex = tell("Let everyone except Ridhima know we're getting her a cake");
+  assert.equal(ex.type, "TELL");
+  if (ex.type === "TELL") { assert.equal(ex.scope, "EXCEPT"); assert.ok(!ex.recipientIds.includes("u-ridhima")); assert.deepEqual(ex.excludedIds, ["u-ridhima"]); assert.equal(ex.needsConfirm, true); }
+  assert.deepEqual(tell("Tell Priya I'm running late"), { type: "PROBLEM", reason: "UNKNOWN_NAME", names: ["Priya"] });
+  assert.equal(tell("Tell Arshia I'm running late").type, "PROBLEM");
+  const sat = tell("Tell Ridhima Saturday is free");
+  assert.equal(sat.type, "TELL");
+  assert.equal(tell("yes").type, "CONFIRM");
+  assert.equal(tell("cancel").type, "CANCEL");
+  const two = tell("Tell Ridhima and Shreya we leave at 6");
+  if (two.type === "TELL") assert.deepEqual(two.recipientIds, ["u-ridhima", "u-shreya"]); else assert.fail("two");
+});
+console.log(`\n${n} agent-behaviour checks passed`);

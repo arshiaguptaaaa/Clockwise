@@ -333,6 +333,12 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
       return { understanding: `Pine Labs status re-fetched: ${str(p.from)} → ${str(p.to)}.`, state: `Payment request is now ${str(p.to)}.` };
     case "PAYMENT_CONFIRMED":
       return { understanding: "Payment confirmed — status was fetched from Pine Labs' API, not taken from a callback body.", state: "Payment request PROCESSED; group card posted." };
+    case "PRIVATE_AGENT_MESSAGE_RECEIVED":
+      return { understanding: `A private message to Clockwise was read as: ${str(p.intent)}${p.scope ? `, ${str(p.scope)} scope, ${str(p.recipientCount)} recipient(s)` : ""}. The words are not recorded here.`, state: "Nothing posted to the group chat." };
+    case "RECIPIENT_NOTIFICATION_REQUESTED":
+      return { understanding: `A note from you was handed to ${str(p.recipientCount)} traveller(s) (${str(p.visibility ?? "PRIVATE_TO_RECIPIENTS")}). The sender is named on it. The words are not recorded here.`, state: "Delivery rails are listed below." };
+    case "RECIPIENT_NOTIFICATION_DELIVERED":
+      return { understanding: `The note appeared on the recipient's screen (${str(p.surface)}).`, state: "Delivered in-app. Browser/OS push is only reported when it actually sent." };
     case "DOCUMENT_EXTRACTED": {
       const f = (p.facts ?? {}) as Record<string, unknown>;
       return {

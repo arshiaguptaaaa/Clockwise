@@ -13,6 +13,7 @@ import type { CollectionView } from "@/lib/payments/obligations";
 import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
 import { IdeaCard, type IdeaView } from "@/components/ideas/IdeaCard";
+import { ClockwiseUnit, ClockwiseWords } from "./ClockwiseUnit";
 import { isAgentRequest } from "@/lib/mentions";
 import { ClashCard, type ClashView } from "@/components/clash/ClashCard";
 
@@ -129,12 +130,7 @@ export function ChatThread({
     });
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {header}
-        <div className="flex flex-1 flex-col space-y-3 px-4 pb-4 pt-2">
-        {messages.map((message, index) => {
+  const renderOne = (message: ChatThreadMessage, index: number) => {
           const prev = index > 0 ? messages[index - 1] : null;
           const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
           const grouped = !message.isClockwise && plain(message) && plain(prev) && prev!.senderId === message.senderId && message.timestamp.getTime() - prev!.timestamp.getTime() < 5 * 60_000;
@@ -151,7 +147,7 @@ export function ChatThread({
           }
           if (collectionId) {
             const c = collections.find((x) => x.id === collectionId);
-            return c ? <CollectionCard key={message.id} c={c} /> : null;
+            return c ? <div key={message.id} id={`collection-${c.id}`}><CollectionCard c={c} /></div> : null;
           }
           return message.proposal ? (
             <ProposalCard
@@ -197,7 +193,42 @@ export function ChatThread({
               people={roster}
             />
           );
-        })}
+  };
+
+  // Consecutive Clockwise words + supporting cards (places, routes, weather) read as ONE unit.
+  const groupable = (m: ChatThreadMessage) =>
+    m.isClockwise && !m.proposal && !m.failed && !m.cardData?.includes('"clash":{') && !m.cardData?.includes('"collection":true') && !m.cardData?.includes('"idea":{') && (!m.cardType || m.cardType === "PLACES" || m.cardType === "ROUTE" || m.cardType === "WEATHER") && !(m.cardData && /"(journeyId|stayBooking|expenseId|payLink|transportPlanId)"/.test(m.cardData)) && !(m.cardType === "PLACES" && m.cardData?.includes('"stays"'));
+  type Row = { kind: "one"; m: ChatThreadMessage; i: number } | { kind: "unit"; items: { m: ChatThreadMessage; i: number }[] };
+  const rows: Row[] = [];
+  messages.forEach((m, i) => {
+    const last = rows[rows.length - 1];
+    if (groupable(m)) {
+      if (last && last.kind === "unit" && m.timestamp.getTime() - last.items[last.items.length - 1].m.timestamp.getTime() < 3 * 60_000) last.items.push({ m, i });
+      else rows.push({ kind: "unit", items: [{ m, i }] });
+    } else rows.push({ kind: "one", m, i });
+  });
+  const formatClock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {header}
+        <div className="flex flex-1 flex-col space-y-3 px-4 pb-4 pt-2">
+        {rows.map((row) =>
+          row.kind === "unit" ? (
+            <ClockwiseUnit key={row.items[0].m.id} time={formatClock(row.items[0].m.timestamp)}>
+              {row.items.map(({ m }) =>
+                m.cardType && m.cardData && m.cardStatus ? (
+                  <ActionCardMessage key={m.id} tripId={tripId} messageId={m.id} cardType={m.cardType} cardStatus={m.cardStatus} cardData={m.cardData} roster={roster} currentUserId={currentUserId} organiserId={organiserId} />
+                ) : (
+                  <ClockwiseWords key={m.id}>{m.content}</ClockwiseWords>
+                )
+              )}
+            </ClockwiseUnit>
+          ) : (
+            renderOne(row.m, row.i)
+          )
+        )}
         {messages.length === 0 && !awaitingClockwise && (
           <p className="pt-12 text-center text-sm text-muted-foreground">{emptyText}</p>
         )}

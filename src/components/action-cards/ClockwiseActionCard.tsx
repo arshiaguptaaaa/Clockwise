@@ -85,13 +85,13 @@ export function ClockwiseActionCard({
   }
 
   return (
-    <div className={`w-full max-w-md border-l-[3px] py-3 pl-4 pr-2 sm:max-w-lg ${visual.tint === "accent" ? "border-accent" : "border-warning"}`}>
+    <div data-action-card className={`w-full max-w-md border-l-[3px] py-3 pl-4 pr-2 sm:max-w-lg ${visual.tint === "accent" ? "border-accent" : "border-warning"}`}>
       <div className="flex items-start gap-3">
         <span className={`hidden ${tintClasses}`}>
           <Icon className="size-4" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <div data-card-meta className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="eyebrow !text-accent-strong">Clockwise</span>
             <span className="eyebrow">· {visual.label}</span>
             {status === "CONFIRMED" && (

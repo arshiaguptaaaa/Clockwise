@@ -8,6 +8,7 @@ import { getCurrentUserId, setCurrentUserId, clearCurrentUser } from "@/lib/sess
 import { getTripById } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { respondToGroupMessage, respondToPrivateMessage } from "@/lib/agent/clockwise-agent";
+import { tryPrivateTell } from "@/lib/private-notes";
 import { withAgentLock, conversationLockKey } from "@/lib/agent-lock";
 import { ensureDemoScenario } from "@/lib/demo/bengaluru-scenario";
 
@@ -205,6 +206,8 @@ export async function runPrivateAgentTurn(tripId: string, actingUserId: string):
     await withAgentLock(conversationLockKey(tripId, "PRIVATE", actingUserId), async () => {
       // My Clockwise is a direct 1:1 conversation — the agent always replies
       // here (stay_silent isn't offered as a tool in private context).
+      // "Tell Ridhima ..." is a hand-off decided in code before the model; anything else goes to the agent unchanged.
+      if (await tryPrivateTell(tripId, actingUserId)) return;
       await respondToPrivateMessage(tripId, actingUserId);
     });
   } catch (err) {

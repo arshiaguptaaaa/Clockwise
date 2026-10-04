@@ -1446,3 +1446,38 @@ model TripClash {
 
   @@index([tripId, status])
 }
+
+// Private Ask / Tell Clockwise: one traveller tells Clockwise something meant for another (or remembers something for
+// themselves). Three visibility levels that are never promoted implicitly:
+//   PRIVATE_TO_AGENT       only the sender and Clockwise (a remembered fact; recipientId is null)
+//   PRIVATE_TO_RECIPIENTS  the named recipient(s) get a note; the group never sees it
+//   GROUP_VISIBLE          the sender explicitly addressed everyone
+// `body` is the sender's own words, verbatim; Clockwise never rewrites them into something they didn't say. A money
+// note is a CLAIM by the sender ("Arshia says your share is ₹2,000"), never a debt, and creates no payment.
+model PrivateNote {
+  id          String   @id @default(cuid())
+  tripId      String
+  senderId    String
+  recipientId String?
+  // PRIVATE_TO_AGENT | PRIVATE_TO_RECIPIENTS | GROUP_VISIBLE
+  visibility  String
+  // NOTE | MONEY_CLAIM | MEMORY
+  kind        String   @default("NOTE")
+  body        String
+  // short line for the toast / notification: "Arshia says your share of the hotel is ₹2,000."
+  headline    String
+  amountMinor Int?
+  currency    String   @default("INR")
+  subject     String?
+  // Set only when the claim matches an existing shared Expense (sender paid, recipient has that exact share).
+  expenseId   String?
+  // PENDING_CONFIRM | SENT | DELIVERED | ACKED | ASKED | CANCELLED
+  status      String   @default("SENT")
+  // groups the rows of one multi-recipient message
+  batchId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tripId, recipientId, status])
+  @@index([tripId, senderId])
+}

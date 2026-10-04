@@ -16,7 +16,8 @@ import { timeLabel } from "@/lib/traveller/journey";
 import { VibeCheck } from "@/components/vibe/VibeCheck";
 import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
 import { loadPointers } from "@/lib/pointers/store";
-import { ForgetButton } from "@/components/plan/ForgetButton";
+import { PointerCard } from "@/components/plan/PointerCard";
+import { notesForViewer } from "@/lib/private-notes";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -89,6 +90,7 @@ export default async function MyClockwisePage({
   const owedTotal = owed.reduce((n, o) => n + o.amountMinor, 0);
   // What Clockwise picked up about THIS traveller from the group chat (they can remove any of it).
   const remembered = currentUserId ? (await loadPointers(tripId)).filter((p) => p.userId === currentUserId) : [];
+  const passedOn = currentUserId ? await notesForViewer(tripId, currentUserId, { all: true }).catch(() => []) : [];
   const foodPrefs = currentUserId ? (await getPrefs(tripId, currentUserId)).food ?? [] : [];
   const rows: { href: string; label: string; value: string; hot?: boolean }[] = [
     { href: `/trips/${tripId}/agent/journey`, label: "Journey", value: journey ? `${journey.originName ?? "?"} → ${journey.destinationName ?? "?"}${journey.arriveLocal ? ` · lands ${timeLabel(journey.arriveLocal)}` : ""}` : "Add your ticket or flight" },
@@ -123,21 +125,16 @@ export default async function MyClockwisePage({
 
       {(remembered.length > 0 || foodPrefs.length > 0) && (
         <section className="mx-5 mt-4" data-remembered>
-          <p className="eyebrow">What Clockwise knows about you ✦</p>
-          <ul className="mt-2 divide-y divide-border border-y border-border">
+          <p className="eyebrow">✦ What Clockwise knows about you</p>
+          <ul className="mt-2 grid grid-cols-2 gap-2.5">
             {foodPrefs.filter((f) => !remembered.some((p) => p.kind === "DIET" && p.subject === f.toLowerCase())).map((f) => (
-              <li key={`food-${f}`} className="flex min-h-11 items-center py-2 text-[14px]" data-remembered-item={f.toLowerCase()}>
-                {f.charAt(0) + f.slice(1).toLowerCase().replace(/_/g, " ")}
-              </li>
+              <PointerCard key={`food-${f}`} kind="DIET" subject={f.toLowerCase().replace(/_/g, " ")} source="From your answers" />
             ))}
             {remembered.map((p) => (
-              <li key={p.id} className="flex min-h-11 items-center justify-between gap-3 py-2 text-[14px]" data-remembered-item={p.subject}>
-                <span>{p.kind === "DIET" ? p.subject.replace(/^./, (c) => c.toUpperCase()) : `You ${p.label.replace(/^(is|says|wants|likes|mentioned) /, (m) => (m.startsWith("is") ? "are " : m))}`}</span>
-                <ForgetButton pointerId={p.id} />
-              </li>
+              <PointerCard key={p.id} kind={p.kind} subject={p.subject} source="from the Trip Room" forgetId={p.id} />
             ))}
           </ul>
-          <p className="mt-1.5 text-[12px] text-muted-foreground">Picked up from what you said in the group. Remove anything that&apos;s wrong.</p>
+          <p className="mt-2 text-[12px] text-muted-foreground">Remove anything that&apos;s wrong with the ✕.</p>
         </section>
       )}
 
@@ -160,7 +157,26 @@ export default async function MyClockwisePage({
         {currentUserId && <CriticalTripAlerts initialOptIn={me?.voiceEscalationOptIn ?? false} initialPhone={me?.phone ?? null} />}
       </details>
 
-      <p className="eyebrow mx-5 mt-6">Ask Clockwise anything</p>
+      {passedOn.length > 0 && (
+        <section id="notes" className="mx-5 mt-4 scroll-mt-4" data-passed-on>
+          <p className="eyebrow">✦ Notes passed on to you</p>
+          <ul className="mt-2 space-y-2">
+            {passedOn.map((n) => (
+              <li key={n.id} className="rounded-[14px] border border-cw-line bg-cw-tint px-4 py-3 text-[14px]" data-passed-note>
+                <p className="eyebrow">{n.amountLabel ? `${n.amountLabel} ${n.kind === "MONEY_TO_SENDER" ? "to" : "from"} ${n.fromName}` : `From ${n.fromName}`}</p>
+                <p className="mt-1 leading-snug">{n.headline}</p>
+                <p className="mt-1 text-[12px] text-muted-foreground">{n.status === "ACKED" ? "Got it ✓" : n.status === "ASKED" ? `You asked ${n.fromName} about this` : "New"}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="cw-unit mx-5 mt-6" data-private-chat-intro>
+        <p className="cw-unit-label">Talk to Clockwise privately <span aria-hidden>✦</span></p>
+        <p className="text-[14px] leading-snug">Tell Clockwise something, ask it to pass something on, or manage your part of the trip.</p>
+        <p className="text-[12px] text-muted-foreground">🔒 This conversation is visible only to you and Clockwise. Nothing here goes to the group unless you say &ldquo;tell everyone&rdquo;.</p>
+      </section>
     </div>
   );
 

@@ -15,6 +15,7 @@ import { describeProposal } from "@/lib/decisions";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
 import type { IdeaView } from "@/components/ideas/IdeaCard";
 import type { ClashView } from "@/components/clash/ClashCard";
+import { ActiveStrip, type ActiveItem } from "@/components/trip-room/ActiveStrip";
 import { timeLabel } from "@/lib/traveller/journey";
 
 // Server actions on this page run the agent (model + tool calls), which can take
@@ -143,6 +144,18 @@ export default async function TripRoomChatPage({
       affected: (JSON.parse(c.affectedIds) as string[]).map(firstOf),
     };
   });
+  // Pinned "Active" chips: anything still open. Built only from rows this page already loaded.
+  const active: ActiveItem[] = [];
+  for (const c of clashes) if (c.status === "OPEN" || c.status === "INFORMED") active.push({ key: `clash-${c.id}`, domId: `clash-${c.id}`, kind: "clash", label: `${c.commitmentName} clash` });
+  for (const m of messages) {
+    const pr = m.proposal;
+    if (pr && (pr.status === "AWAITING_APPROVAL" || pr.status === "APPROVED")) active.push({ key: `prop-${pr.id}`, domId: `proposal-${pr.id}`, kind: "proposal", label: pr.status === "APPROVED" ? `${toProposalCardData(pr).headline}: ready to confirm` : `${toProposalCardData(pr).headline}: waiting on votes` });
+  }
+  for (const c of collections) {
+    const mine = c.lines.find((l) => l.mine && !l.paid);
+    if (mine) active.push({ key: `pay-${c.id}`, domId: `collection-${c.id}`, kind: "payment", label: `₹${(mine.amountMinor / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })} due` });
+  }
+  for (const s of suggestionRows) if (s.status === "OPEN") active.push({ key: `idea-${s.id}`, domId: `idea-${s.id}`, kind: "idea", label: s.title.length > 26 ? `${s.title.slice(0, 24)}…` : s.title });
   const ideas: IdeaView[] = suggestionRows.map((s) => ({ suggestionId: s.id, title: s.title, why: s.why, intro: introBySuggestion.get(s.id) ?? null, windowLabel: "", steps: JSON.parse(s.steps), status: s.status }));
   const late = people.find((p) => p.tone === "late");
   const voiceLine = late ? `${late.name.split(" ")[0]}'s running late. I'll keep everyone together.` : "Everyone's on a different clock. I'll keep them together.";
@@ -172,6 +185,7 @@ export default async function TripRoomChatPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+    <ActiveStrip items={active} />
     <ChatThread
       header={header}
       tripId={tripId}

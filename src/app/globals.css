@@ -24,6 +24,15 @@
   --pop-orange-tint: #ffe6cf;
   --trip-canvas: #fbfaf7;
 
+  /* The visual grammar: white = people, tinted + ✦ = Clockwise, soft category tints = things Clockwise remembers. */
+  --cw-tint: #eff5f0;
+  --cw-line: rgba(30, 75, 58, 0.16);
+  --tint-sage: #e9f1e6;
+  --tint-honey: #fbf1d6;
+  --tint-blush: #fbe9ef;
+  --tint-sky: #e7eefb;
+  --tint-clay: #f6eae3;
+
   --success: #1d8a4f;
   --success-tint: #e6f4ea;
   --warning: #b5432e;
@@ -55,6 +64,13 @@
   --color-pop-orange: var(--pop-orange);
   --color-pop-orange-tint: var(--pop-orange-tint);
   --color-trip-canvas: var(--trip-canvas);
+  --color-cw-tint: var(--cw-tint);
+  --color-cw-line: var(--cw-line);
+  --color-tint-sage: var(--tint-sage);
+  --color-tint-honey: var(--tint-honey);
+  --color-tint-blush: var(--tint-blush);
+  --color-tint-sky: var(--tint-sky);
+  --color-tint-clay: var(--tint-clay);
   --color-success: var(--success);
   --color-success-tint: var(--success-tint);
   --color-warning: var(--warning);
@@ -243,3 +259,42 @@ body { overscroll-behavior-y: none; }
 .hscroll { display: flex; gap: var(--space-5); overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: var(--gutter); scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .hscroll::-webkit-scrollbar { display: none; }
 .hscroll > * { flex: 0 0 auto; scroll-snap-align: start; }
+
+/* Clockwise speaking: one soft container for its words and the cards that support them. No gradient, no shadow. */
+.cw-unit {
+  background: var(--cw-tint);
+  border: 1px solid var(--cw-line);
+  border-radius: 18px;
+  padding: 14px 14px 14px;
+  max-width: 100%;
+}
+.cw-unit-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.cw-unit > * + * { margin-top: 10px; }
+.cw-words {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-size: 17px;
+  line-height: 1.38;
+  letter-spacing: -0.005em;
+  color: var(--foreground);
+}
+/* Things Clockwise picked up: quiet, compact, category-tinted. */
+.cw-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 16px;
+  padding: 12px 12px 11px;
+  min-width: 0;
+}
+/* A supporting card inside Clockwise's tinted container drops its own rail and label: the container already says who is speaking. */
+.cw-unit [data-action-card] { border-left: 0; padding: 0; max-width: none; }
+.cw-unit [data-card-meta] { display: none; }

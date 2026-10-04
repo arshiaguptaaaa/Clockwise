@@ -121,13 +121,13 @@ export function ProposalCard({
   if (done && proposal.change) {
     return (
       <div id={`proposal-${proposal.id}`} className="settle w-full max-w-md border-l-[3px] border-success py-5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
-        <p className="eyebrow !text-success"><span className="cw-mark !text-success">◷</span> Everyone&apos;s aligned ✓</p>
+        <p className="eyebrow !text-success">✓ Plan updated</p>
         <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{proposal.headline}</p>
         <p className="t-number mt-1 flex flex-wrap items-baseline gap-x-3 text-[44px]">
           <span className="text-[26px] text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
           <span>{proposal.change.to}</span>
         </p>
-        <p className="mt-2 text-[13px] text-muted-foreground">Plan updated.</p>
+        <p className="mt-2 text-[14px]"><span className="font-semibold">{proposal.headline}</span> is now {proposal.change.to}. <span className="text-muted-foreground">Everyone&apos;s aligned.</span></p>
         <People approvals={proposal.approvals} />
         {proposal.approvals.length >= 3 && proposal.approvals.every((a) => a.decision === "APPROVED") && <p className="mt-2 font-display text-[16px] italic text-muted-foreground">{HUMAN.unanimous}</p>}
       </div>
@@ -137,8 +137,7 @@ export function ProposalCard({
   return (
     <div id={`proposal-${proposal.id}`} key={status} className="vote-in w-full max-w-md border-l-[3px] border-accent bg-surface-muted/70 py-5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
       <p className="eyebrow !text-accent-strong">
-        <span className="cw-mark">◷</span>{" "}
-        {proposal.retry ? "One more try." : agreed ? "Everyone's aligned" : open ? "Clockwise proposed ✦" : "A decision"}
+        {proposal.retry ? "One more try." : agreed ? "Everyone's aligned" : open ? "◉ Proposed to the group" : "A decision"}
       </p>
 
       {proposal.change ? (
@@ -200,7 +199,7 @@ export function ProposalCard({
       {open && <p className="mt-3 text-[12px] text-muted-foreground">Proposed. The Plan hasn&apos;t changed.{lookingAt && <> <span className="font-display italic">{HUMAN.lookingAt(firstName(lookingAt.name))}</span></>}</p>}
       {agreed && <p className="mt-3 text-[12.5px] font-medium text-success">Everyone accepted ✓ <span className="font-normal text-muted-foreground">· the Plan changes when {isOrganiser ? "you confirm" : `${firstName(organiserName)} confirms`}.</span></p>}
       {status === "REJECTED" && <p className="mt-3 text-[12.5px] text-danger">Not everyone could make it. The Plan hasn&apos;t changed.</p>}
-      {status === "EXECUTED" && proposal.executionResult && !proposal.change && <p className="mt-3 text-[12.5px] text-success">✓ {proposal.executionResult}</p>}
+      {status === "EXECUTED" && proposal.executionResult && !proposal.change && <p className="mt-3 text-[13px] font-medium text-success">✓ Plan updated · <span className="font-normal">{proposal.executionResult}</span></p>}
       {status === "FAILED" && proposal.failureReason && (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-danger"><AlertTriangle className="size-3.5" /> {proposal.failureReason}</p>
       )}

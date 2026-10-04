@@ -49,8 +49,8 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
   }
 
   return (
-    <div className="vote-in w-full max-w-md border-l-[3px] border-danger bg-danger-tint/40 py-5 pl-4 pr-3 sm:max-w-lg" data-clash-card data-clash-status={clash.status}>
-      <p className="eyebrow !text-danger"><span className="cw-mark !text-danger">◷</span> Clockwise caught a clash ✦</p>
+    <div id={`clash-${clash.id}`} className="vote-in w-full max-w-md rounded-[18px] border border-danger/30 bg-danger-tint/60 px-4 py-5 sm:max-w-lg" data-clash-card data-clash-status={clash.status}>
+      <p className="eyebrow !text-danger">⚠ Clockwise caught a clash</p>
       <p className="mt-2.5 font-display text-[24px] leading-[1.1] tracking-[-0.015em]">
         {clash.traveller} won&apos;t make the {clash.targetLabel} {clash.commitmentName}.
       </p>
@@ -79,24 +79,26 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
       {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
 
       {(live || clash.status === "LEFT") && (
-        <div className="mt-3.5 flex flex-wrap gap-2">
+        <div className="mt-3.5 flex flex-col gap-2">
           {clash.suggestedLabel && (
-            <button type="button" disabled={pending} onClick={() => run("PROPOSE", clash.suggestedLocal ?? undefined)} className="btn btn-primary" data-clash-propose>
+            <button type="button" disabled={pending} onClick={() => run("PROPOSE", clash.suggestedLocal ?? undefined)} className="btn btn-primary w-full" data-clash-propose>
               {pending ? "Proposing…" : `Propose ${clash.suggestedLabel}`}
             </button>
           )}
-          {clash.options.length > 0 && (
-            <button type="button" disabled={pending} onClick={() => setShowOptions((v) => !v)} className="btn btn-ghost" data-clash-options>
-              {clash.suggestedLabel ? "Other options" : "Find a later time"}
-            </button>
-          )}
-          <button type="button" disabled={pending} onClick={() => run("INFORM")} className="btn btn-ghost" data-clash-inform>Inform {clash.affected.length > 2 ? "them" : "everyone"}</button>
-          {canCancel && (
-            <button type="button" disabled={pending} onClick={() => run("CANCEL")} className="btn btn-ghost" data-clash-cancel>Cancel {clash.commitmentName.toLowerCase()}</button>
-          )}
-          {clash.status !== "LEFT" && (
-            <button type="button" disabled={pending} onClick={() => run("LEAVE")} className="btn btn-ghost" data-clash-leave>Leave it</button>
-          )}
+          <div className="grid grid-cols-2 gap-2">
+            {clash.options.length > 0 && (
+              <button type="button" disabled={pending} onClick={() => setShowOptions((v) => !v)} className="btn btn-ghost" data-clash-options>
+                {clash.suggestedLabel ? "Other options" : "Later time"}
+              </button>
+            )}
+            <button type="button" disabled={pending} onClick={() => run("INFORM")} className="btn btn-ghost" data-clash-inform>Inform {clash.affected.length > 2 ? "them" : "everyone"}</button>
+            {canCancel && (
+              <button type="button" disabled={pending} onClick={() => run("CANCEL")} className="btn btn-ghost" data-clash-cancel>Cancel {clash.commitmentName.split(" ").slice(-1)[0].toLowerCase()}</button>
+            )}
+            {clash.status !== "LEFT" && (
+              <button type="button" disabled={pending} onClick={() => run("LEAVE")} className="btn btn-ghost" data-clash-leave>Leave it</button>
+            )}
+          </div>
         </div>
       )}
       {showOptions && clash.options.length > 0 && (

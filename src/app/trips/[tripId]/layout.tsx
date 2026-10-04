@@ -6,6 +6,8 @@ import { BottomNav } from "@/components/BottomNav";
 import { LiveSync } from "@/components/LiveSync";
 import { DecisionStrip } from "@/components/decisions/DecisionStrip";
 import { getOpenDecisions, waitingOn } from "@/lib/decisions";
+import { notesForViewer } from "@/lib/private-notes";
+import { NoteToasts } from "@/components/notes/NoteToasts";
 
 export default async function TripShellLayout({
   children,
@@ -29,6 +31,8 @@ export default async function TripShellLayout({
   // itself stays (Ready? and ?vibe=1 can still offer it); nothing here pops it up.
 
   const decisions = await getOpenDecisions(tripId, member.userId);
+  // Notes another traveller asked Clockwise to pass to this viewer (never group chat content).
+  const notes = await notesForViewer(tripId, member.userId).catch(() => []);
   const organiser = trip.members.find((m) => m.userId === trip.createdBy);
 
   const subtitle = `${trip.members.length} ${trip.members.length === 1 ? "traveller" : "travellers"} · ${dateRange}`;
@@ -46,6 +50,7 @@ export default async function TripShellLayout({
         <DecisionStrip tripId={tripId} viewerId={member.userId} organiserId={trip.createdBy} organiserName={organiser?.user.name ?? "the organiser"} decisions={decisions} />
         {children}
       </div>
+      <NoteToasts tripId={tripId} notes={notes} />
       <LiveSync tripId={tripId} />
       <BottomNav tripId={tripId} waiting={waitingOn(decisions).length + (member.userId === trip.createdBy ? decisions.filter((d) => d.stage === "AGREED").length : 0)} />
     </div>
