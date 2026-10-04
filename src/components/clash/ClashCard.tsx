@@ -11,6 +11,8 @@ export type ClashView = {
   commitmentName: string;
   targetLabel: string;
   landsLabel: string;
+  // The time on the ticket, when a delay moved it: "what changed".
+  wasLabel?: string | null;
   readyLabel: string;
   allowanceMin: number;
   routeMinutes: number;
@@ -73,6 +75,12 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
       ) : (
         <>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13.5px]" data-clash-math>
+            {clash.wasLabel && (
+              <>
+                <dt className="text-muted-foreground">What changed</dt>
+                <dd className="font-semibold" data-clash-changed>{clash.wasLabel} → {clash.landsLabel} <span className="ml-1 rounded-full bg-danger-tint px-1.5 py-0.5 text-[10px] tracking-[0.1em] text-danger">DELAYED</span></dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Lands</dt>
             <dd className="font-semibold">{clash.landsLabel}</dd>
             <dt className="text-muted-foreground">Bags &amp; exits</dt>

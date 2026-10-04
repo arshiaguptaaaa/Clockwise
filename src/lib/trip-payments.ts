@@ -41,6 +41,8 @@ export type CreateTripPaymentRequestInput = {
   merchantReference?: string;
   // Group payments commit nothing to Budget here: each obligation is recorded when it is verified paid.
   skipBudgetCommit?: boolean;
+  // Why this link is being created, in the payer's terms (shown in Developer Evidence).
+  decisionNote?: string;
 };
 
 export type TripPaymentRequestResult =
@@ -83,7 +85,7 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
     return { ok: false, reason: "The payer has no email or phone on file, which Pine Labs requires.", bookingId: booking.id };
   }
 
-  const result = await withRailContext({ tripId: input.tripId, userId: input.payerId ?? null, relatedKind: "BOOKING", relatedId: booking.id, decision: "Group proposal confirmed by the organiser → create a Pine Labs payment link" }, () => createPaymentLink({
+  const result = await withRailContext({ tripId: input.tripId, userId: input.payerId ?? null, relatedKind: "BOOKING", relatedId: booking.id, decision: input.decisionNote ?? "Group proposal confirmed by the organiser → create a Pine Labs payment link" }, () => createPaymentLink({
     merchantReference: input.merchantReference ?? booking.id,
     amountMinorUnits: input.amountMinorUnits,
     currency: input.currency,

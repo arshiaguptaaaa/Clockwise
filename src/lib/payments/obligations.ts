@@ -98,6 +98,9 @@ export async function payObligation(obligationId: string, actorId: string): Prom
     sourceProposalId: o.collectionId,
     merchantReference: attempts === 0 ? o.merchantRef : `${o.merchantRef}-${attempts}`.slice(0, 50),
     skipBudgetCommit: true,
+    decisionNote: o.collection.payeeUserId
+      ? `${first(user?.name ?? "The payer")} authorised paying ${first((await prisma.user.findUnique({ where: { id: o.collection.payeeUserId }, select: { name: true } }))?.name ?? "the payee")} ${formatINR(check.minor, o.collection.currency)} (payer and payee fixed, not split) → create a Pine Labs payment link`
+      : undefined,
   });
   if (!result.ok) {
     // The provider's own message stays in Developer Evidence; only a plain sentence is kept and shown.

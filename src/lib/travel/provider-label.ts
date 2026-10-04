@@ -2,7 +2,7 @@
 // choice did not answer, and a Geoapify number is never described as Delhivery.
 export function fallbackReason(fellBackFrom: string | null | undefined): string | null {
   if (!fellBackFrom) return null;
-  if (/RATE_LIMITED|429/i.test(fellBackFrom)) return "Delhivery 429 · rate-limited";
+  if (/RATE_LIMITED|429/i.test(fellBackFrom)) return "Delhivery rate-limited · 429 cool-down";
   if (/TOKEN_REJECTED|401/i.test(fellBackFrom)) return "Delhivery rejected the token";
   if (/CREDENTIALS|not configured/i.test(fellBackFrom)) return "Delhivery not configured";
   return "Delhivery did not answer";

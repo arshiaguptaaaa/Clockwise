@@ -941,7 +941,7 @@ async function main() {
     assert.match(del.decision ?? "", /NOT SENT/);
     assert.match(geo.decision ?? "", /FALLBACK/);
     assert.equal(geo.httpStatus, 200);
-    assert.equal(providerLabel(r.provider, r.fellBackFrom), "Geoapify · FALLBACK (Delhivery 429 · rate-limited)");
+    assert.equal(providerLabel(r.provider, r.fellBackFrom), "Geoapify · FALLBACK (Delhivery rate-limited · 429 cool-down)");
     assert.equal(providerLabel("delhivery"), "Delhivery");
     delete process.env.DELHIVERY_MAPS_TOKEN;
     process.env.DELHIVERY_MAPS_TOKEN = "";

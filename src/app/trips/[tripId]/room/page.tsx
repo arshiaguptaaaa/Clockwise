@@ -126,6 +126,9 @@ export default async function TripRoomChatPage({
     }
   }
   const clashRows = await prisma.tripClash.findMany({ where: { tripId: trip.id }, orderBy: { createdAt: "asc" } });
+  const clashJourneys = clashRows.length ? await prisma.travellerJourney.findMany({ where: { tripId: trip.id, status: "CONFIRMED", userId: { in: [...new Set(clashRows.map((c) => c.travellerId))] } }, orderBy: { createdAt: "desc" }, select: { userId: true, scheduledArriveLocal: true } }) : [];
+  const ticketTime = new Map<string, string | null>();
+  for (const j of clashJourneys) if (!ticketTime.has(j.userId)) ticketTime.set(j.userId, j.scheduledArriveLocal);
   const firstOf = (id: string) => (trip.members.find((m) => m.userId === id)?.user.name ?? "Someone").split(" ")[0];
   const clashes: ClashView[] = clashRows.map((c) => {
     const options = (JSON.parse(c.options) as string[]).map((o) => ({ local: o, label: timeLabel(o) }));
@@ -136,6 +139,7 @@ export default async function TripRoomChatPage({
       commitmentName: c.commitmentName,
       targetLabel: timeLabel(c.targetLocal),
       landsLabel: timeLabel(c.landsAt),
+      wasLabel: ticketTime.get(c.travellerId) && ticketTime.get(c.travellerId) !== c.landsAt ? timeLabel(ticketTime.get(c.travellerId)!) : null,
       readyLabel: timeLabel(c.readyAt),
       allowanceMin: c.allowanceMin,
       unknownTravel: c.anchorKind === "unknown-route",
