@@ -22,6 +22,7 @@ import { resolveTripLocationText, isResolveFailure } from "@/lib/travel/resolve"
 import { humanMoment } from "@/lib/when";
 import { timeLabel } from "@/lib/traveller/journey";
 import { isAgreement } from "@/lib/pointers/extract";
+import { resolveReplyTarget, clarifyYes } from "@/lib/reply-target";
 
 const toMs = (l: string) => new Date(`${l}:00.000Z`).getTime();
 const toLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
@@ -56,7 +57,10 @@ export function classifyClashAnswer(text: string): ClashAnswer | null {
   if (/\b(inform|tell them|tell everyone|let them know|let everyone know|notify|warn them|give them a heads up)\b/.test(t)) return "INFORM";
   if (/\b(later|another time|different time|other options|other time|push it|find a later)\b/.test(t)) return "LATER";
   if (/\b(leave it|leave as is|never ?mind|nvm|ignore|keep it|keep dinner|keep lunch|it'?s fine|its fine|don'?t (move|change))\b/.test(t) || /^no\b/.test(t) || /^nope\b/.test(t) || /^not now\b/.test(t)) return "LEAVE";
-  if (isAgreement(text) || /^(yeah|yes|yep|yup|sure|ok|okay|do it|go ahead|go for it|please do|sounds good|works|that works|perfect|great|good idea|yes please|yeah please)\b/.test(t) || /\bpropose\b/.test(t)) return "AGREE";
+  // A yes is the WHOLE reply. "Go ahead, I'll join you directly at dinner" is someone saying something else; it
+  // must never be taken as agreeing to a proposal.
+  const statesSomethingElse = /\b(i'?ll|i will|i'?m|i am|im|my|we'?ll|we will|because|but|since)\b/.test(t);
+  if (!statesSomethingElse && (isAgreement(text) || /^(yeah|yes|yep|yup|sure|ok|okay|do it|go ahead|go for it|please do|sounds good|works|that works|perfect|great|good idea|yes please|yeah please)(\s+(please|pls|thanks|thank you|do it|go ahead))?$/.test(t) || /\bpropose\b/.test(t))) return "AGREE";
   return null;
 }
 
@@ -82,6 +86,28 @@ async function feasibleSuggestion(tripId: string, affected: string[], earliestLo
   return { suggested: good[0] ?? null, options: good.slice(1) };
 }
 
+// A clash (and the proposal built on it) rests on ONE assumption: when this traveller can be there. When that
+// changes, the old card and the old proposal stop meaning anything: its votes were for different terms, so it is
+// withdrawn here, out loud, and cannot be voted on or confirmed any more. A new clash is raised if one still holds.
+export async function retireClash(old: { id: string; tripId: string; travellerId: string; commitmentName: string; proposalId: string | null; messageId: string | null; status: string }, why: string): Promise<boolean> {
+  let withdrew = false;
+  if (old.proposalId) {
+    const r = await prisma.proposal.updateMany({ where: { id: old.proposalId, status: { in: ["AWAITING_APPROVAL", "APPROVED", "REJECTED", "FAILED"] } }, data: { status: "CANCELLED" } });
+    withdrew = r.count > 0;
+    if (withdrew) {
+      await prisma.auditLog
+        .create({ data: { tripId: old.tripId, actorId: old.travellerId, actionType: "PROPOSAL_SUPERSEDED", payloadSummary: `Proposal ${old.proposalId} for ${old.commitmentName} withdrawn: ${why}. Earlier votes do not carry over.` } })
+        .catch(() => undefined);
+    }
+  }
+  await prisma.tripClash.update({ where: { id: old.id }, data: { status: "SUPERSEDED" } });
+  // A proposal that already finished (executed, or cancelled by a person) is history, not something to retract.
+  if (old.proposalId && !withdrew) return false;
+  if (old.messageId) await prisma.message.update({ where: { id: old.messageId }, data: { cardStatus: "DISMISSED" } }).catch(() => undefined);
+  await ev(old.tripId, "PROPOSAL_SUPERSEDED", null, old.travellerId, null, { commitment: old.commitmentName, reason: why, proposalWithdrawn: withdrew, note: "Votes on the old terms do not count for the new ones." }, ["proposals", "chat"]);
+  return true;
+}
+
 // Re-reads the stored Plan against everyone's measured clocks for ONE traveller and raises (or clears) clashes.
 export async function evaluateConsequences(p: { tripId: string; userId: string; sourceMessageId: string | null; announce?: boolean }): Promise<DisruptionResult> {
   const { tripId, userId, sourceMessageId } = p;
@@ -102,30 +128,35 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
 
   // WHERE MUST THEY GET TO?
   await ev(tripId, "NEXT_ANCHOR_RESOLVED", userId, userId, sourceMessageId, { traveller: name, anchor: view.stayName, anchorKind: view.anchorKind, order: ["confirmed stay", "meeting point the group named", "location of the next shared commitment"], note: view.anchorKind ? "Never defaults to the city centre." : "No usable anchor yet. Asked instead of guessing." });
+  // Without a stay or a measured route, TRAVEL feasibility is unknown, and Clockwise says so. But a plan that starts before the
+  // traveller even lands is impossible whatever the roads are like, so that conflict is still raised and any existing
+  // clash is kept. Missing data never clears a clash.
+  const known = clock.status === "KNOWN";
+  let unknownReply: string | null = null;
   if (clock.status === "NO_STAY") {
     const next = mine[0];
-    out.reply = `Where are you heading after the airport, ${me}? I need that to check whether you can still make ${next ? next.name : "the plans"}.`;
+    unknownReply = `Where are you heading after the airport, ${me}? I need that to check whether you can still make ${next ? next.name : "the plans"}.`;
     await ev(tripId, "ANCHOR_QUESTION_ASKED", userId, userId, sourceMessageId, { traveller: name, forCommitment: next?.name ?? null });
-    return out;
-  }
-  if (clock.status !== "KNOWN") {
+  } else if (!known) {
     await ev(tripId, "ROUTE_CALCULATED", userId, userId, sourceMessageId, { traveller: name, ok: false, reason: clock.status, to: view.stayName });
-    out.reply = `I couldn't measure the trip from ${clock.arrivalPlace?.replace(/ International Airport$/, "") ?? "where you land"} to ${anchorWords(view.anchorKind, view.stayName)} just now, so I can't tell whether you'll make ${mine[0]?.name ?? "the plans"}. I haven't guessed; I'll check again when a route comes back.`;
-    return out;
+    unknownReply = `Travel feasibility is unknown right now: I couldn't measure the trip from ${clock.arrivalPlace?.replace(/ International Airport$/, "") ?? "where you land"} to ${anchorWords(view.anchorKind, view.stayName)}, so I can't tell whether you'll make ${mine[0]?.name ?? "the plans"} in time. I haven't guessed a travel time, and nothing already flagged has been cleared; I'll check again when a route comes back.`;
   }
 
   // WHEN CAN THEY REALISTICALLY BE THERE?
-  const readyAt = clock.hotelBy!;
+  const readyAt = known ? clock.hotelBy! : clock.arriveLocal ?? "";
   const anchorLabel = anchorWords(view.anchorKind, view.stayName);
-  await ev(tripId, "ROUTE_CALCULATED", userId, userId, sourceMessageId, { traveller: name, ok: true, provider: clock.routeProvider, from: clock.arrivalPlace, to: view.stayName, anchorKind: view.anchorKind, minutes: clock.routeMinutes, km: clock.routeKm });
-  await ev(tripId, "REALISTIC_READY_TIME_UPDATED", userId, userId, sourceMessageId, { traveller: name, concept: "LANDS AT ≠ AVAILABLE AT", landsAt: clock.arriveLocal, scheduledArrival: clock.scheduledArrive, allowanceMin: clock.allowanceMin, allowanceNote: "bags and exits: a stated assumption", routeMinutes: clock.routeMinutes, routeProvider: clock.routeProvider, readyAt, anchor: view.stayName });
+  if (known) {
+    await ev(tripId, "ROUTE_CALCULATED", userId, userId, sourceMessageId, { traveller: name, ok: true, provider: clock.routeProvider, from: clock.arrivalPlace, to: view.stayName, anchorKind: view.anchorKind, minutes: clock.routeMinutes, km: clock.routeKm });
+    await ev(tripId, "REALISTIC_READY_TIME_UPDATED", userId, userId, sourceMessageId, { traveller: name, concept: "LANDS AT ≠ AVAILABLE AT", landsAt: clock.arriveLocal, scheduledArrival: clock.scheduledArrive, allowanceMin: clock.allowanceMin, allowanceNote: clock.outFloor ? `counted from ${clock.outFloor}, when they said they were still inside` : "bags and exits: a stated assumption", routeMinutes: clock.routeMinutes, routeProvider: clock.routeProvider, readyAt, anchor: view.stayName });
+  }
 
   // WHAT DOES THAT BREAK?
-  const checks = view.commitments.filter((c) => c.late.some((l) => l.name === name));
+  const checks = view.commitments.filter((c) => c.late.some((l) => l.name === name && (known || l.lowerBound)));
   const stillOpen = await prisma.tripClash.findMany({ where: { tripId, travellerId: userId, status: { in: ["OPEN", "INFORMED", "PROPOSED"] } } });
-  // a clash that no longer holds (arrival earlier, or the Plan moved) is closed, out loud
-  for (const old of stillOpen) {
+  // a clash that no longer holds (arrival earlier, or the Plan moved) is closed, out loud. Never on missing data.
+  for (const old of known ? stillOpen : []) {
     if (!checks.some((c) => c.id === old.commitmentId)) {
+      if (old.status === "PROPOSED") await retireClash(old, `${me} is back in time, so the move is no longer needed`);
       await prisma.tripClash.update({ where: { id: old.id }, data: { status: "RESOLVED" } });
       out.resolved.push(old.commitmentName);
     }
@@ -136,21 +167,32 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
     const c = commitments.find((x) => x.id === chk.id);
     if (!c) continue;
     const targetLocal = toLocal(c.targetTime.getTime());
+    // Joining this one directly: measured to the venue, not to the stay.
+    const viaDirect = clock.direct?.commitmentId === chk.id;
+    const mineLate = chk.late.find((l) => l.name === name);
+    const readyHere = mineLate?.hotelBy ?? readyAt;
+    const lowerBound = Boolean(mineLate?.lowerBound);
+    const whereLabel = viaDirect ? c.location || "the venue" : anchorLabel;
     const affectedIds = ids(c.participantIds).length ? ids(c.participantIds) : members.map((m) => m.userId);
     const affectedNames = affectedIds.map((i) => first(nameOf.get(i) ?? "Someone"));
-    await ev(tripId, "COMMITMENT_CONFLICT_DETECTED", userId, userId, sourceMessageId, { traveller: name, commitment: c.name, commitmentId: c.id, target: targetLocal, readyAt, slackMinutes: Math.round((toMs(targetLocal) - toMs(readyAt)) / 60_000) });
+    await ev(tripId, "COMMITMENT_CONFLICT_DETECTED", userId, userId, sourceMessageId, { traveller: name, commitment: c.name, commitmentId: c.id, target: targetLocal, readyAt: readyHere, slackMinutes: Math.round((toMs(targetLocal) - toMs(readyHere)) / 60_000), via: viaDirect ? "directly to the venue" : "the stay" });
     await ev(tripId, "AFFECTED_TRAVELLERS_IDENTIFIED", userId, userId, sourceMessageId, { commitment: c.name, affected: affectedNames, ofTrip: members.length, note: ids(c.participantIds).length ? "the commitment's own participants" : "everyone (no participant list)" });
 
     // the earliest time that works for everyone we can measure, checked against stated limits
     const clocks = view.clocks.filter((k) => affectedIds.includes(k.userId) && k.status === "KNOWN");
-    const latestReady = clocks.map((k) => k.hotelBy!).sort().at(-1) ?? readyAt;
-    const { suggested, options } = await feasibleSuggestion(tripId, affectedIds, latestReady);
+    const latestReady = clocks.map((k) => (k.direct?.commitmentId === chk.id && k.direct.seconds != null && k.arriveLocal ? toLocal(toMs(k.arriveLocal) + (k.direct.seconds + ARRIVAL_BUFFER_MIN * 60) * 1000) : k.hotelBy!)).sort().at(-1) ?? readyHere;
+    // With no travel data a new time cannot be suggested responsibly.
+    const { suggested, options } = lowerBound ? { suggested: null as string | null, options: [] as string[] } : await feasibleSuggestion(tripId, affectedIds, latestReady);
     const unmeasured = view.clocks.filter((k) => affectedIds.includes(k.userId) && k.status !== "KNOWN").map((k) => first(k.name)).concat(members.filter((m) => affectedIds.includes(m.userId) && !view.clocks.some((k) => k.userId === m.userId)).map((m) => first(m.user.name)));
 
     const prior = stillOpen.find((o) => o.commitmentId === c.id);
-    if (prior && prior.status !== "PROPOSED" && prior.readyAt === readyAt && prior.targetLocal === targetLocal) continue; // nothing new to say
-    if (prior && prior.status === "PROPOSED") continue; // the group is already deciding it
-    if (prior) await prisma.tripClash.update({ where: { id: prior.id }, data: { status: "SUPERSEDED" } });
+    if (prior && prior.readyAt === readyHere && prior.targetLocal === targetLocal) continue; // nothing new to say (including: the group is already deciding it)
+    if (prior && lowerBound) continue; // a known conflict is kept as it is when the route is unknown
+    let replaced = false;
+    if (prior) {
+      // New terms: an open card is replaced; a proposal the group is voting on is withdrawn, and its votes do not carry over.
+      replaced = await retireClash(prior, prior.readyAt !== readyHere ? `${me}'s timing changed (${timeLabel(prior.readyAt)} → ${timeLabel(readyHere)})` : `${c.name} moved`);
+    }
 
     const clash = await prisma.tripClash.create({
       data: {
@@ -160,12 +202,12 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
         commitmentName: c.name,
         targetLocal,
         landsAt: clock.arriveLocal ?? "",
-        allowanceMin: clock.allowanceMin,
-        routeMinutes: clock.routeMinutes ?? 0,
-        routeProvider: clock.routeProvider,
-        anchorKind: view.anchorKind ?? "stay",
-        anchorLabel: view.stayName ?? "the stay",
-        readyAt,
+        allowanceMin: lowerBound ? 0 : Math.round(((clock.outAtLocal ? toMs(clock.outAtLocal) : toMs(clock.arriveLocal ?? readyHere)) - toMs(clock.arriveLocal ?? readyHere)) / 60_000),
+        routeMinutes: viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes ?? 0,
+        routeProvider: viaDirect ? null : clock.routeProvider,
+        anchorKind: viaDirect ? "venue" : view.anchorKind ?? "stay",
+        anchorLabel: viaDirect ? whereLabel : view.stayName ?? "the stay",
+        readyAt: readyHere,
         suggestedLocal: suggested,
         options: JSON.stringify(options),
         affectedIds: JSON.stringify(affectedIds),
@@ -175,14 +217,18 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
 
     const context = [
       `${me} won't make the ${timeLabel(targetLocal)} ${c.name}.`,
-      `${me}'s flight now lands around ${timeLabel(clock.arriveLocal!)}. After ${clock.allowanceMin} min for bags and exits and about ${clock.routeMinutes} min to ${anchorLabel} (${providerName(clock.routeProvider)}), ${me} can realistically be there around ${timeLabel(readyAt)}.`,
-      suggested ? `I can move ${c.name} to ${timeLabel(suggested)}, which works for ${unmeasured.length ? "everyone I can measure" : "everyone"}${unmeasured.length ? ` (not yet measured: ${unmeasured.join(", ")})` : ""}. Should I propose that?` : `I couldn't find a time that works for everyone's stated limits. What should I do?`,
-    ].join(" ");
+      replaced ? `This replaces the earlier ${c.name} card${prior?.proposalId ? ", and that proposal is withdrawn (votes on the old terms do not count)" : ""}.` : "",
+      lowerBound
+        ? `${me}'s flight lands around ${timeLabel(clock.arriveLocal!)}, after ${c.name} has already started. I can't measure the trip to ${whereLabel} right now, so travel time is unknown, but this can't work however the roads are. Because I have no travel data I can't suggest another time; you could inform them, cancel it or leave it.`
+        : `${me}'s flight now lands around ${timeLabel(clock.arriveLocal!)}. ${clock.outFloor ? `${me} said they were still inside the airport at ${timeLabel(clock.outFloor)}, so I counted the exit from then` : `After ${clock.allowanceMin} min for bags and exits (a stated assumption)`} and about ${viaDirect ? Math.round((clock.direct?.seconds ?? 0) / 60) : clock.routeMinutes} min to ${viaDirect ? whereLabel : anchorLabel} (${providerName(viaDirect ? null : clock.routeProvider)}): ${me} can realistically be there around ${timeLabel(readyHere)}${clock.outFloor ? " at the earliest, an estimate" : ""}.`,
+      lowerBound ? "" : suggested ? `I can move ${c.name} to ${timeLabel(suggested)}, which works for ${unmeasured.length ? "everyone I can measure" : "everyone"}${unmeasured.length ? ` (not yet measured: ${unmeasured.join(", ")})` : ""}. Should I propose that?` : `I couldn't find a time that works for everyone's stated limits. What should I do?`,
+    ].filter(Boolean).join(" ");
     const msg = await postActionCard({ tripId, channel: "GROUP", type: "DECISION", status: "PENDING", data: { title: "CLOCKWISE CAUGHT A CLASH ✦", context, clash: { clashId: clash.id } } });
     await prisma.tripClash.update({ where: { id: clash.id }, data: { messageId: msg.id } });
     out.clashIds.push(clash.id);
   }
   void trip;
+  if (unknownReply && !out.reply) out.reply = out.clashIds.length ? `${unknownReply.replace(/ I haven't guessed.*$/, "")} The conflict above doesn't depend on it.` : unknownReply;
   return out;
 }
 
@@ -306,7 +352,7 @@ export async function laterClash(clashId: string): Promise<{ ok: boolean; reply:
 }
 
 // "Yeah." Natural answers to the question Clockwise just asked. Returns null when nothing is waiting.
-export async function answerClashFromChat(tripId: string, userId: string, text: string): Promise<{ reply: string } | null> {
+export async function answerClashFromChat(tripId: string, userId: string, text: string, messageId: string | null = null): Promise<{ reply: string } | null> {
   const answer = classifyClashAnswer(text);
   if (!answer) return null;
   // "cancel tomorrow's breakfast" / "move dinner to 10" name another day or time: that is a plan command, not an answer.
@@ -314,7 +360,25 @@ export async function answerClashFromChat(tripId: string, userId: string, text: 
   const open = await prisma.tripClash.findMany({ where: { tripId, status: { in: ["OPEN", "INFORMED"] }, updatedAt: { gt: new Date(Date.now() - 6 * 3600_000) } }, orderBy: { createdAt: "desc" } });
   if (open.length === 0) return null;
   let target = open[0];
-  if (open.length > 1) {
+  let resolved = false;
+  // A bare "Yeah" / "no" could be answering a proposal waiting on this person instead. Resolve WHAT is meant first;
+  // never let a yes meant for something else create a proposal.
+  if (answer === "AGREE" || (answer === "LEAVE" && /^\s*(no|nope|nah)\b/i.test(text))) {
+    const t = await resolveReplyTarget(tripId, userId, text);
+    if (t.kind === "proposal") return null;
+    if (t.kind === "ambiguous") {
+      const who = (await prisma.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name.split(" ")[0] ?? "there";
+      return { reply: clarifyYes(who, t.options) };
+    }
+    if (t.kind === "clash") {
+      const hit = open.find((c) => c.id === t.id);
+      if (hit) {
+        target = hit;
+        resolved = true;
+      }
+    }
+  }
+  if (open.length > 1 && !resolved) {
     const named = open.filter((c) => text.toLowerCase().includes(c.commitmentName.toLowerCase().split(" ").pop() ?? "~"));
     if (named.length === 1) target = named[0];
     else return { reply: `Which one: ${open.map((c) => `${c.commitmentName} (${timeLabel(c.targetLocal)})`).join(" or ")}?` };

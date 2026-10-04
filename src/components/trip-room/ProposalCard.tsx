@@ -33,6 +33,8 @@ export type ProposalCardData = {
   executionResult: string | null;
   failureReason: string | null;
   approvals: ProposalCardApproval[];
+  // A yes with a condition ("only if we're back by 11") is shown, and is NOT counted as a yes.
+  conditions?: { name: string; text: string }[];
   // Server-computed (so this client file stays free of server-only imports).
   headline: string;
   kind: "reschedule" | "place" | "stay" | "ride" | "payment" | "other";
@@ -194,6 +196,16 @@ export function ProposalCard({
       )}
 
       <People approvals={proposal.approvals} />
+
+      {open && (proposal.conditions?.length ?? 0) > 0 && (
+        <ul className="mt-2 space-y-1" data-conditions>
+          {proposal.conditions!.map((c, i) => (
+            <li key={i} className="text-[12.5px] leading-snug text-muted-foreground">
+              <span className="font-medium text-foreground">{c.name}</span>: yes, only if {c.text}. <span className="italic">Not counted as a yes yet. I can&apos;t check that from the Plan.</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* Proposal is not Plan: say exactly which one this is. */}
       {open && <p className="mt-3 text-[12px] text-muted-foreground">Proposed. The Plan hasn&apos;t changed.{lookingAt && <> <span className="font-display italic">{HUMAN.lookingAt(firstName(lookingAt.name))}</span></>}</p>}

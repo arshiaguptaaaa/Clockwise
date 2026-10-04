@@ -339,6 +339,20 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
       return { understanding: `A note from you was handed to ${str(p.recipientCount)} traveller(s) (${str(p.visibility ?? "PRIVATE_TO_RECIPIENTS")}). The sender is named on it. The words are not recorded here.`, state: "Delivery rails are listed below." };
     case "RECIPIENT_NOTIFICATION_DELIVERED":
       return { understanding: `The note appeared on the recipient's screen (${str(p.surface)}).`, state: "Delivered in-app. Browser/OS push is only reported when it actually sent." };
+    case "TRAVELLER_STATUS_NOTED":
+      return { understanding: `A small clock statement was read (${str(p.status)}). ${str(p.note)}`, state: p.changedArrival === false ? "Arrival unchanged." : null };
+    case "TRAVELLER_ROUTE_INTENT_UPDATED":
+      return { understanding: `${str(p.traveller)} will join ${str(p.commitment)} ${str(p.via)}.`, state: p.measured ? `Route measured (${str(p.provider)}, ${str(p.minutes)} min).` : `Not measured: ${str(p.unmeasuredBecause)}. Nothing was moved.` };
+    case "PROPOSAL_SUPERSEDED":
+      return { understanding: `The earlier ${str(p.commitment)} proposal rested on a time that changed (${str(p.reason)}). ${str(p.note)}`, state: p.proposalWithdrawn ? "Old proposal withdrawn; it can no longer be voted on or confirmed." : "Old card closed." };
+    case "MEAL_MOOD_NOTED":
+      return { understanding: `A mood about the next meal (not ${str(p.avoid)} for now). ${str(p.note)}`, state: "Not stored as a diet or a dislike." };
+    case "CONDITIONAL_APPROVAL_NOTED":
+      return { understanding: `A conditional yes ("${str(p.condition)}") was noticed.`, state: "Not counted as approval until the condition is checked." };
+    case "SETTLEMENT_REPORTED":
+      return { understanding: "A traveller said they paid someone outside Clockwise.", state: "Unconfirmed report. The ledger and settlements were not changed." };
+    case "PAYMENT_RECONCILIATION_MISMATCH":
+      return { understanding: `The provider's answer did not match this payment request (${str(p.reason)}: expected ${str(p.expected)}, got ${str(p.got)}).`, state: "Nothing was marked paid." };
     case "DOCUMENT_EXTRACTED": {
       const f = (p.facts ?? {}) as Record<string, unknown>;
       return {

@@ -15,10 +15,12 @@ export type TellKind = "NOTE" | "MONEY_TO_SENDER" | "MONEY_FROM_SENDER" | "MONEY
 
 export type TellIntent =
   | { type: "NONE" }
-  | { type: "KEEP"; secret: boolean }
+  // KEEP: for Clockwise only. `remember` = the traveller asked it to remember something (store it); a bare
+  // "don't tell Ridhima ..." only withholds and stores nothing.
+  | { type: "KEEP"; secret: boolean; remember: boolean }
   | { type: "CONFIRM" }
   | { type: "CANCEL" }
-  | { type: "PROBLEM"; reason: "UNKNOWN_NAME" | "SELF" | "NO_ONE"; names: string[] }
+  | { type: "PROBLEM"; reason: "UNKNOWN_NAME" | "AMBIGUOUS_NAME" | "SELF" | "NO_ONE"; names: string[]; word?: string }
   | {
       type: "TELL";
       scope: "PEOPLE" | "ALL" | "EXCEPT";
@@ -30,6 +32,10 @@ export type TellIntent =
       amountMinor: number | null;
       subject: string | null;
       needsConfirm: boolean;
+      // "but don't mention why": the reason is dropped from what is sent and never stored.
+      withheld: boolean;
+      // "Also remember I hate crowded places": a second, private instruction in the same message.
+      keep: string | null;
     };
 
 const first = (n: string) => n.trim().split(/\s+/)[0];
@@ -46,16 +52,26 @@ export function amountIn(text: string): number | null {
   return Math.round(n * 100);
 }
 
+// Every rupee figure written in a message, in paise: "₹2,000", "2000", "2k", "Rs 1,500.50".
+export function statedAmounts(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(/(\d[\d,]*(?:\.\d{1,2})?)\s?(k\b)?/gi)) {
+    const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
+    if (Number.isFinite(n) && n > 0) out.push(Math.round(n * 100));
+  }
+  return out;
+}
+
 export const rupees = (minor: number) => `₹${(minor / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 const GROUP_WORDS = new Set(["everyone", "everybody", "all", "@all", "@everyone", "the group", "group"]);
 const NOT_NAMES = new Set(["i", "i'm", "i'll", "i'd", "we", "we're", "me", "us", "my", "clockwise", "that", "the", "a", "to", "about", "what", "where", "when", "how", "dinner", "it", "this", "there", "she", "he", "they", "you", "your", "our", "if"]);
 
-type Spec = { ids: string[]; excluded: string[]; all: boolean; unknown: string[]; consumed: number; except: boolean };
+type Spec = { ids: string[]; excluded: string[]; all: boolean; unknown: string[]; ambiguous: { word: string; options: string[] }[]; consumed: number; except: boolean };
 
 // Reads names / @mentions / everyone / "everyone except X" off the front of a token list.
 function readSpec(tokens: string[], members: Member[], senderId: string): Spec {
-  const out: Spec = { ids: [], excluded: [], all: false, unknown: [], consumed: 0, except: false };
+  const out: Spec = { ids: [], excluded: [], all: false, unknown: [], ambiguous: [], consumed: 0, except: false };
   const byFirst = (w: string) => members.filter((m) => first(m.name).toLowerCase() === w.toLowerCase());
   let i = 0;
   let exceptMode = false;
@@ -78,7 +94,7 @@ function readSpec(tokens: string[], members: Member[], senderId: string): Spec {
       out.consumed = i + 1;
       continue;
     }
-    if (hits.length > 1) { out.unknown.push(`${nm} (more than one ${nm} on this trip)`); out.consumed = i + 1; continue; }
+    if (hits.length > 1 && !NOT_NAMES.has(nm.toLowerCase())) { out.ambiguous.push({ word: nm, options: hits.map((h) => h.name) }); out.consumed = i + 1; continue; }
     // an unknown person: only when it is written like a name, directly where a recipient goes
     if ((at || /^[A-Z][a-z]+$/.test(nm)) && !NOT_NAMES.has(nm.toLowerCase()) && out.consumed === i && (connector || (out.ids.length === 0 && out.excluded.length === 0 && !out.all))) { out.unknown.push(nm); out.consumed = i + 1; continue; }
     break;
@@ -123,7 +139,7 @@ export function noteHeadline(sender: string, message: string, lead: "says" | "re
   const tp = thirdPerson(sender, message);
   if (tp) return tp;
   const q = clean(message).replace(/[.!]+$/, "");
-  return lead === "reminds" ? `${s} is reminding you: “${q}”.` : `${s} says: “${q}”.`;
+  return lead === "reminds" ? `${s} is reminding you: “${q}”` : `${s} says: “${q}”`;
 }
 
 function moneyKind(message: string): { kind: TellKind; amountMinor: number | null; subject: string | null } {
@@ -135,6 +151,24 @@ function moneyKind(message: string): { kind: TellKind; amountMinor: number | nul
   if (/\bi\s*(?:'ll|will|am going to|'m going to)\s+(?:pay|send|transfer|give|settle)/i.test(message)) return { kind: "MONEY_PLEDGE", amountMinor, subject };
   if (/\bi\s+owe\b/i.test(message)) return { kind: "MONEY_FROM_SENDER", amountMinor, subject };
   return { kind: "NOTE", amountMinor: null, subject: null };
+}
+
+
+// "I need ten minutes, but don't mention why": only the first part is sent. The withheld clause is dropped here,
+// before anything is stored or delivered.
+const WITHHOLD = /[,;.\-–—]?\s*(?:(?:but|and|just|please|pls)\s+)*(?:(?:don'?t|do not|never)\s+(?:mention|say|tell|share|reveal|explain|give|include|bring up)\b|without\s+(?:saying|mentioning|telling|explaining)\b|no need to\s+(?:say|mention|explain)\b|keep (?:the reason|that|it|this) (?:private|to yourself|between us|secret)\b)[^]*$/i;
+export function splitWithheld(message: string): { message: string; withheld: boolean } {
+  const m = WITHHOLD.exec(message);
+  if (!m || m.index === 0) return { message, withheld: false };
+  const rest = clean(message.slice(0, m.index)).replace(/[,;:-]+$/, "");
+  return rest ? { message: rest, withheld: true } : { message, withheld: false };
+}
+
+// "I'm vegetarian. Also remember I hate crowded places." -> the first sentence is passed on, the second is kept.
+const ALSO_KEEP = /^(.*?[.!?])\s+(?:also|and|oh and|plus)[,]?\s+(?:please\s+)?(?:just\s+)?(?:remember|keep in mind|note|make a note of|make a note)\b\s*(?:that\s+)?(.+)$/i;
+export function splitAlsoKeep(message: string): { message: string; keep: string | null } {
+  const m = ALSO_KEEP.exec(clean(message));
+  return m && clean(m[1]) && clean(m[2]) ? { message: clean(m[1]), keep: clean(m[2]).replace(/[.!]+$/, "") } : { message: clean(message), keep: null };
 }
 
 const POLITE = /^(?:(?:hey |hi |ok |okay |so |also |and |now )*clockwise[,:]?\s*)?(?:(?:can|could|would|will) you(?: please)?\s+|please\s+|i(?:'d| would) like you to\s+|i want you to\s+)?/i;
@@ -175,6 +209,7 @@ export function parsePrivateTell(raw: string, members: Member[], senderId: strin
     const spec = readSpec(toks, members, senderId);
     // "tell me ..." / "remind me ..." is the traveller talking to Clockwise, not a hand-off
     if (spec.consumed === 0 || !clean(message)) return { type: "NONE" };
+    if (spec.ambiguous.length) return { type: "PROBLEM", reason: "AMBIGUOUS_NAME", names: spec.ambiguous[0].options, word: spec.ambiguous[0].word };
     if (spec.unknown.length) return { type: "PROBLEM", reason: "UNKNOWN_NAME", names: spec.unknown };
 
     let recipients = spec.all ? members.map((x) => x.id) : spec.ids;
@@ -183,7 +218,9 @@ export function parsePrivateTell(raw: string, members: Member[], senderId: strin
     if (recipients.length === 0) return { type: "PROBLEM", reason: "NO_ONE", names: [] };
 
     const scope = spec.all && spec.excluded.length ? "EXCEPT" : spec.all ? "ALL" : "PEOPLE";
-    const msg = clean(message);
+    const k = splitAlsoKeep(message);
+    const w = splitWithheld(k.message);
+    const msg = clean(w.message);
     const money = moneyKind(msg);
     return {
       type: "TELL",
@@ -195,14 +232,17 @@ export function parsePrivateTell(raw: string, members: Member[], senderId: strin
       kind: money.kind,
       amountMinor: money.amountMinor,
       subject: money.subject,
+      withheld: w.withheld,
+      keep: k.keep,
       // naming a person is clear; widening to a group, or leaving someone out, is confirmed first
       needsConfirm: scope !== "PEOPLE",
     };
   }
 
   // KEEP: for Clockwise only. Nothing is passed on.
-  if (/\b(?:don'?t|do not|never)\s+(?:tell|let|say|mention|share)\b|\bkeep (?:this|it|that)\s+(?:private|secret|between us|to yourself)|\bbetween (?:us|you and me)\b|\bsecret\b/i.test(low)) return { type: "KEEP", secret: true };
-  if (/^(?:just\s+)?(?:so you know|fyi|for your (?:info|information)|remember|keep in mind|note(?: down)?|make a note|jot down|just remember)\b/i.test(body) || /^(?:just\s+)?(?:remember|note)\b/i.test(body)) return { type: "KEEP", secret: false };
+  const remember = /\b(?:remember|keep in mind|make a note|note (?:down|that)|just so you know|fyi)\b/i.test(low);
+  if (/\b(?:don'?t|do not|never)\s+(?:tell|let|say|mention|share)\b|\bkeep (?:this|it|that)\s+(?:private|secret|between us|to yourself)|\bbetween (?:us|you and me)\b|\bsecret\b/i.test(low)) return { type: "KEEP", secret: true, remember };
+  if (/^(?:just\s+)?(?:so you know|fyi|for your (?:info|information)|remember|keep in mind|note(?: down)?|make a note|jot down|just remember)\b/i.test(body) || /^(?:just\s+)?(?:remember|note)\b/i.test(body)) return { type: "KEEP", secret: false, remember: true };
 
   return { type: "NONE" };
 }

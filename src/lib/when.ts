@@ -61,7 +61,12 @@ export function parseDay(text: string, now: LocalNow, window: DayWindow = {}): P
     const nowYear = Number(now.date.slice(0, 4));
     let candidate = `${nowYear}-${pad(explicit.mon + 1)}-${pad(explicit.day)}`;
     if (candidate < now.date) candidate = `${nowYear + 1}-${pad(explicit.mon + 1)}-${pad(explicit.day)}`;
-    return { date: candidate, matched: explicit.matched, relative: "explicit" };
+    // "Monday 5 Oct" / "5 Oct, Monday": the weekday is part of the date phrase, so it must not be left behind
+    // (and end up in the name of whatever is being added).
+    const wdAlt = [...WEEKDAYS, ...WEEKDAY_SHORT].join("|");
+    const esc = explicit.matched.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const whole = new RegExp(`(?:\\b(?:${wdAlt})\\.?,?\\s+)?${esc}(?:,?\\s+(?:${wdAlt})\\b)?`, "i").exec(text);
+    return { date: candidate, matched: whole?.[0] ?? explicit.matched, relative: "explicit" };
   }
 
   const wdRe = new RegExp(`\\b(?:(this|next|coming)\\s+)?(${WEEKDAYS.join("|")}|${WEEKDAY_SHORT.join("|")})\\b`);

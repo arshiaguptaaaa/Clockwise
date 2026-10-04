@@ -16,6 +16,7 @@ import { prisma } from "./prisma";
 import { getAppBaseUrl } from "./site-url";
 import { applyVerifiedPaymentStatus } from "./payment-lifecycle";
 import { validatePineMinor } from "./payments/amount";
+import { reconcilePayment } from "./payments/reconcile";
 import { withRailContext } from "./rails/evidence";
 import {
   createPaymentLink,
@@ -142,6 +143,19 @@ export async function refreshTripPaymentStatus(bookingId: string): Promise<TripP
 
   const live = await withRailContext({ tripId: booking.tripId, relatedKind: "BOOKING", relatedId: booking.id, decision: "Verify payment: fetch the link's authoritative status from Pine Labs" }, () => getPaymentLinkStatus(booking.confirmationId!));
   if (!live.ok) return { ok: false, reason: live.reason };
+
+  // The answer must be about THIS payment: same link, reference, amount and currency. Otherwise nothing is applied.
+  const obligation = await prisma.paymentObligation.findFirst({ where: { bookingId: booking.id }, select: { merchantRef: true } });
+  const check = reconcilePayment(
+    { paymentLinkId: booking.confirmationId, amountMinor: booking.amount, currency: booking.currency, references: obligation ? [obligation.merchantRef] : [booking.id] },
+    { paymentLinkId: live.paymentLinkId || null, merchantReference: live.merchantReference, amountMinorUnits: live.amountMinorUnits, currency: live.currency }
+  );
+  if (!check.ok) {
+    await prisma.tripEvent
+      .create({ data: { tripId: booking.tripId, kind: "PAYMENT_RECONCILIATION_MISMATCH", scope: "GROUP", sourceChannel: "PINELABS", confidence: "HIGH", payload: JSON.stringify({ bookingId: booking.id, reason: check.reason, expected: check.expected, got: check.got, reportedStatus: live.status, applied: false, note: "The provider's answer did not match this payment request, so nothing was marked paid." }), propagation: JSON.stringify(["payments"]) } })
+      .catch(() => undefined);
+    return { ok: false, reason: `Pine Labs' answer didn't match this payment (${check.reason}), so nothing was changed.` };
+  }
 
   await applyVerifiedPaymentStatus(booking.id, live.status, "RETURN_PAGE");
   return { ok: true, status: live.status, amount: booking.amount, currency: booking.currency };

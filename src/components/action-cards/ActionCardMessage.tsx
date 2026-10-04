@@ -8,6 +8,7 @@ import { PaymentCard } from "./PaymentCard";
 import { TravelResultCard } from "./TravelResultCard";
 import { ClockwiseActionCard, type CardPerson } from "./ClockwiseActionCard";
 import { ExpenseCard } from "./ExpenseCard";
+import { SettlementCard } from "./SettlementCard";
 import { PaymentLinkCard } from "./PaymentLinkCard";
 import { StayBookedCard } from "./StayBookedCard";
 import { JourneyConfirmCard } from "./JourneyConfirmCard";
@@ -55,6 +56,10 @@ export function ActionCardMessage({
 
   if (data.payLink && data.bookingId) {
     return <PaymentLinkCard bookingId={data.bookingId} status={cardStatus} title={data.title} context={data.context} />;
+  }
+
+  if (data.settlement) {
+    return <SettlementCard messageId={messageId} status={cardStatus} title={data.title} context={data.context} values={data.values} canAct={Boolean(currentUserId && currentUserId === data.settlement.fromId)} toName={data.settlement.toName} />;
   }
 
   if (data.expenseId) {

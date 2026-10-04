@@ -12,6 +12,7 @@ import { anchorsFor, ladderSearch, withWalking, toAroundPlace, type AroundAnchor
 import { suggestPlaces, pointForSuggestion } from "./locate";
 import { resolveTripLocationText, isResolveFailure } from "./resolve";
 import { hoursAt } from "./hours";
+import { recentMealMoods, placeMatchesAvoid } from "@/lib/pointers/mood";
 import { localNow } from "@/lib/when";
 import type { PlaceIntent, Keyword } from "./place-intent";
 import type { LatLng, PlaceResult } from "./types";
@@ -51,6 +52,8 @@ export type PlaceSearchOutcome =
       diet: "vegetarian" | "vegan" | "halal" | null;
       dietWhy: string | null;
       category: string;
+      // "Anything except another dosa place": what was left out of THIS meal's search, and whether that left nothing.
+      mealMood: { avoid: string; by: string; removed: number; leftNothing: boolean } | null;
     }
   | { ok: false; error: string; needsLocation?: boolean; chain?: ChainStep[] };
 
@@ -191,6 +194,20 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
   const diet = intent.diet ?? (foodish && params.groupDiet ? params.groupDiet.diet : null);
   const dietWhy = intent.diet ? `you asked for ${intent.diet}` : foodish && params.groupDiet ? `${params.groupDiet.names.join(" and ")} ${params.groupDiet.names.length > 1 ? "are" : "is"} ${params.groupDiet.diet}` : null;
 
+  // A mood about THIS meal (see pointers/mood.ts) applies to every food search for it, from any caller (chat, ideas, ...).
+  const moods = foodish ? (await recentMealMoods(tripId, localNow())).filter((m) => !(intent.what && placeMatchesAvoid(intent.what, m.avoid)) && !(intent.keyword && placeMatchesAvoid(intent.keyword.word, m.avoid))) : [];
+  const avoided = (p: PlaceResult) => moods.find((m) => placeMatchesAvoid(`${p.name} ${p.cuisine ?? ""} ${p.categories.join(" ")}`, m.avoid)) ?? null;
+  let removed = 0;
+  let removedBy: { avoid: string; by: string } | null = null;
+  const dropAvoided = <T,>(items: T[], get: (x: T) => PlaceResult): T[] => items.filter((x) => {
+    const m = moods.length ? avoided(get(x)) : null;
+    if (m) {
+      removed++;
+      removedBy = removedBy ?? m;
+    }
+    return !m;
+  });
+
   let raw: PlaceResult[] = [];
   let widened = false;
   let keywordMatches = 0;
@@ -225,17 +242,19 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
       const rest = ranked
         .filter((r) => r.score < 3 && (r.score > 0 || /indian|south/.test(lc(r.p.categories.join(" ")) + lc(r.p.cuisine ?? "")) || (diet && r.veg)))
         .sort((a, b) => b.score - a.score || (a.p.distanceMeters ?? 1e9) - (b.p.distanceMeters ?? 1e9));
-      ranked = [...matched, ...rest].slice(0, 8);
+      ranked = dropAvoided([...matched, ...rest], (r) => r.p).slice(0, 8);
       widened = matched.length < 3;
     } else {
       const ladder = await ladderSearch(category, anchor.point, { diet: diet ?? undefined, limit: 12 });
       raw = ladder.raw;
       widened = ladder.broadened || ladder.usedRadius > 1500;
-      ranked = ladder.raw
-        .filter((p) => p.name !== "Unnamed place")
-        .map((p) => ({ p, score: 0, why: null as string | null, veg: Boolean(diet) }))
-        .sort((a, b) => (a.p.distanceMeters ?? 1e9) - (b.p.distanceMeters ?? 1e9))
-        .slice(0, 8);
+      ranked = dropAvoided(
+        ladder.raw
+          .filter((p) => p.name !== "Unnamed place")
+          .map((p) => ({ p, score: 0, why: null as string | null, veg: Boolean(diet) }))
+          .sort((a, b) => (a.p.distanceMeters ?? 1e9) - (b.p.distanceMeters ?? 1e9)),
+        (r) => r.p
+      ).slice(0, 8);
     }
     chain.push({ step: "places", provider: "geoapify", status: "ok" });
   } catch (err) {
@@ -244,8 +263,9 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
   }
   chain.push({ step: "places", provider: "google_places", status: "not_configured", detail: "no Google Places credentials in this project" });
 
+  const mealMood = removed > 0 && removedBy ? { avoid: (removedBy as { avoid: string; by: string }).avoid, by: (removedBy as { avoid: string; by: string }).by, removed, leftNothing: ranked.length === 0 } : null;
   if (ranked.length === 0) {
-    return { ok: true, anchor, anchorWhy: located.why, title: titleFor(intent, category, anchor), context: `The provider's data has no ${intent.what ?? category} places within about 8 km of ${anchor.label}.`, places: [], chain, provider: "geoapify", retrievedAt: new Date().toISOString(), keywordMatches: 0, diet, dietWhy, category };
+    return { ok: true, anchor, anchorWhy: located.why, title: titleFor(intent, category, anchor), context: mealMood?.leftNothing ? `Everything the provider returned near ${anchor.label} is a ${mealMood.avoid} place, which ${mealMood.by} wanted a break from for this meal.` : `The provider's data has no ${intent.what ?? category} places within about 8 km of ${anchor.label}.`, places: [], chain, provider: "geoapify", retrievedAt: new Date().toISOString(), keywordMatches: 0, diet, dietWhy, category, mealMood };
   }
 
   // Walking time from the anchor, by the provider's own route; nothing is converted from straight-line distance.
@@ -270,7 +290,7 @@ export async function searchForIntent(params: { tripId: string; userId: string; 
     bits.push(keywordMatches >= 3 ? `${keywordMatches} places matched ${what} on the provider's cuisine tags and names.` : keywordMatches > 0 ? `Only ${keywordMatches} place${keywordMatches === 1 ? " is" : "s are"} tagged or named ${what} in the provider's data; the rest are the closest related restaurants.` : `No place is tagged or named ${what} in the provider's data here, so these are the closest related restaurants. They may or may not serve it.`);
   } else if (widened) bits.push("Widened the search to find enough real places.");
   if (diet) bits.push(`Found using Geoapify's ${diet} search${dietWhy ? ` (${dietWhy})` : ""}. That's a provider filter, not a check of each menu.`);
-  return { ok: true, anchor, anchorWhy: located.why, title: titleFor(intent, category, anchor), context: bits.join(" "), places, chain, provider: "geoapify", retrievedAt, keywordMatches, diet, dietWhy, category };
+  return { ok: true, anchor, anchorWhy: located.why, title: titleFor(intent, category, anchor), context: bits.join(" "), places, chain, provider: "geoapify", retrievedAt, keywordMatches, diet, dietWhy, category, mealMood };
 }
 
 function titleFor(intent: PlaceIntent, category: string, anchor: AroundAnchor) {
@@ -282,7 +302,9 @@ function titleFor(intent: PlaceIntent, category: string, anchor: AroundAnchor) {
 // Travellers who said they're vegetarian/vegan (a pointer or a stored food preference): the group's diet for ranking.
 export async function groupDietFor(tripId: string): Promise<{ diet: "vegetarian" | "vegan"; names: string[] } | null> {
   const [prefs, pointers] = await Promise.all([
-    prisma.travellerPreference.findMany({ where: { tripId, key: "FOOD", value: { in: ["VEGETARIAN", "VEGAN"] } }, select: { userId: true, value: true } }),
+    // Only what a traveller made visible to the group (said in the Trip Room). A private Vibe Check answer is for
+    // that traveller's own screens: it never steers, names or hints at anything in a group explanation.
+    prisma.travellerPreference.findMany({ where: { tripId, key: "FOOD", value: { in: ["VEGETARIAN", "VEGAN"] }, visibility: "GROUP" }, select: { userId: true, value: true } }),
     prisma.tripPointer.findMany({ where: { tripId, kind: "DIET", subject: { in: ["vegetarian", "vegan"] }, status: { not: "DISMISSED" } }, select: { userId: true, subject: true } }),
   ]);
   const ids = new Map<string, "vegetarian" | "vegan">();

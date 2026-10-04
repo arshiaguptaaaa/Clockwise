@@ -87,12 +87,22 @@ async function createRows(tripId: string, senderId: string, senderName: string, 
 }
 
 function sentReply(t: TellParsed, rcpt: string[], headline: string, linked: boolean, group: boolean): string {
-  if (group) return `Done. I've told ${list(rcpt)} and posted it in the Trip Room, with your name on it.`;
+  const withheld = t.withheld ? " I left out the part you asked me not to mention." : "";
+  if (group) return `Done. I've told ${list(rcpt)} and posted it in the Trip Room, with your name on it. They'll read: ${headline}${withheld}`;
   const who = list(rcpt);
-  if (t.kind === "NOTE") return `Done. I've sent ${who} a note from you. It isn't in the group chat. They'll read: “${headline}”`;
+  if (t.kind === "NOTE") return `Done. I've sent ${who} a note from you. It isn't in the group chat. They'll read: ${headline}${withheld}`;
   return linked
-    ? `Sent to ${who}: “${headline}” It matches the shared expense in Budget, so I linked it. I haven't asked for a payment.`
-    : `Sent to ${who}: “${headline}” That's your own claim. I haven't created an expense or a payment, and I'm not presenting it to them as a confirmed debt. If it should be in the shared Budget, add it there.`;
+    ? `Sent to ${who}. They'll read: ${headline} It matches the shared expense in Budget, so I linked it. I haven't asked for a payment.`
+    : `Sent to ${who}. They'll read: ${headline} That's your own claim. I haven't created an expense or a payment, and I'm not presenting it to them as a confirmed debt. If it should be in the shared Budget, add it there.`;
+}
+
+// What Clockwise keeps for ONE traveller. A PERSONAL-scope event is the same store the private agent already reads
+// ("Told privately: ..."); it is visible only to that traveller and never reaches the group.
+async function rememberPrivately(tripId: string, userId: string, text: string) {
+  await prisma.privateNote.create({ data: { tripId, senderId: userId, recipientId: null, visibility: "PRIVATE_TO_AGENT", kind: "MEMORY", body: text.slice(0, 500), headline: "Kept private", status: "SENT" } });
+  await prisma.tripEvent
+    .create({ data: { tripId, kind: "PERSONAL_UNDERSTANDING", scope: "PERSONAL", actorUserId: userId, subjectUserId: userId, sourceChannel: "PRIVATE", confidence: "HIGH", payload: JSON.stringify({ category: "PRIVATE_NOTE", value: text.slice(0, 300) }), propagation: "[]" } })
+    .catch(() => undefined);
 }
 
 // Returns the reply Clockwise should give, or null when this is not a hand-off and the normal private agent
@@ -118,7 +128,7 @@ export async function handlePrivateTell(tripId: string, senderId: string, text: 
     }
     const nm = await names(batch.map((b) => b.recipientId!));
     const group = batch[0].visibility === "GROUP_VISIBLE";
-    const t = { type: "TELL", scope: group ? "ALL" : "EXCEPT", recipientIds: batch.map((b) => b.recipientId!), excludedIds: [], message: batch[0].body, lead: "says", kind: batch[0].kind as TellParsed["kind"], amountMinor: batch[0].amountMinor, subject: batch[0].subject, needsConfirm: false } as TellParsed;
+    const t = { type: "TELL", scope: group ? "ALL" : "EXCEPT", recipientIds: batch.map((b) => b.recipientId!), excludedIds: [], message: batch[0].body, lead: "says", kind: batch[0].kind as TellParsed["kind"], amountMinor: batch[0].amountMinor, subject: batch[0].subject, needsConfirm: false, withheld: false, keep: null } as TellParsed;
     await send(tripId, senderId, t, batchId, batch.map((b) => b.id), me.name);
     if (group) await postToGroup(tripId, me.name, t);
     return sentReply(t, batch.map((b) => nm.get(b.recipientId!) ?? "them"), batch[0].headline, false, group);
@@ -129,31 +139,36 @@ export async function handlePrivateTell(tripId: string, senderId: string, text: 
   if (intent.type === "PROBLEM") {
     if (intent.reason === "SELF") return "That one's to yourself, so there's nobody to pass it to. I'll keep it in mind instead.";
     if (intent.reason === "NO_ONE") return "I couldn't find anyone else to send that to.";
+    if (intent.reason === "AMBIGUOUS_NAME") return `Which ${intent.word}: ${list(intent.names)}? I haven't sent anything.`;
     const others = roster.filter((r) => r.id !== senderId).map((r) => first(r.name));
     return `I couldn't match ${list(intent.names)} to anyone on this trip, so I haven't sent anything. On this trip: ${list(others)}.`;
   }
 
   if (intent.type === "KEEP") {
-    await prisma.privateNote.create({ data: { tripId, senderId, recipientId: null, visibility: "PRIVATE_TO_AGENT", kind: "MEMORY", body: text, headline: "Kept private", status: "SENT" } });
-    // "Don't tell anyone" is answered here, in code, so nothing downstream can decide to surface it.
-    return intent.secret ? "Understood. That stays between you and me. I won't tell anyone, and I won't bring it up in the group." : null;
+    if (intent.remember) await rememberPrivately(tripId, senderId, text);
+    // "Don't tell anyone" is answered here, in code, so nothing downstream can decide to surface it. A bare
+    // "don't tell Ridhima ..." stores nothing and sends nothing.
+    if (intent.secret) return intent.remember ? "Understood. That stays between you and me. I won't tell anyone, and I won't bring it up in the group." : "Okay, I won't tell anyone. Nothing was sent and nothing was recorded.";
+    return null;
   }
 
   // TELL
+  if (intent.keep) await rememberPrivately(tripId, senderId, intent.keep);
+  const keptNote = intent.keep ? " The other thing you said stays private; I haven't passed it on." : "";
   if (pending.length) await prisma.privateNote.updateMany({ where: { id: { in: pending.map((p) => p.id) } }, data: { status: "CANCELLED" } });
   const nm = await names([...intent.recipientIds, ...intent.excludedIds]);
   const rcpt = intent.recipientIds.map((i) => nm.get(i) ?? "them");
 
   if (intent.needsConfirm) {
     const { headline } = await createRows(tripId, senderId, me.name, intent, "PENDING_CONFIRM");
-    if (intent.scope === "ALL") return `This goes to everyone (${list(rcpt)}) and I'll also post it in the Trip Room, so it stops being private: “${headline}” Send it? Say yes, or cancel.`;
-    return `I'll tell ${list(rcpt)}: “${headline}” ${list(intent.excludedIds.map((i) => nm.get(i) ?? "them"))} won't be told, and nothing goes in the group chat. Send it? Say yes, or cancel.`;
+    if (intent.scope === "ALL") return `This goes to everyone (${list(rcpt)}) and I'll also post it in the Trip Room, so it stops being private. They'd read: ${headline}${keptNote} Send it? Say yes, or cancel.`;
+    return `I'll tell ${list(rcpt)}, and only them. ${list(intent.excludedIds.map((i) => nm.get(i) ?? "them"))} won't see it anywhere, and nothing goes in the group chat. They'd read: ${headline}${keptNote} Send it? Say yes, or cancel.`;
   }
 
   const { batchId, ids, headline } = await createRows(tripId, senderId, me.name, intent, "SENT");
   await send(tripId, senderId, intent, batchId, ids, me.name);
   const linked = (await prisma.privateNote.count({ where: { id: { in: ids }, expenseId: { not: null } } })) > 0;
-  return sentReply(intent, rcpt, headline, linked, false);
+  return sentReply(intent, rcpt, headline, linked, false) + keptNote;
 }
 
 // Called from the private turn runner before the model. True = handled, skip the model.

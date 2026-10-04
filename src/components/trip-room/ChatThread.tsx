@@ -197,7 +197,7 @@ export function ChatThread({
 
   // Consecutive Clockwise words + supporting cards (places, routes, weather) read as ONE unit.
   const groupable = (m: ChatThreadMessage) =>
-    m.isClockwise && !m.proposal && !m.failed && !m.cardData?.includes('"clash":{') && !m.cardData?.includes('"collection":true') && !m.cardData?.includes('"idea":{') && (!m.cardType || m.cardType === "PLACES" || m.cardType === "ROUTE" || m.cardType === "WEATHER") && !(m.cardData && /"(journeyId|stayBooking|expenseId|payLink|transportPlanId)"/.test(m.cardData)) && !(m.cardType === "PLACES" && m.cardData?.includes('"stays"'));
+    m.isClockwise && !m.proposal && !m.failed && !m.cardData?.includes('"clash":{') && !m.cardData?.includes('"collection":true') && !m.cardData?.includes('"idea":{') && (!m.cardType || m.cardType === "PLACES" || m.cardType === "ROUTE" || m.cardType === "WEATHER") && !(m.cardData && /"(journeyId|stayBooking|expenseId|settlement|payLink|transportPlanId)"/.test(m.cardData)) && !(m.cardType === "PLACES" && m.cardData?.includes('"stays"'));
   type Row = { kind: "one"; m: ChatThreadMessage; i: number } | { kind: "unit"; items: { m: ChatThreadMessage; i: number }[] };
   const rows: Row[] = [];
   messages.forEach((m, i) => {

@@ -47,6 +47,9 @@ import { createCommitmentChecked, moveCommitmentChecked, cancelCommitmentChecked
 import { matchCommitment } from "@/lib/plan/parse";
 import { parseDay, parseTime, localNow, stripMatched } from "@/lib/when";
 import { recordPointer, rememberDiet } from "@/lib/pointers/store";
+import { validateModelPointer } from "@/lib/pointers/extract";
+import { statedAmounts } from "@/lib/private-tell";
+import { groundedTitle } from "@/lib/budget/titles";
 import { buildIdea, tripDayWindow } from "@/lib/ideas";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
@@ -956,6 +959,10 @@ async function noteTripPointerTool(input: Record<string, unknown>, ctx: AgentCon
   const kind = String(input.kind ?? "");
   const subject = String(input.subject ?? "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 60);
   if (!POINTER_VERB[kind] || !subject) return { output: "Not noted: need a kind and a subject." };
+  // The model proposes, code decides: only what the speaker said about THEMSELVES is stored (see validateModelPointer).
+  const spoken = [...ctx.history].reverse().find((h) => !h.isClockwise)?.content ?? "";
+  const verdict = validateModelPointer(spoken, kind, subject, ctx.trip.members.filter((m) => m.userId !== ctx.actingUserId).map((m) => m.user.name.split(" ")[0]));
+  if (!verdict.ok) return { output: `Not noted. ${verdict.reason} Do not reply to the group about it.` };
   const label = kind === "WANT" ? `wants ${subject}` : `${POINTER_VERB[kind]} ${subject}`;
   const r = await recordPointer({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: lastHumanId(ctx), kind: kind as never, subject, label });
   if (kind === "DIET") await rememberDiet(ctx.trip.id, ctx.actingUserId, subject);
@@ -1134,6 +1141,11 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
   if (!title || amountMinor == null) return { output: "Need what it was for and a stated amount — ask the person, don't guess." };
   const currency = String(input.currency ?? "INR").toUpperCase().slice(0, 3);
 
+  // The amount must be one the speaker actually WROTE in this message. "Pay her the remaining amount" states no
+  // figure, so nothing is invented from earlier chat; and the same payment is never proposed twice under a new title.
+  const spoken = [...ctx.history].reverse().find((h) => !h.isClockwise)?.content ?? "";
+  if (!statedAmounts(spoken).includes(amountMinor)) return { output: "Not recorded: that amount isn't in what they just said. Ask them for the amount; do not infer it from earlier messages." };
+
   const byName = (n: string) => ctx.trip.members.find((m) => m.user.name.toLowerCase().startsWith(n.trim().toLowerCase()));
   let payerId = ctx.actingUserId;
   if (typeof input.paidBy === "string" && input.paidBy.trim()) {
@@ -1154,11 +1166,15 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
   if (participantIds.length === 0) return { output: "Nobody to split with." };
 
   const sourceMessageId = [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+  const dup = await prisma.expense.findFirst({ where: { tripId: ctx.trip.id, amountMinor, paidByUserId: payerId, status: "PROPOSED", createdAt: { gt: new Date(Date.now() - 2 * 3600_000) } }, select: { id: true } });
+  if (dup) return { output: "That expense was already caught a moment ago, so nothing new was added." };
   const category = typeof input.category === "string" && isCategory(input.category.toUpperCase()) ? (input.category.toUpperCase() as keyof typeof CATEGORY_LABEL) : undefined;
+  const payerFirst = (ctx.trip.members.find((m) => m.userId === payerId)?.user.name ?? "someone").split(" ")[0];
+  const named = groundedTitle(spoken, title, payerFirst);
   const created = await createExpense({
     tripId: ctx.trip.id,
     actorUserId: ctx.actingUserId,
-    title,
+    title: named.title,
     category,
     amountMinor,
     currency,
@@ -1169,7 +1185,7 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
     sourceReferenceId: sourceMessageId,
     splitMethod: "EQUAL",
     participants: participantIds.map((userId) => ({ userId })),
-    idempotencyKey: sourceMessageId ? `chat:${sourceMessageId}:${title.toLowerCase()}:${amountMinor}` : null,
+    idempotencyKey: sourceMessageId ? `chat:${sourceMessageId}:${named.title.toLowerCase()}:${amountMinor}` : null,
   });
   if (!created.ok) return { output: created.error };
   if (created.duplicate) return { output: "That expense was already caught from this message." };
@@ -1184,7 +1200,7 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
     status: "PENDING",
     data: {
       title: "Clockwise caught that ✦",
-      context: `${nameOf(payerId)} paid ${formatMoney(amountMinor, currency)} for ${title}, split ${participantIds.length} ways (about ${formatMoney(each, currency)} each). Nothing is added until it's confirmed.`,
+      context: `${nameOf(payerId)} paid ${formatMoney(amountMinor, currency)}${named.grounded ? ` for ${named.title}` : ""}, split ${participantIds.length} ways (about ${formatMoney(each, currency)} each).${named.grounded ? "" : " You didn't say what it was for, so it has no description yet: tap Edit to name it."} Nothing is added until it's confirmed.`,
       values: [
         { label: "Paid by", value: nameOf(payerId) },
         { label: "Split between", value: participantIds.map(nameOf).join(", ") },
@@ -1194,7 +1210,7 @@ async function proposeExpense(input: Record<string, unknown>, ctx: AgentContext)
       payerId,
     },
   });
-  return { output: `Posted a confirmation card for ${formatMoney(amountMinor, currency)} ${title}. Nothing is recorded until ${ctx.actingUserName} (or the payer) confirms it; say so in one short line.` };
+  return { output: `Posted a confirmation card for ${formatMoney(amountMinor, currency)} ${named.title}. Nothing is recorded until ${ctx.actingUserName} (or the payer) confirms it; say so in one short line.` };
 }
 
 // The speaker's OWN journey only: the acting user id comes from the session, never

@@ -32,7 +32,10 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
   if (booking.status === "PROCESSED") return { changed: false as const }; // terminal, never regress
   if (TERMINAL.has(booking.status) && liveStatus !== "PROCESSED") return { changed: false as const };
 
-  await prisma.booking.update({ where: { id: booking.id }, data: { status: liveStatus } });
+  // Claim the transition atomically: of any number of concurrent identical answers (a retry, a webhook racing the return
+  // page), exactly one moves the state and produces the event, card and notifications.
+  const claimed = await prisma.booking.updateMany({ where: { id: booking.id, status: booking.status }, data: { status: liveStatus } });
+  if (claimed.count === 0) return { changed: false as const };
   const statusEvent = await prisma.tripEvent.create({
     data: {
       tripId: booking.tripId,

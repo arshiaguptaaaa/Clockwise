@@ -29,7 +29,7 @@ export async function updateMyArrival(p: { tripId: string; userId: string; arriv
   await prisma.travellerJourney.update({
     where: { id: journey.id },
     // Old route numbers belong to the old arrival time; recomputed below.
-    data: { arriveLocal: decision.newLocal, scheduledArriveLocal: journey.scheduledArriveLocal ?? old, routeToStayMeters: null, routeToStaySeconds: null, routeComputedAt: null },
+    data: { arriveLocal: decision.newLocal, scheduledArriveLocal: journey.scheduledArriveLocal ?? old, notOutBeforeLocal: null, routeToStayMeters: null, routeToStaySeconds: null, routeComputedAt: null },
   });
 
   await recomputeRendezvous(p.tripId);

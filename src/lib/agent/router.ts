@@ -15,11 +15,20 @@ import { searchForIntent, groupDietFor, type PlaceSearchOutcome } from "@/lib/tr
 import { buildIdea, maybeSurfaceIdea, tripDayWindow } from "@/lib/ideas";
 import { observeMessage, loadPointers, pointerLine } from "@/lib/pointers/store";
 import { parseOwnArrival } from "@/lib/traveller/arrival-parse";
+import { parseTravellerStatus } from "@/lib/traveller/status-parse";
+import { handleTravellerStatus } from "@/lib/traveller/status";
+import { parseConditionalYes, parsePayDirective, parseSelfReportedPayment, parseFitQuestion } from "@/lib/reply-talk";
+import { payDirectiveOutcome, selfReportedReply } from "./money-talk";
+import { rupees } from "@/lib/private-tell";
+import { attachCondition } from "@/lib/proposal-conditions";
+import { parseTransientAvoid, recordMealMood } from "@/lib/pointers/mood";
 import { handleArrivalChange, evaluateConsequences, answerClashFromChat } from "@/lib/disruption";
 import { recomputeRendezvous } from "@/lib/rendezvous";
 import { executeTool } from "./tools";
 import { doesThisFit } from "@/lib/travel/fit";
 import { anchorsFor } from "@/lib/travel/around";
+import { hoursNote } from "@/lib/travel/hours";
+import { matchCommitment } from "@/lib/plan/parse";
 import { searchPlaceByText } from "@/lib/travel/geoapify-provider";
 import { localNow } from "@/lib/when";
 import { getOpenDecisions } from "@/lib/decisions";
@@ -60,30 +69,18 @@ export async function runPlaceRequest(ctx: AgentContext, text: string, channel: 
     .catch(() => undefined);
 
   if (!outcome.ok) return { reply: outcome.error, outcome };
-  if (outcome.places.length === 0) return { reply: `${outcome.context} I haven't named anything, since nothing real came back. Try a wider area.`, outcome };
-
-  await postActionCard({
-    tripId: ctx.trip.id,
-    channel,
-    recipientId: channel === "PRIVATE" ? ctx.actingUserId : undefined,
-    type: "PLACES",
-    status: "CONFIRMED",
-    data: {
-      title: outcome.title,
-      context: [`Around ${outcome.anchorWhy}.`, outcome.context].filter(Boolean).join(" "),
-      places: outcome.places.map((p) => ({ name: p.name, formattedAddress: p.formattedAddress, distanceMeters: p.distanceMeters, latitude: p.latitude, longitude: p.longitude, walkMinutes: p.walkMinutes, category: p.category, hours: p.hours, provider: p.provider, mapsUrl: p.mapsUrl, why: p.why })),
-      provider: outcome.provider,
-      retrievedAt: outcome.retrievedAt,
-      sources: outcome.chain.filter((c) => c.status === "ok" || c.status === "fallback").map((c) => `${c.step === "places" ? "Places" : c.step === "route" ? "Route" : "Search"} · ${c.provider === "delhivery" ? "Delhivery" : c.provider === "geoapify" ? "Geoapify" : c.provider}`),
-    },
-  });
+  if (outcome.places.length === 0) {
+    if (outcome.mealMood?.leftNothing) return { reply: `${outcome.context} I haven't listed them. Want a wider area, or should I include them anyway?`, outcome };
+    return { reply: `${outcome.context} I haven't named anything, since nothing real came back. Try a wider area.`, outcome };
+  }
 
   const top = outcome.places[0];
   const what = intent.what ?? outcome.category;
   const lead = outcome.keywordMatches >= 1 && intent.keyword ? `${outcome.keywordMatches} of these ${outcome.keywordMatches === 1 ? "matches" : "match"} ${what} on Geoapify's cuisine tags or names` : `Real places from Geoapify`;
   const why = top.why ? ` WHY THIS WORKS ✦ ${top.why}.` : "";
   const dietNote = outcome.dietWhy ? ` Ranked with ${outcome.dietWhy} in mind.` : "";
-  return { reply: `Found ${outcome.places.length} around ${outcome.anchor.label}: ${lead}. Top pick is ${top.name}.${why}${dietNote} Full list is in the card.`, outcome };
+  const moodNote = outcome.mealMood ? ` Left out ${outcome.mealMood.avoid} places, since ${outcome.mealMood.by} wanted a break from them for this meal.` : "";
+  return { reply: `Found ${outcome.places.length} around ${outcome.anchor.label}: ${lead}. Top pick is ${top.name}.${why}${dietNote}${moodNote} Full list is in the card.`, outcome };
 }
 
 // ---- ideas ----------------------------------------------------------------------------------------------
@@ -100,6 +97,31 @@ async function openQuestions(ctx: AgentContext): Promise<string> {
   return bits.length ? `Still open: ${bits.join(". ")}.` : "Nothing is waiting on a decision right now.";
 }
 
+// ---- feasibility of ONE named place ------------------------------------------------------------------------
+// Used for "can we fit Cubbon Park before dinner?" AND for "Let's do Cubbon before dinner?". It only ever ANSWERS: it
+// adds nothing to the Plan, and a yes to the question is a separate, explicit step.
+async function runFitQuestion(ctx: AgentContext, placeName: string): Promise<Routed> {
+  const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
+  const origin = a.stay ?? a.destination;
+  const found = origin ? await searchPlaceByText(placeName, origin.point).catch(() => []) : [];
+  if (!origin || !found[0]) return { handled: true, reply: origin ? `I couldn't find "${placeName}" on the map, so I can't say whether it fits. I haven't guessed.` : "There's no stay or destination to measure from yet, so I can't say whether it fits.", calls: [{ name: "does_this_fit", input: { placeName, found: false } }] };
+  const kind = /park|garden/i.test(placeName) ? "park" : "attraction";
+  const r = await doesThisFit({ tripId: ctx.trip.id, userId: ctx.actingUserId, place: { name: found[0].name, lat: found[0].latitude, lng: found[0].longitude }, kind, origin: { label: origin.kind === "stay" ? "the hotel" : origin.label, point: origin.point } });
+  if (!r.ok) return { handled: true, reply: r.error, calls: [{ name: "does_this_fit", input: { placeName, error: r.error } }] };
+  await prisma.tripEvent.create({ data: { tripId: ctx.trip.id, kind: "FIT_CHECKED", scope: "GROUP", actorUserId: ctx.actingUserId, sourceChannel: "GROUP", confidence: "HIGH", payload: JSON.stringify({ place: r.place, verdict: r.verdict, routeProvider: r.routeProvider, reachChecked: r.reach.checked, reachInside: r.reach.inside, reachProvider: r.reach.provider, toMin: r.toMin, onMin: r.onMin, spareMin: r.spareMin, commitment: r.commitment?.name ?? null, whatIf: r.whatIf, evidenceIds: r.evidenceIds, tool: "does_this_fit" }), propagation: JSON.stringify(["chat"]) } }).catch(() => undefined);
+  const t = (l: string) => timeLabel(l);
+  const provider = r.routeProvider === "delhivery" ? "Delhivery" : "Geoapify";
+  const reply = `${r.verdict === "YES" ? "Yes" : r.verdict === "TIGHT" ? "It's tight, but" : "No"}: ${r.place} ${r.verdict === "NO" ? "doesn't fit" : "fits"}${r.commitment ? ` before ${r.commitment.name} (${t(r.commitment.targetLocal)})` : ""}. ${r.toMin != null ? `${r.toMin} min there from ${r.originLabel}${r.onMin != null ? `, ${r.onMin} min back` : ""} (${provider}), about ${r.stayMin} min at the place. ` : ""}${r.verdict !== "NO" && r.leaveByLocal ? `Leave by ${t(r.leaveByLocal)}. ` : ""}${r.whatIf ? `That's a what-if for setting off at ${t(r.leaveLocal)}. ` : ""}${r.reason} ${hoursNote(found[0].openingHours, r.leaveLocal, r.toMin)}Nothing has been added to the Plan.`;
+  return { handled: true, reply, calls: [{ name: "does_this_fit", input: { placeName } }] };
+}
+
+// ---- a conditional yes ------------------------------------------------------------------------------------------
+// "I'm fine with 10, but only if we're back by 11." is kept on the proposal it answers and is not an approval (see
+// proposal-conditions.ts).
+async function conditionalReply(ctx: AgentContext, cond: { accepts: string; condition: string }, messageId: string | null): Promise<string | null> {
+  return attachCondition({ tripId: ctx.trip.id, userId: ctx.actingUserId, accepts: cond.accepts, condition: cond.condition, messageId });
+}
+
 // ---- the router -------------------------------------------------------------------------------------------
 
 export async function routeAddressed(ctx: AgentContext, last: ConversationTurn, mode: Exclude<MessageMode, "PASSIVE" | "HUMAN">): Promise<Routed> {
@@ -111,26 +133,51 @@ export async function routeAddressed(ctx: AgentContext, last: ConversationTurn, 
     return { handled: true, reply: plan.result?.reply ?? null, calls: [{ name: `plan_${c.kind}`, input: c }] };
   }
 
+  // "I'm still at baggage claim", "I'll join you directly at dinner", "8:15 is take-off, not landing", "kal subah aaungi".
+  const clockStatus = parseTravellerStatus(text, localNow());
+  if (clockStatus) {
+    const r = await handleTravellerStatus({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: last.id, status: clockStatus });
+    return { handled: true, reply: r.reply, calls: r.calls };
+  }
+
   if (/\bwhat('?s| is| are)\b.*\b(still )?(undecided|left to decide|open|pending|waiting)\b/i.test(text)) {
     return { handled: true, reply: await openQuestions(ctx), calls: [{ name: "open_questions", input: {} }] };
   }
 
   // "can we fit Cubbon Park before dinner?" is a feasibility question about ONE named place, not a search.
   const fitAsk = /\b(?:can|could|will|would|do|should)\s+(?:we|i)\s+(?:actually\s+|really\s+)?(?:fit|squeeze(?:\s+in)?|do|visit|see|make|manage|get to|go to|add)\s+(.+?)\s+(?:before|ahead of|prior to|between)\b/i.exec(text);
-  if (fitAsk) {
-    const placeName = fitAsk[1].replace(/\s+in$/i, "").replace(/^(the|a)\s+/i, "").trim();
-    const a = await anchorsFor(ctx.trip.id, ctx.actingUserId);
-    const origin = a.stay ?? a.destination;
-    const found = origin ? await searchPlaceByText(placeName, origin.point).catch(() => []) : [];
-    if (!origin || !found[0]) return { handled: true, reply: origin ? `I couldn't find "${placeName}" on the map, so I can't say whether it fits. I haven't guessed.` : "There's no stay or destination to measure from yet, so I can't say whether it fits.", calls: [{ name: "does_this_fit", input: { placeName, found: false } }] };
-    const kind = /park|garden/i.test(placeName) ? "park" : "attraction";
-    const r = await doesThisFit({ tripId: ctx.trip.id, userId: ctx.actingUserId, place: { name: found[0].name, lat: found[0].latitude, lng: found[0].longitude }, kind, origin: { label: origin.kind === "stay" ? "the hotel" : origin.label, point: origin.point } });
-    if (!r.ok) return { handled: true, reply: r.error, calls: [{ name: "does_this_fit", input: { placeName, error: r.error } }] };
-    await prisma.tripEvent.create({ data: { tripId: ctx.trip.id, kind: "FIT_CHECKED", scope: "GROUP", actorUserId: ctx.actingUserId, sourceChannel: "GROUP", confidence: "HIGH", payload: JSON.stringify({ place: r.place, verdict: r.verdict, routeProvider: r.routeProvider, reachChecked: r.reach.checked, reachInside: r.reach.inside, reachProvider: r.reach.provider, toMin: r.toMin, onMin: r.onMin, spareMin: r.spareMin, commitment: r.commitment?.name ?? null, whatIf: r.whatIf, evidenceIds: r.evidenceIds, tool: "does_this_fit" }), propagation: JSON.stringify(["chat"]) } }).catch(() => undefined);
-    const t = (l: string) => timeLabel(l);
-    const provider = r.routeProvider === "delhivery" ? "Delhivery" : "Geoapify";
-    const reply = `${r.verdict === "YES" ? "Yes" : r.verdict === "TIGHT" ? "It's tight, but" : "No"}: ${r.place} ${r.verdict === "NO" ? "doesn't fit" : "fits"}${r.commitment ? ` before ${r.commitment.name} (${t(r.commitment.targetLocal)})` : ""}. ${r.toMin != null ? `${r.toMin} min there from ${r.originLabel}${r.onMin != null ? `, ${r.onMin} min back` : ""} (${provider}), about ${r.stayMin} min at the place. ` : ""}${r.verdict !== "NO" && r.leaveByLocal ? `Leave by ${t(r.leaveByLocal)}. ` : ""}${r.whatIf ? `That's a what-if for setting off at ${t(r.leaveLocal)}. ` : ""}${r.reason}`;
-    return { handled: true, reply, calls: [{ name: "does_this_fit", input: { placeName } }] };
+  if (fitAsk) return runFitQuestion(ctx, fitAsk[1].replace(/\s+in$/i, "").replace(/^(the|a)\s+/i, "").trim());
+
+  // Words that look like instructions but are not: a conditional yes, a payment directive, "I already paid her".
+  const names = ctx.trip.members.map((m) => first(m.user.name));
+  const cond = parseConditionalYes(text);
+  if (cond) return { handled: true, reply: await conditionalReply(ctx, cond, last.id), calls: [{ name: "conditional_approval_noted", input: { counted: false } }] };
+  const pay = parsePayDirective(text, names);
+  if (pay) {
+    const out = await payDirectiveOutcome(ctx.trip.id, ctx.actingUserId, pay);
+    if (out.settlement) {
+      const s = out.settlement;
+      await postActionCard({
+        tripId: ctx.trip.id,
+        channel: "GROUP",
+        type: "DECISION",
+        status: "PENDING",
+        data: {
+          title: "PAYMENT TO CONFIRM ✦",
+          context: `${s.fromName} owes ${s.toName} ${s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}`} on confirmed expenses${s.basis.length ? ` (${s.basis.join(", ")})` : ""}. Tap only after you've actually paid ${s.toName} outside Clockwise: it records the settlement and tells ${s.toName}. It moves no money and adds no expense.`,
+          values: [{ label: "From", value: s.fromName }, { label: "To", value: s.toName }, { label: "Amount", value: s.currency === "INR" ? rupees(s.amountMinor) : `${s.currency} ${(s.amountMinor / 100).toFixed(2)}` }],
+          settlement: { fromId: s.fromId, toId: s.toId, fromName: s.fromName, toName: s.toName, amountMinor: s.amountMinor, currency: s.currency },
+        },
+      });
+    }
+    return { handled: true, reply: out.reply, calls: [{ name: "payment_directive_checked", input: { created: false, confirmationCard: Boolean(out.settlement) } }] };
+  }
+  const self = parseSelfReportedPayment(text, names);
+  if (self) return { handled: true, reply: await selfReportedReply(ctx.trip.id, ctx.actingUserId, self, last.id), calls: [{ name: "settlement_reported", input: { confirmed: false } }] };
+  const fitQ = parseFitQuestion(text);
+  if (fitQ) {
+    const plan = await buildPlanCtx(ctx.trip.id, ctx.actingUserId);
+    if (matchCommitment(fitQ.anchor, plan.commitments).hit) return runFitQuestion(ctx, fitQ.place);
   }
 
   if (isPlaceSearch(text)) {
@@ -162,8 +209,17 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
   for (const c of seen.captured) calls.push({ name: "note_trip_pointer", input: { kind: c.kind, subject: c.subject, label: c.label, mentions: c.mentions } });
   for (const s of seen.supported) calls.push({ name: "support_trip_pointer", input: { subject: s } });
 
+  // 1b. a mood about the NEXT meal ("anything except another dosa place"): understood, expires, never stored as a
+  // preference, and the model never sees it (so it cannot turn it into one).
+  const mood = parseTransientAvoid(text);
+  if (mood && seen.captured.length === 0) {
+    await recordMealMood(ctx.trip.id, ctx.actingUserId, last.id, mood, localNow());
+    calls.push({ name: "note_meal_mood", input: { avoid: mood, scope: "this meal" } });
+    return { calls, needsModel: false };
+  }
+
   // 2. A clash question is waiting and this is the answer ("Yeah", "inform them", "cancel it", "leave it").
-  const answered = await answerClashFromChat(ctx.trip.id, ctx.actingUserId, text);
+  const answered = await answerClashFromChat(ctx.trip.id, ctx.actingUserId, text, last.id);
   if (answered) {
     calls.push({ name: "answer_clash", input: { text: text.slice(0, 60) } });
     return { calls, needsModel: false, reply: answered.reply };
@@ -198,10 +254,54 @@ export async function observePassive(ctx: AgentContext, last: ConversationTurn, 
     }
   }
 
+  // 2a'. small clock statements ("still at baggage claim", "join you directly at dinner", "8:15 is take-off", tentative or
+  // historical delays, Hinglish days). Matched narrowly; anything else follows the existing path untouched.
+  let handledStatus = false;
+  const clockStatus = parseTravellerStatus(text, localNow());
+  if (clockStatus) {
+    const sr = await handleTravellerStatus({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: last.id, status: clockStatus }).catch((err) => {
+      console.error("[status] failed:", err instanceof Error ? err.message : err);
+      return null;
+    });
+    if (sr) {
+      calls.push(...sr.calls);
+      handledStatus = true;
+      if (sr.reply && !reply) reply = sr.reply;
+    }
+  }
+
+  // 2a''. words that look like instructions but are not (see reply-talk.ts): never reach the model, never change state.
+  if (!handledStatus) {
+    const names = ctx.trip.members.map((m) => first(m.user.name));
+    const cond = parseConditionalYes(text);
+    if (cond) {
+      const cr = await conditionalReply(ctx, cond, last.id);
+      calls.push({ name: "conditional_approval_noted", input: { counted: false } });
+      return { calls, needsModel: false, reply: cr ?? undefined };
+    }
+    if (parseSelfReportedPayment(text, names)) {
+      await selfReportedReply(ctx.trip.id, ctx.actingUserId, parseSelfReportedPayment(text, names)!, last.id);
+      calls.push({ name: "settlement_reported", input: { confirmed: false } });
+      return { calls, needsModel: false };
+    }
+    if (parsePayDirective(text, names)) {
+      calls.push({ name: "payment_directive_seen", input: { created: false } });
+      return { calls, needsModel: false };
+    }
+    const fitQ = parseFitQuestion(text);
+    if (fitQ) {
+      const plan = await buildPlanCtx(ctx.trip.id, ctx.actingUserId);
+      if (matchCommitment(fitQ.anchor, plan.commitments).hit) {
+        const fr = await runFitQuestion(ctx, fitQ.place).catch(() => null);
+        if (fr?.handled) return { calls: [...calls, ...fr.calls], needsModel: false, reply: fr.reply ?? undefined };
+      }
+    }
+  }
+
   // 2b. the speaker's OWN arrival changed -> the whole consequence chain (journey, anchor, provider route, ready time, clashes)
-  let handledArrival = false;
+  let handledArrival = handledStatus;
   const window = await tripDayWindow(ctx.trip.id);
-  const arrival = parseOwnArrival(text, localNow(), window);
+  const arrival = handledStatus ? null : parseOwnArrival(text, localNow(), window);
   if (arrival && arrival.kind !== "ambiguous") {
     const r = await handleArrivalChange({
       tripId: ctx.trip.id,

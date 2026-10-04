@@ -19,6 +19,11 @@ async function main() {
   // easily share a name with one of these seed personas). Users are only
   // ever deleted if this specific demo trip's own membership said so.
   const existingDemoTrip = await prisma.trip.findFirst({ where: { isDemo: true } });
+  // A deploy never resets anything. The demo trip is rebuilt only when asked: RESET_DEMO=1 (or `npm run demo:reset`).
+  if (existingDemoTrip && process.env.RESET_DEMO !== "1") {
+    console.log("[seed] demo trip already exists and is preserved (set RESET_DEMO=1 to rebuild it).");
+    return;
+  }
   if (existingDemoTrip) {
     const demoMembers = await prisma.tripMember.findMany({
       where: { tripId: existingDemoTrip.id },

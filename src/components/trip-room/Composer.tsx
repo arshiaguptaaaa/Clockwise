@@ -126,6 +126,8 @@ export function Composer({
   const cancelledRef = useRef(false);
   // The last upload, kept so TRY AGAIN can resend it without re-recording.
   const lastUploadRef = useRef<{ blob: Blob; durationMs: number } | null>(null);
+  // Whether a retry is possible. Rendered state, because the ref itself must not be read while rendering.
+  const [canRetryUpload, setCanRetryUpload] = useState(false);
   // The rail-evidence row of the last transcription, linked to the message when it is sent.
   const voiceCallRef = useRef<string | null>(null);
 
@@ -227,6 +229,7 @@ export function Composer({
     }
 
     lastUploadRef.current = { blob: upload, durationMs: Math.max(0, Math.round(elapsedRef.current * 1000)) };
+    setCanRetryUpload(true);
     await sendForTranscription();
   }
 
@@ -317,7 +320,7 @@ export function Composer({
       {voiceError && voiceState === "error" && (
         <div className="flex items-center gap-3 px-4 pt-3 text-xs text-danger" role="alert">
           <span>{voiceError}</span>
-          {lastUploadRef.current && (
+          {canRetryUpload && (
             <button
               type="button"
               onClick={retryTranscription}

@@ -124,3 +124,29 @@ export function isAgreement(text: string): boolean {
 export function isFloat(text: string): boolean {
   return /\?\s*$/.test(text.trim()) || /\b(should we|shall we|how about|what about|let'?s)\b/i.test(text);
 }
+
+// ---- guarding what the MODEL wants to remember ------------------------------------------------------------
+// The model may only note something the speaker said about THEMSELVES. "Ridhima's vegetarian, I think." is a
+// guess about someone else, and "Anything except another dosa place" is a mood about the next meal: neither
+// becomes a stored diet or a lasting dislike. The deterministic extractor is the reference: a diet needs a
+// first-person statement it can read itself; anything else needs a first-person marker and no other traveller
+// named as the subject.
+const FIRST_PERSON = /\b(i|i'm|im|i'll|i'd|i've|my|me|we|we're|we'll|let's|lets|us|our)\b/i;
+export function isTransientMood(text: string): boolean {
+  return /\b(anything|something|whatever|literally anything|any food)\s+(except|but|other than|besides)\b/i.test(text) || /\b(not|no)\s+(another|more)\s+\w+/i.test(text) || /\b(another|more)\s+[\w ]{2,24}\s+(place|spot|restaurant|joint|cafe|café)\b.*[😭😩😫🙃🫠]/u.test(text);
+}
+
+export function validateModelPointer(text: string, kind: string, subject: string, otherNames: string[]): { ok: true } | { ok: false; reason: string } {
+  const t = text.replace(/\s+/g, " ").trim();
+  const det = extractPointers(t);
+  const subj = subject.toLowerCase();
+  if (det.some((d) => d.kind === kind && (d.subject.includes(subj) || subj.includes(d.subject)))) return { ok: true };
+  if (kind === "DIET") return { ok: false, reason: "A diet is stored only when the speaker says it about themselves." };
+  if (kind === "AVOID") return { ok: false, reason: "A dislike is stored only when the speaker states it about themselves." };
+  if (isTransientMood(t)) return { ok: false, reason: "That is about the next meal, not a lasting preference." };
+  const names = otherNames.map((n) => n.toLowerCase()).filter(Boolean);
+  const aboutSomeoneElse = names.some((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:'s|\\s+(?:is|was|will|would|might|probably|prefers|likes|wants))\\b`, "i").test(t));
+  if (aboutSomeoneElse && !FIRST_PERSON.test(t.replace(new RegExp(`\\b(${names.join("|") || "~"})\\b`, "ig"), ""))) return { ok: false, reason: "That is about another traveller, not something the speaker said about themselves." };
+  if (!FIRST_PERSON.test(t)) return { ok: false, reason: "Nothing here says it is the speaker's own wish." };
+  return { ok: true };
+}

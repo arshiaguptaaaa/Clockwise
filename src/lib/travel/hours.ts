@@ -44,3 +44,16 @@ export function hoursCoverVisit(raw: string | null | undefined, startLocalZ: Dat
   const end = hoursAt(raw, new Date(startLocalZ.getTime() + minutes * 60000));
   return end.state === "unknown" ? end : { state: "open", until: end.until };
 }
+
+// Travel feasibility and venue availability are different questions. The route says whether you CAN get there in time;
+// opening hours say whether it is open when you do. Hours are only ever the provider's own string, never assumed.
+export function hoursNote(openingHours: string | null | undefined, leaveLocal: string, toMin: number | null): string {
+  if (!openingHours) return "That is travel time only: I don't have opening hours for it, so I haven't checked it is open then. ";
+  const visit = new Date(`${leaveLocal}:00.000Z`);
+  if (toMin != null) visit.setUTCMinutes(visit.getUTCMinutes() + toMin);
+  const h = hoursAt(openingHours, visit);
+  if (h.state === "open") return `Its listed hours say open at that time${h.until ? ` (until ${h.until})` : ""}. `;
+  if (h.state === "closed") return `But its listed hours say closed at that time${h.opensAt ? ` (opens ${h.opensAt})` : ""}, so the route working doesn't make it a good idea. `;
+  return "That is travel time only: its hours couldn't be read, so I haven't checked it is open then. ";
+}
+

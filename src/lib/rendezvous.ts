@@ -20,7 +20,7 @@ const toLocal = (ms: number) => new Date(ms).toISOString().slice(0, 16);
 export type GroupAnchor = { id: string; placeName: string; latitude: number; longitude: number; kind: "stay" | "meeting" | "commitment" };
 
 const geocodeMemo = new Map<string, { at: number; value: { lat: number; lng: number; label: string } | null }>();
-async function geocodeAnchorText(tripId: string, text: string) {
+export async function geocodeAnchorText(tripId: string, text: string) {
   const key = `${tripId}:${text.toLowerCase()}`;
   const hit = geocodeMemo.get(key);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
@@ -85,7 +85,7 @@ export async function recomputeRendezvous(tripId: string) {
       if (j.routeStayBookingId === stay.id && j.routeToStaySeconds != null && (!wantDelhivery || j.routeProvider === "delhivery")) continue;
       try {
         // The traveller leaves the airport after the allowance for bags and exits: that is the departure time to price.
-        const departLocal = j.arriveLocal ? toLocal(toMs(j.arriveLocal) + ARRIVAL_BUFFER_MIN * 60_000) : null;
+        const departLocal = j.arriveLocal ? outAt(j).outAtLocal : null;
         const r = await driveRoute({ lat: j.arrivalLat, lng: j.arrivalLng }, { lat: stay.latitude, lng: stay.longitude }, { departLocal, tripId, userId: j.userId, decision: "Arrival point to confirmed stay: feeds readiness, rendezvous and commitment feasibility" });
         providersUsed.add(r.provider);
         const nm = await prisma.user.findUnique({ where: { id: j.userId }, select: { name: true } });
@@ -141,9 +141,15 @@ export type TravellerClock = {
   routeKm: number | null;
   routeProvider: string | null;
   hotelBy: string | null; // local YYYY-MM-DDTHH:mm
+  // The earliest the traveller can be OUT of the airport: landing + the stated allowance, or later if they said they are
+  // still inside. `outFloor` is set only when what they said is what decides it.
+  outAtLocal: string | null;
+  outFloor: string | null;
+  // "I'll join you directly at dinner": for this one commitment the traveller goes straight to the venue.
+  direct: { commitmentId: string; seconds: number | null } | null;
   status: "KNOWN" | "NO_STAY" | "NO_ARRIVAL_TIME" | "NO_ARRIVAL_POINT" | "NO_ROUTE";
 };
-export type CommitmentCheck = { id: string; name: string; target: string; allAtHotelBy: boolean; late: { name: string; hotelBy: string }[]; unknown: string[] };
+export type CommitmentCheck = { id: string; name: string; target: string; allAtHotelBy: boolean; late: { name: string; hotelBy: string; lowerBound?: boolean }[]; unknown: string[] };
 export type RendezvousView = {
   stayName: string | null;
   anchorKind: "stay" | "meeting" | "commitment" | null;
@@ -166,6 +172,13 @@ export function appliesTo(participantIdsJson: string): (userId: string) => boole
   return (userId) => ids.length === 0 || ids.includes(userId);
 }
 
+function outAt(j: { arriveLocal: string | null; notOutBeforeLocal: string | null }): { outAtLocal: string | null; outFloor: string | null } {
+  if (!j.arriveLocal) return { outAtLocal: null, outFloor: null };
+  const standard = toMs(j.arriveLocal) + ARRIVAL_BUFFER_MIN * 60_000;
+  const floor = j.notOutBeforeLocal ? toMs(j.notOutBeforeLocal) : 0;
+  return floor > standard ? { outAtLocal: toLocal(floor), outFloor: j.notOutBeforeLocal } : { outAtLocal: toLocal(standard), outFloor: null };
+}
+
 export async function buildRendezvousView(tripId: string): Promise<RendezvousView> {
   const [stay, journeys, members, commitments] = await Promise.all([
     groupAnchor(tripId),
@@ -175,12 +188,12 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
   ]);
   const nameOf = new Map(members.map((m) => [m.userId, m.user.name]));
   const clocks: TravellerClock[] = journeys.map((j) => {
-    const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName, scheduledArrive: j.scheduledArriveLocal && j.scheduledArriveLocal !== j.arriveLocal ? j.scheduledArriveLocal : null, allowanceMin: ARRIVAL_BUFFER_MIN };
+    const base = { userId: j.userId, name: nameOf.get(j.userId) ?? "Traveller", mode: j.mode, arriveLocal: j.arriveLocal, arrivalPlace: j.arrivalPlaceName, scheduledArrive: j.scheduledArriveLocal && j.scheduledArriveLocal !== j.arriveLocal ? j.scheduledArriveLocal : null, allowanceMin: ARRIVAL_BUFFER_MIN, ...outAt(j), direct: j.directToCommitmentId ? { commitmentId: j.directToCommitmentId, seconds: j.directRouteSeconds ?? null } : null };
     if (!stay) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_STAY" as const };
     if (!j.arriveLocal) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_TIME" as const };
     if (j.arrivalLat == null) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ARRIVAL_POINT" as const };
     if (j.routeToStaySeconds == null || j.routeStayBookingId !== stay.id) return { ...base, routeMinutes: null, routeKm: null, routeProvider: null, hotelBy: null, status: "NO_ROUTE" as const };
-    const hotelBy = toLocal(toMs(j.arriveLocal) + (j.routeToStaySeconds + ARRIVAL_BUFFER_MIN * 60) * 1000);
+    const hotelBy = toLocal(toMs(outAt(j).outAtLocal!) + j.routeToStaySeconds * 1000);
     return { ...base, routeMinutes: Math.round(j.routeToStaySeconds / 60), routeKm: Math.round(((j.routeToStayMeters ?? 0) / 1000) * 10) / 10, routeProvider: j.routeProvider, hotelBy, status: "KNOWN" as const };
   });
   const have = new Set(journeys.map((j) => j.userId));
@@ -194,9 +207,17 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
     // A commitment applies to its listed participants (empty/unparseable = everyone).
     const applies = appliesTo(c.participantIds);
     const scoped = clocks.filter((k) => applies(k.userId));
-    const knownHere = scoped.filter((k) => k.status === "KNOWN");
-    const late = knownHere.filter((k) => k.hotelBy! > target).map((k) => ({ name: k.name, hotelBy: k.hotelBy! }));
-    const unknown = scoped.filter((k) => k.status !== "KNOWN").map((k) => k.name);
+        // Someone joining THIS commitment directly is measured to its venue, not to the stay; with no measured venue route
+    // they are "not measured" for it (never late by the stay's clock, never assumed on time).
+    const directFor = (k: TravellerClock) => (k.direct?.commitmentId === c.id ? k.direct : null);
+    const late = scoped.flatMap((k): { name: string; hotelBy: string; lowerBound?: boolean }[] => {
+      const d = directFor(k);
+      const exact = d ? (d.seconds != null && k.outAtLocal ? toLocal(toMs(k.outAtLocal) + d.seconds * 1000) : null) : k.status === "KNOWN" ? k.hotelBy : null;
+      if (exact) return exact > target ? [{ name: k.name, hotelBy: exact }] : [];
+      // Travel time unknown: landing after the start is impossible whatever any route says.
+      return k.arriveLocal && k.arriveLocal >= target ? [{ name: k.name, hotelBy: k.arriveLocal, lowerBound: true }] : [];
+    });
+    const unknown = scoped.filter((k) => k.status !== "KNOWN" || (directFor(k) && directFor(k)!.seconds == null)).map((k) => k.name);
     const missing = members.filter((m) => applies(m.userId) && !have.has(m.userId)).map((m) => m.user.name);
     return { id: c.id, name: c.name, target, allAtHotelBy: late.length === 0 && unknown.length === 0 && missing.length === 0, late, unknown };
   });

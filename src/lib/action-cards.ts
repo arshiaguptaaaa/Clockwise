@@ -35,6 +35,9 @@ export type ActionCardData = {
   // this Expense; nothing is recorded until then. proposerId = who may act on it.
   expenseId?: string;
   proposerId?: string;
+  // "Pay her the remaining amount": a confirmation to RECORD that the debtor has paid, from the confirmed ledger. It moves no
+  // money and creates no expense. Only `fromId` can confirm it.
+  settlement?: { fromId: string; toId: string; fromName: string; toName: string; amountMinor: number; currency: string };
   // A Pine Labs payment-link card: the button opens the hosted checkout for
   // this Booking and can ask Pine Labs for the current status.
   payLink?: boolean;

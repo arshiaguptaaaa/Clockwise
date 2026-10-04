@@ -53,6 +53,7 @@ export default async function TripRoomChatPage({
           payload: true,
           executionResult: true,
           failureReason: true,
+          conditions: { where: { status: "OPEN" }, select: { userId: true, text: true } },
           approvals: {
             select: {
               decision: true,
@@ -93,6 +94,7 @@ export default async function TripRoomChatPage({
       change: d.change,
       because: d.because,
       retry: Boolean(p.supersedesId),
+      conditions: p.conditions.map((c) => ({ name: nameOf.get(c.userId) ?? "Someone", text: c.text })),
       executionResult: p.executionResult,
       failureReason: p.failureReason,
       // Stable, human order (the roster's), not whichever vote landed last.

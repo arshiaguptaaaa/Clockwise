@@ -276,7 +276,7 @@ export async function respondToGroupMessage(
     passiveReply = obs.reply;
   } else if (lastHumanTurn) {
     const { answerClashFromChat } = await import("@/lib/disruption");
-    const ans = await answerClashFromChat(tripId, actingUserId, lastHumanTurn.content).catch(() => null);
+    const ans = await answerClashFromChat(tripId, actingUserId, lastHumanTurn.content, lastHumanTurn.id).catch(() => null);
     if (ans) {
       await prisma.message.create({ data: { tripId, senderId: ctx.clockwiseUserId, channel: "GROUP", content: ans.reply } });
       return { spoke: true, replyText: ans.reply, toolCalls: [{ name: "answer_clash", input: {} }] };

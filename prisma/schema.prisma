@@ -771,6 +771,22 @@ model Proposal {
 
   approvals ProposalApproval[]
   reminders ProposalReminder[]
+  conditions ProposalCondition[]
+}
+
+// "I'm fine with 10, but only if we're back by 11." A yes with a condition is NOT a yes: the condition is kept on the
+// proposal, shown on its card, and the approval is not counted. A later explicit Accept from that person waives it.
+model ProposalCondition {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  userId     String
+  text       String
+  // OPEN | WAIVED (they accepted anyway) | WITHDRAWN (proposal ended)
+  status     String   @default("OPEN")
+  createdAt  DateTime @default(now())
+
+  @@index([proposalId, status])
 }
 
 // One traveller's vote on a Proposal. @@unique means re-voting updates the
@@ -1243,6 +1259,15 @@ model TravellerJourney {
   // The arrival printed on the ticket / first confirmed, kept when a delay moves arriveLocal, so a disruption is
   // visible as scheduled -> expected and never overwrites what the ticket said.
   scheduledArriveLocal String?
+  // "I'll join you directly at dinner": for that ONE commitment this traveller goes from the arrival point straight
+  // to the venue, not via the stay. The route is measured only when the venue is a real place.
+  directToCommitmentId String?
+  directRouteSeconds Int?
+  directRouteMeters  Int?
+  directProvider     String?
+  // "I'm still at baggage claim" at 8:40 PM: they cannot be out of the airport before 8:40 PM. Readiness is counted from
+  // the later of (landing + the stated allowance) and this floor. Cleared whenever the arrival itself changes.
+  notOutBeforeLocal  String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

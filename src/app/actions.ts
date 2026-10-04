@@ -77,7 +77,11 @@ export async function postGroupMessage(tripId: string, formData: FormData): Prom
   // A plain "yes" / "can't do 10" / "make it 9:30" answers the one open decision waiting on
   // this person. When it did, Clockwise has nothing more to say, so no agent turn follows.
   if (!attachment) {
-    const answered = await voteFromChat({ tripId, userId: senderId, text: content }).catch(() => ({ handled: false }));
+    const answered = await voteFromChat({ tripId, userId: senderId, text: content, messageId: message.id }).catch(() => ({ handled: false, clarify: undefined as string | undefined }));
+    if (answered.handled && "clarify" in answered && answered.clarify) {
+      // Several things are waiting on this person and none is clearly the one meant: ask, count nothing.
+      await prisma.message.create({ data: { tripId, senderId: await getClockwiseUserId(), channel: "GROUP", content: answered.clarify } });
+    }
     if (answered.handled) {
       revalidatePath(`/trips/${tripId}/room`);
       revalidatePath(`/trips/${tripId}/plan`);

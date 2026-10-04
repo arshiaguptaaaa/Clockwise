@@ -253,6 +253,8 @@ export async function castApprovalVote(
     return { ok: true, proposalStatus: proposal.status };
   }
 
+  // An explicit Accept is a yes without the condition: say so on the record, then count it.
+  if (decision === "APPROVED") await prisma.proposalCondition.updateMany({ where: { proposalId, userId: actorId, status: "OPEN" }, data: { status: "WAIVED" } });
   await prisma.proposalApproval.update({
     where: { id: approval.id },
     data: { decision, respondedAt: new Date(), note: decision === "REJECTED" ? (note?.trim().slice(0, 300) || null) : null },
