@@ -1307,3 +1307,48 @@ model DelhiveryCache {
   createdAt    DateTime @default(now())
   expiresAt    DateTime
 }
+
+// A group payment, split into one obligation per traveller. Money is only ever PAID per obligation, from a
+// status Clockwise itself fetched from Pine Labs; the collection is SETTLED when every obligation is.
+model PaymentCollection {
+  id               String              @id @default(cuid())
+  tripId           String
+  title            String
+  totalMinor       Int
+  currency         String              @default("INR")
+  // ACTIVE | SETTLED | CANCELLED
+  status           String              @default("ACTIVE")
+  createdBy        String
+  sourceProposalId String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  obligations      PaymentObligation[]
+
+  @@index([tripId])
+}
+
+model PaymentObligation {
+  id            String            @id @default(cuid())
+  collectionId  String
+  collection    PaymentCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  tripId        String
+  // The traveller who owes it: a user id, never matched by name.
+  userId        String
+  amountMinor   Int
+  // DUE | PAYING (link created / opened) | PAID | EXPIRED | CANCELLED
+  status        String            @default("DUE")
+  // Unique Pine Labs merchant_payment_link_reference (<= 50 chars).
+  merchantRef   String            @unique
+  // The Booking (PAYMENT_REQUEST) that holds Pine's link and status vocabulary.
+  bookingId     String?
+  paymentLinkId String?
+  paymentUrl    String?
+  // Plain-words reason for the last failed attempt (the raw provider error stays in Developer Evidence).
+  lastError     String?
+  paidAt        DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([collectionId, userId])
+  @@index([tripId, userId])
+}

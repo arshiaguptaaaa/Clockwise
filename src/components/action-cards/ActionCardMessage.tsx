@@ -99,6 +99,21 @@ export function ActionCardMessage({
     );
   }
 
+  if (data.links && data.links.length > 0) {
+    return (
+      <ClockwiseActionCard type={cardType} title={data.title} context={data.context} values={data.values} status="CONFIRMED">
+        <div className="mt-3 flex flex-col gap-2" data-handoffs>
+          {data.links.map((l) => (
+            <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center justify-between rounded-full border border-foreground/25 px-5 text-[12px] font-semibold tracking-[0.12em] hover:border-foreground">
+              <span>{l.label.toUpperCase()}</span>
+              <span className="text-[10.5px] font-normal tracking-normal text-muted-foreground">{l.provider ?? ""} ↗</span>
+            </a>
+          ))}
+        </div>
+      </ClockwiseActionCard>
+    );
+  }
+
   if (cardType === "PLACES" || cardType === "ROUTE" || cardType === "WEATHER") {
     return <TravelResultCard cardType={cardType} data={data} />;
   }

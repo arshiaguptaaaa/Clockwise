@@ -62,6 +62,12 @@ export type ProposalPayload = {
     retrievedAt: string;
     kind: string;
   };
+  // BOOKING proposals that collect money from travellers: who owes exactly what. Nothing is charged and no
+  // link exists until the organiser confirms ("CREATE PAYMENT"); then each person gets their own Pine Labs link.
+  split?: {
+    totalMinor: number;
+    lines: { userId: string; name: string; amountMinor: number; alreadyPaid: boolean }[];
+  };
   stay?: {
     provider: string;
     providerPlaceId: string;

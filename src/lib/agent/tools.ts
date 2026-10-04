@@ -34,6 +34,10 @@ import { timeLabel } from "@/lib/traveller/journey";
 import { brandSearch, anchorsFor, orderCategories } from "@/lib/travel/around";
 import { freeTimeOptions } from "@/lib/travel/window";
 import { doesThisFit } from "@/lib/travel/fit";
+import { resolvedMoment } from "@/lib/dates";
+import { handoffs, connectedFor } from "@/lib/travel-inventory/providers";
+import { rupeesToPaise, PINE_MIN_MINOR } from "@/lib/payments/amount";
+import { computeObligations } from "@/lib/payments/obligations-math";
 import { driveRoute } from "@/lib/travel/route-provider";
 import { getPrefs } from "@/lib/traveller/vibe";
 import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
@@ -280,9 +284,13 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
       type: "object",
       properties: {
         purpose: { type: "string", description: "What the payment is for, e.g. 'Sunset boat ride deposit'" },
-        amount: { type: "number", description: "The amount in whole currency units (e.g. 6000 for ₹6,000) — exactly as stated in the conversation, never estimated" },
+        amount: { type: "number", description: "The TOTAL to collect, in whole rupees (e.g. 3000 for ₹3,000), exactly as stated in the conversation, never estimated. Pass a plain number: no symbols." },
         currency: { type: "string", description: "ISO currency code, e.g. 'INR'. Defaults to INR if the conversation is in rupees and doesn't say." },
         summary: { type: "string", description: "One plain sentence explaining the proposal to the group" },
+        participants: { type: "array", items: { type: "string" }, description: "Traveller names who pay. Omit for everyone on the trip. For a personal payment ('make a payment of ₹10', 'I'll pay ₹500') pass ONLY the speaker's name. Use first names exactly as on the roster." },
+        exclude: { type: "array", items: { type: "string" }, description: "Travellers NOT included ('don't include Shreya')." },
+        fixedAmounts: { type: "array", items: { type: "object", properties: { name: { type: "string" }, amount: { type: "number" } }, required: ["name", "amount"] }, description: "A stated fixed share in rupees ('₹500 from Eva and the rest between us' => [{name:'Eva',amount:500}]). Everyone else splits the remainder equally." },
+        alreadyPaid: { type: "array", items: { type: "string" }, description: "Travellers who already paid outside Clockwise ('Arshia already paid')." },
       },
       required: ["purpose", "amount", "summary"],
     },
@@ -469,6 +477,21 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
     },
   },
   {
+    name: "travel_options",
+    description:
+      "Use when someone asks for TICKETS or how to get from A to B between cities ('get me tickets Delhi to Amritsar', 'flights Delhi to Amritsar on 12 Dec after 4', 'how do I get from the airport to Amritsar'). Clockwise has NO live fare, seat or timetable feed connected for flights, trains or buses yet, and never invents one. This tool posts honest handoff buttons to each mode's own booking page and returns the connected-provider status. If the user did not name a mode, it is deliberately ambiguous (an airport origin does not mean a flight): present FLIGHT · TRAIN · BUS and let them choose. Never state a price, timing, seat or availability.",
+    parameters: {
+      type: "object",
+      properties: {
+        origin: { type: "string", description: "Where from, as stated (e.g. 'Delhi', 'Indira Gandhi Airport')." },
+        destination: { type: "string", description: "Where to (e.g. 'Amritsar')." },
+        date: { type: "string", description: "YYYY-MM-DD if the user gave a clear date; omit otherwise. Never guess one." },
+        mode: { type: "string", enum: ["flight", "train", "bus"], description: "Only if the user named a mode." },
+      },
+      required: ["origin", "destination"],
+    },
+  },
+  {
     name: "does_this_fit",
     description:
       "Read-only: 'can we do Cubbon Park before dinner?', 'is Nandi Hills doable today?'. Decides, deterministically, whether ONE named real place fits before the traveller's next shared commitment: Delhivery drive time there and back (traffic-aware for the departure time), the area reachable in the time left (Delhivery IsoSuite), and a stated time-at-place assumption. Returns YES / TIGHT / NO with a leave-by time. Never judge this yourself and never name a leave-by time that this tool did not return.",
@@ -588,6 +611,8 @@ export async function executeTool(
       return freeTimeTool(input, ctx);
     case "does_this_fit":
       return doesThisFitTool(input, ctx);
+    case "travel_options":
+      return travelOptionsTool(input, ctx);
     case "find_saved_overlap":
       return findSavedOverlapTool(ctx);
     case "get_route":
@@ -741,8 +766,10 @@ async function preparePayment(input: Record<string, unknown>, ctx: AgentContext)
     return { output: `Could not find a traveller named "${payerName}" — ask for clarification.` };
   }
 
-  const amount = Number(input.amount);
-  const currency = (input.currency as string) ?? "EUR";
+  const amountMinorChecked = rupeesToPaise(input.amount);
+  if (amountMinorChecked == null) return { output: "I need a clear rupee amount (digits, at most two decimals) before preparing a payment. Ask for it; don't guess." };
+  const amount = amountMinorChecked / 100;
+  const currency = (input.currency as string) ?? "INR";
   const purpose = (input.purpose as string) ?? "a booking";
 
   const groupCard = await postActionCard({
@@ -1078,7 +1105,7 @@ async function updateMyArrivalTool(input: Record<string, unknown>, ctx: AgentCon
     : r.unknownRoute
       ? "No shared commitment could be checked because there is no confirmed stay or no provider route for this traveller yet — say so, don't claim it's fine."
       : "No shared commitment is put at risk by this.";
-  return { output: `Updated ${r.name}'s arrival: ${r.oldArrival ? `${timeLabel(r.oldArrival)} → ` : ""}${timeLabel(r.newArrival)}. Everyone's clocks were recomputed with provider routes. ${risk}` };
+  return { output: `Updated ${r.name}'s arrival to ${resolvedMoment(r.newArrival)} (state this full day and time back, so a wrong day is caught): ${r.oldArrival ? `${timeLabel(r.oldArrival)} → ` : ""}${timeLabel(r.newArrival)}. Everyone's clocks were recomputed with provider routes. ${risk}` };
 }
 
 async function proposeCommitmentReschedule(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
@@ -1273,22 +1300,57 @@ async function updateTripRoute(input: Record<string, unknown>, ctx: AgentContext
 async function proposePaymentRequest(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
   const purpose = (input.purpose as string | undefined)?.trim();
   const summary = (input.summary as string | undefined)?.trim();
-  const amount = Number(input.amount);
-  const currency = (input.currency as string | undefined)?.trim() || "INR";
-
-  if (!purpose || !summary || !Number.isFinite(amount) || amount <= 0) {
-    return { output: "Need a purpose, a positive amount, and a one-sentence summary to post a payment proposal." };
+  const currency = ((input.currency as string | undefined)?.trim() || "INR").toUpperCase();
+  // The one conversion from rupees to the integer Pine Labs needs; a value that isn't a clean rupee amount is refused here, not later at the provider.
+  const totalMinor = rupeesToPaise(input.amount);
+  if (!purpose || !summary || totalMinor == null) {
+    return { output: "Need a purpose, a clear rupee amount (digits only, at most two decimals) and a one-sentence summary to post a payment proposal. Ask the person for the amount; don't guess." };
   }
+  if (currency !== "INR") return { output: "Collecting payments works in rupees only right now. Say so." };
+  if (totalMinor < PINE_MIN_MINOR) return { output: "The smallest payment Pine Labs accepts is ₹1. Say so." };
 
+  const roster = ctx.trip.members.filter((m) => m.userId !== ctx.clockwiseUserId).map((m) => ({ userId: m.userId, name: m.user.name }));
+  const byName = (n: unknown) => {
+    const q = String(n ?? "").trim().toLowerCase();
+    if (!q) return null;
+    if (/^(me|myself|i)$/.test(q)) return roster.find((r) => r.userId === ctx.actingUserId) ?? null;
+    const exact = roster.filter((r) => r.name.toLowerCase() === q || r.name.split(" ")[0].toLowerCase() === q);
+    return exact.length === 1 ? exact[0] : null;
+  };
+  const names = (arr: unknown): { ok: true; list: { userId: string; name: string }[] } | { ok: false; bad: string } => {
+    const list: { userId: string; name: string }[] = [];
+    for (const n of Array.isArray(arr) ? arr : []) {
+      const hit = byName(n);
+      if (!hit) return { ok: false, bad: String(n) };
+      list.push(hit);
+    }
+    return { ok: true, list };
+  };
+  const inc = Array.isArray(input.participants) && input.participants.length ? names(input.participants) : { ok: true as const, list: roster };
+  const exc = names(input.exclude);
+  const paid = names(input.alreadyPaid);
+  if (!inc.ok || !exc.ok || !paid.ok) return { output: `"${(!inc.ok ? inc.bad : !exc.ok ? exc.bad : (paid as { bad: string }).bad)}" doesn't match exactly one traveller on this trip. Ask who they mean; never pick for them.` };
+  const people = inc.list.filter((p) => !exc.list.some((e) => e.userId === p.userId));
+  const fixed: Record<string, number> = {};
+  for (const f of Array.isArray(input.fixedAmounts) ? (input.fixedAmounts as { name?: unknown; amount?: unknown }[]) : []) {
+    const who = byName(f.name);
+    const minor = rupeesToPaise(f.amount);
+    if (!who || minor == null) return { output: `I couldn't read the fixed amount for "${String(f.name)}". Ask for a clear name and rupee amount.` };
+    fixed[who.userId] = minor;
+  }
+  const split = computeObligations({ totalMinor, people, fixed, alreadyPaid: paid.list.map((p) => p.userId) });
+  if (!split.ok) return { output: `That split doesn't work: ${split.error} Tell the person plainly and ask how they'd like to split it.` };
+
+  const rupees = (m: number) => `₹${(m / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   await postProposal(ctx, {
     type: "BOOKING",
     title: `Payment needed: ${purpose}`,
-    summary,
-    payload: { amount, currency },
+    summary: `${summary} Split: ${split.lines.map((l) => `${l.name.split(" ")[0]} ${rupees(l.amountMinor)}${l.alreadyPaid ? " (already paid)" : ""}`).join(", ")}. Total ${rupees(totalMinor)}.`,
+    payload: { amount: totalMinor / 100, currency, split: { totalMinor, lines: split.lines } },
   });
 
   return {
-    output: `Posted a payment proposal for ${currency} ${amount} (${purpose}) — travellers can discuss, and only the organiser's final confirmation actually creates a real payment link.`,
+    output: `Posted a payment proposal for ${rupees(totalMinor)} (${purpose}), split exactly: ${split.lines.map((l) => `${l.name.split(" ")[0]} ${rupees(l.amountMinor)}`).join(", ")}. The group sees the split BEFORE anything is created. Nothing is charged and no link exists until the organiser confirms (CREATE PAYMENT); then each person gets their own pay button. Tell them in one short line.`,
     posted: true,
   };
 }
@@ -1764,6 +1826,36 @@ async function freeTimeTool(input: Record<string, unknown>, ctx: AgentContext): 
   if (r.options.length === 0) return { output: `Nothing real that I checked fits ${r.windowMinutes} minutes (${r.considered} places routed). Say so plainly and suggest a longer window. Never invent an option.`, posted: true };
   return {
     output: `Posted ${r.options.length} option(s) that fit a ${r.windowMinutes}-minute window${r.rainyMode ? " (rain likely, so indoor-type places only)" : ""}. Each includes real walking time there and onward. Say in ONE short line how long the window is and that the card shows what fits; do not list places or add any that are not on the card. Time at each place is an assumption; say so if asked.`,
+    posted: true,
+  };
+}
+
+async function travelOptionsTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const origin = String(input.origin ?? "").trim().slice(0, 80);
+  const destination = String(input.destination ?? "").trim().slice(0, 80);
+  if (!origin || !destination) return { output: "Need where from and where to. Ask." };
+  const date = typeof input.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : null;
+  const want = input.mode === "flight" || input.mode === "train" || input.mode === "bus" ? (input.mode === "train" ? "rail" : input.mode) : null;
+  const all = handoffs({ origin, destination, date });
+  const shown = want ? all.filter((h) => h.mode === want) : all;
+  const live = (["flight", "rail", "bus"] as const).filter((m) => connectedFor(m).length > 0);
+  await postActionCard({
+    tripId: ctx.trip.id,
+    ...cardChannel(ctx),
+    type: "ROUTE",
+    status: "CONFIRMED",
+    data: {
+      title: `${origin.toUpperCase()} → ${destination.toUpperCase()}`,
+      context: `${want ? "" : "How do you want to get there? "}Clockwise has no live fares or timetables for this yet, so these open each provider's own booking page. You'll book there.`,
+      values: date ? [{ label: "Date", value: resolvedMoment(`${date}T00:00`).split(" · ")[0] }] : [{ label: "Date", value: "Pick one when you search" }],
+      links: shown.map((h) => ({ label: h.label, url: h.url, provider: h.provider })),
+    },
+  });
+  await prisma.tripEvent.create({
+    data: { tripId: ctx.trip.id, kind: "TRAVEL_BOOKING_HANDOFF", scope: ctx.mode === "PRIVATE" ? "PERSONAL" : "GROUP", actorUserId: ctx.actingUserId, subjectUserId: ctx.mode === "PRIVATE" ? ctx.actingUserId : null, sourceChannel: ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP", confidence: "HIGH", payload: JSON.stringify({ origin, destination, date, modes: shown.map((h) => h.provider), liveInventoryConnected: live, note: "no live fare/availability feed; handoff only" }), propagation: JSON.stringify(["chat-card"]) },
+  }).catch(() => undefined);
+  return {
+    output: `Posted ${shown.length} handoff button(s) for ${origin} → ${destination}${date ? ` on ${date}` : ""}. NO live prices, timings or seat availability are connected for ${live.length ? "the other modes" : "flights, trains or buses"}, so state none. ${want ? "" : "Say in ONE line that it depends on whether they want to fly, take the train or the bus, and that the buttons open each booking page. "}Never say "check another provider" as a dismissal: the buttons are the next step. Do not claim you searched or booked anything.`,
     posted: true,
   };
 }

@@ -196,6 +196,16 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
       return { understanding: `FIT_CHECKED — "${str(p.place)}": ${str(p.verdict)}${p.commitment ? ` before ${str(p.commitment)}` : ""}${p.whatIf ? " (what-if departure, labelled as such)" : ""}. ${str(p.toMin)} min there, ${str(p.onMin)} min back${p.spareMin != null ? `, ${str(p.spareMin)} min spare` : ""}. Routes: ${str(p.routeProvider)}. IsoSuite reachability: ${p.reachChecked ? (p.reachInside ? "inside" : "outside") + ` (${str(p.reachProvider)})` : "not checked"}.`, state: "Deterministic: provider travel times + the Plan's next commitment + a stated time-at-place assumption. No coordinates recorded." };
     case "MEETUP_RANKED":
       return { understanding: `MEETUP_RANKED — ${str(p.candidates)} real places compared for ${str(p.travellers)} travellers using the ${str(p.provider)} distance matrix; best: ${str(p.best)} (longest journey ${str(p.bestWorstMinutes)} min).`, state: "Ranked by the longest single journey, then the total — not a geometric midpoint. No one's position is recorded here." };
+    case "TRAVEL_BOOKING_HANDOFF":
+      return { understanding: `TRAVEL_BOOKING_HANDOFF — ${str(p.origin)} → ${str(p.destination)}${p.date ? ` on ${str(p.date)}` : ""}: handed the traveller to ${Array.isArray(p.modes) ? (p.modes as string[]).join(", ") : "the provider"}'s own booking page.`, state: "No live fare, timetable or seat feed is connected, so none was shown or claimed; nothing was booked by Clockwise." };
+    case "PAYMENT_COLLECTION_CREATED": {
+      const ob = Array.isArray(p.obligations) ? (p.obligations as { name: string; amountMinor: number; alreadyPaid: boolean }[]) : [];
+      return { understanding: `PAYMENT_COLLECTION_CREATED — "${str(p.title)}", ${(Number(p.totalMinor) / 100).toLocaleString("en-IN")} ${str(p.currency)}: ${ob.map((o) => `${o.name} ${(o.amountMinor / 100).toLocaleString("en-IN")}${o.alreadyPaid ? " (already paid)" : ""}`).join(", ")}.`, state: "One obligation per traveller. No Pine Labs link exists yet: each person's own link is created when they press PAY. Nothing is marked paid." };
+    }
+    case "PAYMENT_OBLIGATION_PAID":
+      return { understanding: `PAYMENT_OBLIGATION_PAID — ${str(p.traveller)} paid ${(Number(p.amountMinor) / 100).toLocaleString("en-IN")} for "${str(p.title)}"; ${str(p.paidCount)} of ${str(p.of)} paid (${(Number(p.collectedMinor) / 100).toLocaleString("en-IN")} / ${(Number(p.totalMinor) / 100).toLocaleString("en-IN")}).`, state: `Applied once, from a status Clockwise fetched from Pine Labs (${str(p.verifiedBy)}). Only this traveller's obligation changed; Budget recorded their share.` };
+    case "COMMITMENT_ADDED":
+      return { understanding: `COMMITMENT_ADDED — "${str(p.name)}" at ${str(p.at).replace("T", " ")}${p.location ? `, ${str(p.location)}` : ""}, picked in the calendar.`, state: "Shared Plan item; every traveller's clock is checked against it." };
     case "LOCATION_REQUESTED":
       return { understanding: "A traveller pressed USE MY LOCATION; the browser was asked for permission.", state: "Private. Nothing is tracked in the background and no coordinates are recorded here." };
     case "LOCATION_PERMISSION_GRANTED":

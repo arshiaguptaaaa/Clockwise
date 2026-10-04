@@ -14,6 +14,7 @@ import { prisma } from "./prisma";
 import { postActionCard } from "./action-cards";
 import { notify, otherMemberIds } from "./notifications";
 import { markPaidFromPayment } from "./budget/ledger";
+import { syncObligationFromBooking } from "./payments/obligations";
 
 export type StatusSource = "CREATE" | "RETURN_PAGE" | "WEBHOOK_TRIGGERED_REFETCH" | "POLL" | "CANCEL";
 
@@ -43,6 +44,18 @@ export async function applyVerifiedPaymentStatus(bookingId: string, liveStatus: 
       propagation: JSON.stringify(["payments", "chat"]),
     },
   });
+
+  // A traveller's share of a group payment: that obligation (and only that one) moves, in its own
+  // idempotent path, with its own Budget entry and notifications.
+  if (await syncObligationFromBooking(booking.id, liveStatus)) {
+    try {
+      revalidatePath(`/trips/${booking.tripId}/room`);
+      revalidatePath(`/trips/${booking.tripId}/budget`);
+    } catch {
+      // best-effort outside a request
+    }
+    return { changed: true as const, status: liveStatus };
+  }
 
   const href = `/trips/${booking.tripId}/room`;
   const everyone = (await prisma.tripMember.findMany({ where: { tripId: booking.tripId }, select: { userId: true } })).map((m) => m.userId);

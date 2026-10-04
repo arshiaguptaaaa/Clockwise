@@ -3,9 +3,6 @@ import { getCurrentMember } from "@/lib/trip";
 import { formatDateRange } from "@/lib/format";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
-import { VibeCheck } from "@/components/vibe/VibeCheck";
-import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
-import { prisma } from "@/lib/prisma";
 import { LiveSync } from "@/components/LiveSync";
 import { DecisionStrip } from "@/components/decisions/DecisionStrip";
 import { getOpenDecisions, waitingOn } from "@/lib/decisions";
@@ -28,15 +25,8 @@ export default async function TripShellLayout({
     trip.coreStartDate && trip.coreEndDate
       ? `${formatDateRange(trip.coreStartDate, trip.coreEndDate)} ${trip.coreEndDate.getUTCFullYear()}`
       : "dates not set yet";
-  // Private vibe check: offered once, right after joining (and again on request).
-  const vibeStatus = await getVibeStatus(tripId, member.userId);
-  let vibe: React.ReactNode = null;
-  if (vibeStatus === "NONE") {
-    const [prefs, journey] = await Promise.all([getPrefs(tripId, member.userId), prisma.travellerJourney.findFirst({ where: { tripId, userId: member.userId, status: "CONFIRMED" } })]);
-    const asks = questionsToAsk(prefs, { origin: journey?.originName, mode: journey?.mode });
-    const known = [journey?.originName ? `you're coming from ${journey.originName}` : null, journey?.mode ? `you're travelling by ${journey.mode.toLowerCase()}` : null].filter(Boolean).join(" and ");
-    vibe = <VibeCheck tripId={tripId} firstName={member.user.name.split(" ")[0]} questions={asks} knownLine={known || null} />;
-  }
+  // The Vibe Check is no longer part of onboarding: discovery is query-driven and never depends on it. The feature
+  // itself stays (Ready? and ?vibe=1 can still offer it); nothing here pops it up.
 
   const decisions = await getOpenDecisions(tripId, member.userId);
   const organiser = trip.members.find((m) => m.userId === trip.createdBy);
@@ -58,7 +48,6 @@ export default async function TripShellLayout({
       </div>
       <LiveSync tripId={tripId} />
       <BottomNav tripId={tripId} waiting={waitingOn(decisions).length + (member.userId === trip.createdBy ? decisions.filter((d) => d.stage === "AGREED").length : 0)} />
-      {vibe}
     </div>
   );
 }

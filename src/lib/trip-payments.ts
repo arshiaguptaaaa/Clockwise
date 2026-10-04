@@ -15,6 +15,7 @@
 import { prisma } from "./prisma";
 import { getAppBaseUrl } from "./site-url";
 import { applyVerifiedPaymentStatus } from "./payment-lifecycle";
+import { validatePineMinor } from "./payments/amount";
 import { withRailContext } from "./rails/evidence";
 import {
   createPaymentLink,
@@ -35,6 +36,10 @@ export type CreateTripPaymentRequestInput = {
   // Used as the Budget payer once Pine Labs reports PROCESSED.
   payerId?: string;
   sourceProposalId?: string;
+  // Group payments name their own reference (<= 50 chars); a single legacy payment uses its booking id.
+  merchantReference?: string;
+  // Group payments commit nothing to Budget here: each obligation is recorded when it is verified paid.
+  skipBudgetCommit?: boolean;
 };
 
 export type TripPaymentRequestResult =
@@ -49,6 +54,9 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
   if (!isPineLabsConfigured()) {
     return { ok: false, reason: "Pine Labs isn't configured for this environment yet." };
   }
+  // Pine Labs is never sent an amount it would reject (a missing, NaN, fractional or sub-minimum value).
+  const amountCheck = validatePineMinor(input.amountMinorUnits, input.currency);
+  if (!amountCheck.ok) return { ok: false, reason: `INVALID_AMOUNT: ${amountCheck.reason}` };
 
   const booking = await prisma.booking.create({
     data: {
@@ -75,7 +83,7 @@ export async function createTripPaymentRequest(input: CreateTripPaymentRequestIn
   }
 
   const result = await withRailContext({ tripId: input.tripId, userId: input.payerId ?? null, relatedKind: "BOOKING", relatedId: booking.id, decision: "Group proposal confirmed by the organiser → create a Pine Labs payment link" }, () => createPaymentLink({
-    merchantReference: booking.id,
+    merchantReference: input.merchantReference ?? booking.id,
     amountMinorUnits: input.amountMinorUnits,
     currency: input.currency,
     purpose: input.purpose,

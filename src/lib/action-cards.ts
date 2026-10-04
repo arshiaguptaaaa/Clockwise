@@ -38,6 +38,11 @@ export type ActionCardData = {
   // A Pine Labs payment-link card: the button opens the hosted checkout for
   // this Booking and can ask Pine Labs for the current status.
   payLink?: boolean;
+  // A group payment: the card renders live from the PaymentCollection, never from this snapshot.
+  collectionId?: string;
+  // Honest handoffs to a provider's own booking page (never a claim that Clockwise priced or booked anything).
+  links?: { label: string; url: string; provider?: string }[];
+  collection?: boolean;
   // An approved stay waiting for the organiser to mark it booked.
   stayBooking?: boolean;
   // A pending journey read from a ticket, waiting for the traveller's confirmation.

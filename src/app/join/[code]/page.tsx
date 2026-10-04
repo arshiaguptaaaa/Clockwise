@@ -85,7 +85,7 @@ export default async function JoinTripPage({ params, searchParams }: { params: P
           <button type="submit" className="mt-6 w-full cursor-pointer rounded-full bg-accent px-6 py-3.5 text-[13px] font-semibold tracking-[0.16em] text-accent-foreground transition-opacity hover:opacity-90">
             JOIN THE TRIP
           </button>
-          <p className="mt-3 text-[11.5px] text-muted-foreground">No account, no email. You&apos;ll answer a short private Vibe Check next.</p>
+          <p className="mt-3 text-[11.5px] text-muted-foreground">No account, no email.</p>
         </form>
       </div>
     </main>

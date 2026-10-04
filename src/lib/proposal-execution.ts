@@ -13,6 +13,8 @@ import { hasValidCoordinates } from "./location/types";
 import { getOrganiserAuth, resolveRoute, isFailure } from "./transport";
 import { mobilityProvider } from "./providers/mobility";
 import { createTripPaymentRequest } from "./trip-payments";
+import { createCollection } from "./payments/obligations";
+import { rupeesToPaise } from "./payments/amount";
 import { commitFromProposal } from "./budget/ledger";
 import { postActionCard } from "./action-cards";
 import { approveStayFromProposal } from "./stays";
@@ -157,13 +159,28 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
   // payment request, not a settled booking; it only becomes CONFIRMED
   // once Pine Labs reports PROCESSED (see the webhook,
   // /api/integrations/pinelabs/webhook).
+  // A split payment: ONE collection, one obligation per traveller. No Pine Labs call happens here; each
+  // traveller's own link is created when they press PAY.
+  if (payload.split) {
+    const collection = await createCollection({
+      tripId: proposal.tripId,
+      title: proposal.title.replace(/^Payment needed:\s*/i, "").trim() || "Payment",
+      totalMinor: payload.split.totalMinor,
+      currency: payload.currency ?? "INR",
+      createdBy: proposal.organiserConfirmedBy ?? proposal.createdBy,
+      sourceProposalId: proposal.id,
+      lines: payload.split.lines,
+    });
+    return { ok: true, summary: `Payment created: ${payload.split.lines.length} traveller${payload.split.lines.length === 1 ? "" : "s"} can now pay their own share (collection ${collection.id.slice(-6)}).` };
+  }
+
   if (payload.amount != null && payload.amount > 0) {
     const payerId = proposal.organiserConfirmedBy ?? proposal.createdBy ?? undefined;
     const payer = payerId ? await prisma.user.findUnique({ where: { id: payerId }, select: { name: true, email: true, phone: true } }) : null;
     const result = await createTripPaymentRequest({
       tripId: proposal.tripId,
       purpose: proposal.title,
-      amountMinorUnits: Math.round(payload.amount * 100),
+      amountMinorUnits: rupeesToPaise(payload.amount) ?? Number.NaN,
       currency: payload.currency ?? "INR",
       sourceProposalId: proposal.id,
       payerId,
@@ -171,7 +188,9 @@ async function executeBooking(proposal: Proposal): Promise<ExecutionResult> {
       payerContact: payer?.email ?? payer?.phone ?? undefined,
     });
     if (!result.ok) {
-      return { ok: false, error: `Couldn't create the payment request: ${result.reason}` };
+      // The provider's wording stays in the server log and Developer Evidence; the card shows a plain sentence.
+      console.error("[payments] payment request failed:", result.reason.slice(0, 200));
+      return { ok: false, error: "Couldn't create that payment. Nothing was charged. Try again." };
     }
     // Group-approved and awaiting payment: the money is COMMITTED in Budget (never PAID until verified).
     await commitFromProposal({

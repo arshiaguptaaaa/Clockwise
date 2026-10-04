@@ -1,5 +1,6 @@
 import { getCurrentMember } from "@/lib/trip";
 import { loadBudget } from "@/lib/budget/ledger";
+import { owedBy } from "@/lib/payments/obligations";
 import { BudgetView, type BudgetViewData } from "@/components/budget/BudgetView";
 
 export const dynamic = "force-dynamic";
@@ -71,5 +72,5 @@ export default async function BudgetPage({
     editId: edit ?? null,
   };
 
-  return <BudgetView data={view} />;
+  return <BudgetView data={view} owe={await owedBy(tripId, viewerId)} />;
 }

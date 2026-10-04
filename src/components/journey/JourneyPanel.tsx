@@ -1,5 +1,6 @@
 "use client";
 
+import { DateTimeField } from "@/components/DatePicker";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { Loader2 } from "lucide-react";
@@ -65,20 +66,22 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
           <p className="headline headline-md">Clockwise found this ✦</p>
           <p className="text-xs text-muted-foreground">Read from your ticket. It stays private until you confirm — then your arrival goes to the Plan.</p>
           {edit ? (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["From", "originName"],
-                  ["To", "destinationName"],
-                  ["Departs (YYYY-MM-DDTHH:mm)", "departLocal"],
-                  ["Arrives (YYYY-MM-DDTHH:mm)", "arriveLocal"],
-                ] as const
-              ).map(([l, k]) => (
-                <label key={k} className="text-xs text-muted-foreground">
-                  {l}
-                  <input className={`${input} mt-1`} value={(edit[k] as string | null) ?? ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} />
-                </label>
-              ))}
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["From", "originName"],
+                    ["To", "destinationName"],
+                  ] as const
+                ).map(([l, k]) => (
+                  <label key={k} className="text-xs text-muted-foreground">
+                    {l}
+                    <input className={`${input} mt-1 min-h-11`} value={(edit[k] as string | null) ?? ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} />
+                  </label>
+                ))}
+              </div>
+              <DateTimeField label="Departs" value={edit.departLocal ?? ""} onChange={(v) => setEdit({ ...edit, departLocal: v })} minDate="2000-01-01" />
+              <DateTimeField label="Arrives" value={edit.arriveLocal ?? ""} onChange={(v) => setEdit({ ...edit, arriveLocal: v })} minDate="2000-01-01" />
             </div>
           ) : (
             <p className="mt-3 text-sm">
@@ -140,17 +143,20 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
           {(
             [
               ["From", "origin", "Delhi"],
-              ["To", "destination", "Udaipur"],
-              ["Departs (YYYY-MM-DDTHH:mm)", "depart", "2026-12-12T17:20"],
-              ["Arrives (YYYY-MM-DDTHH:mm)", "arrive", "2026-12-12T18:35"],
-              ["Carrier (optional)", "carrier", "IndiGo"],
+              ["To", "destination", "Bengaluru"],
             ] as const
           ).map(([l, k, ph]) => (
             <label key={k} className="block text-xs text-muted-foreground">
               {l}
-              <input className={`${input} mt-1`} value={form[k]} placeholder={ph} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
+              <input className={`${input} mt-1 min-h-11`} value={form[k]} placeholder={ph} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
             </label>
           ))}
+          <DateTimeField label="Departs" value={form.depart} onChange={(v) => setForm({ ...form, depart: v })} />
+          <DateTimeField label="Arrives" value={form.arrive} onChange={(v) => setForm({ ...form, arrive: v })} />
+          <label className="block text-xs text-muted-foreground">
+            Carrier (optional)
+            <input className={`${input} mt-1 min-h-11`} value={form.carrier} placeholder="IndiGo" onChange={(e) => setForm({ ...form, carrier: e.target.value })} />
+          </label>
           <button
             disabled={busy}
             onClick={() =>

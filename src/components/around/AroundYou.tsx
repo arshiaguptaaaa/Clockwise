@@ -5,8 +5,9 @@ import { Heart } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { HUMAN } from "@/lib/copy";
-import { suggestPlacesAction, chooseSuggestionAction, reverseLocalityAction, meetupAction, aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
+import { discoverAction, suggestPlacesAction, chooseSuggestionAction, reverseLocalityAction, meetupAction, aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
 import { FitCheck } from "./FitCheck";
+import { uberDeeplink } from "@/lib/uber/deeplink";
 import type { SuggestedPlace } from "@/lib/travel/locate";
 import type { MeetupResult } from "@/lib/travel/meetup";
 import type { NextUp, FreeTime } from "@/lib/travel/window";
@@ -94,6 +95,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
   const [suggErr, setSuggErr] = useState<string | null>(null);
   const [locality, setLocality] = useState<{ locality: string | null; city: string | null; state: string | null } | null>(null);
   const [meet, setMeet] = useState<MeetupResult | null>(null);
+  const [dq, setDq] = useState("");
+  const [dNote, setDNote] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -209,6 +212,50 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, fix?.at, custom?.label]);
 
+  // "coffee in Gurgaon": what and where, by the words alone. Preferences never gate what exists.
+  const discover = () => {
+    const q = dq.trim();
+    if (q.length < 3) return;
+    start(async () => {
+      setErr(null);
+      setDNote(null);
+      const r = await discoverAction(tripId, q);
+      if (!r.ok) {
+        setErr(r.error);
+        return;
+      }
+      if (r.category) setCat(r.category);
+      if (r.where) {
+        setCustom({ lat: r.where.lat, lng: r.where.lng, label: r.where.label });
+        setAnyQ(r.where.label);
+        setSugg(null);
+        setAnchor("anywhere");
+      } else if (!anchor && fallback) setAnchor(fallback);
+      setDNote(r.note);
+    });
+  };
+  const searchBox = (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        discover();
+      }}
+      className="flex gap-2"
+      data-discover
+    >
+      <input
+        value={dq}
+        onChange={(e) => setDq(e.target.value)}
+        placeholder="Try: coffee in Gurgaon"
+        enterKeyHint="search"
+        className="min-h-11 flex-1 rounded-full border border-border bg-surface px-4 text-[15px] focus:border-accent focus:outline-none"
+      />
+      <button type="submit" disabled={busy || dq.trim().length < 3} className="min-h-11 cursor-pointer rounded-full bg-accent px-5 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground disabled:opacity-50">
+        SEARCH
+      </button>
+    </form>
+  );
+
   const shown = res?.places.filter((p) => maxWalk == null || (p.walkMinutes != null && p.walkMinutes <= maxWalk)) ?? [];
   const anchorChips: { id: Anchor; icon: string; label: string; ok: boolean; why?: string }[] = [
     { id: "destination", icon: "◎", label: "DESTINATION", ok: anchors.destination.available, why: "No destination yet" },
@@ -243,7 +290,8 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
         </p>
         <h1 className="headline headline-xl mt-2">What&apos;s around you right now?</h1>
         <p className="lede mt-3 max-w-[20rem]">{wantsMe ? "To search around where you are, I need your location. Tap the button." : "Your location is private. It's used for one search, never stored, never shown to the group."}</p>
-        <div className="mt-6 flex flex-col gap-2.5">
+        <div className="mt-6">{searchBox}</div>
+        <div className="mt-4 flex flex-col gap-2.5">
           <button type="button" onClick={requestMyLocation} disabled={loc === "asking"} data-use-my-location className="cursor-pointer rounded-full bg-accent px-5 py-3.5 text-[13px] font-semibold tracking-[0.12em] text-accent-foreground disabled:opacity-60">
             {loc === "asking" ? "ASKING YOUR BROWSER…" : "USE MY LOCATION"}
           </button>
@@ -369,6 +417,20 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
                         <span className="font-semibold">{route.fromLabel}</span> → <span className="font-semibold">{route.toLabel}</span>
                       </p>
                       {route.geometry && route.geometry.length > 1 && <RouteMap geometry={route.geometry} />}
+                      <div data-uber>
+                        <a
+                          href={uberDeeplink({
+                            pickup: anchor === "me" ? "my_location" : { latitude: route.geometry?.[0]?.lat, longitude: route.geometry?.[0]?.lng, label: route.fromLabel },
+                            dropoff: { latitude: p.lat, longitude: p.lng, label: p.name },
+                          })}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center rounded-full border border-foreground/25 px-5 text-[12px] font-semibold tracking-[0.12em] hover:border-foreground"
+                        >
+                          OPEN IN UBER
+                        </a>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{route.fromLabel} → {p.name}. You&apos;ll confirm the ride in Uber. Fares come from Uber, not from Clockwise.</p>
+                      </div>
                       <ul className="space-y-0.5 text-xs">
                         {route.legs.map((l) => (
                         <li key={l.mode} data-route-leg={l.mode}>
@@ -424,6 +486,11 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           )}
         </p>
       </header>
+
+      <div>
+        {searchBox}
+        {dNote && <p className="mt-1.5 text-[11.5px] text-muted-foreground" data-discover-note>{dNote}</p>}
+      </div>
 
       <div>
         <p className="eyebrow mb-2">Searching around</p>

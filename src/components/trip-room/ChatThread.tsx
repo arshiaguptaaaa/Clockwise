@@ -8,6 +8,8 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { Composer } from "./Composer";
 import { AskClockwise } from "./AskClockwise";
 import { ProposalCard, type ProposalCardData } from "./ProposalCard";
+import { CollectionCard } from "@/components/payments/CollectionCard";
+import type { CollectionView } from "@/lib/payments/obligations";
 import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
 
@@ -41,6 +43,7 @@ export function ChatThread({
   emptyText,
   suggestions,
   header,
+  collections = [],
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
@@ -60,6 +63,8 @@ export function ChatThread({
   suggestions?: string[];
   // Rendered at the top of the scrolling thread (the Trip Room's editorial header).
   header?: React.ReactNode;
+  // Live group-payment state; a payment card in the thread renders from this, never from its stale snapshot.
+  collections?: CollectionView[];
 }) {
   // Only covers the fast DB write — the composer is disabled for
   // milliseconds, not for however long Gemini takes.
@@ -105,6 +110,11 @@ export function ChatThread({
           const prev = index > 0 ? messages[index - 1] : null;
           const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
           const grouped = !message.isClockwise && plain(message) && plain(prev) && prev!.senderId === message.senderId && message.timestamp.getTime() - prev!.timestamp.getTime() < 5 * 60_000;
+          const collectionId = message.cardData && message.cardData.includes('"collection":true') ? (/"collectionId":"([^"]+)"/.exec(message.cardData)?.[1] ?? null) : null;
+          if (collectionId) {
+            const c = collections.find((x) => x.id === collectionId);
+            return c ? <CollectionCard key={message.id} c={c} /> : null;
+          }
           return message.proposal ? (
             <ProposalCard
               key={message.id}

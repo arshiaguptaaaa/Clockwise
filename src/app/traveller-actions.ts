@@ -16,6 +16,7 @@ import type { TravelMode } from "@/lib/travel/types";
 import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
 import { suggestPlaces, pointForSuggestion, reverseLocality, type SuggestOutcome, type SuggestedPlace, type Locality } from "@/lib/travel/locate";
 import { doesThisFit, type FitResult } from "@/lib/travel/fit";
+import { parseDiscoveryQuery } from "@/lib/travel/discovery-query";
 import { easiestForEveryone, type MeetupResult, type MeetCandidate } from "@/lib/travel/meetup";
 
 async function member(tripId: string) {
@@ -183,7 +184,7 @@ export async function aroundSearchAction(tripId: string, category: string, opts:
     const w = whyPicked(category, { energy: prefs.energy, nearby: prefs.nearby, food: prefs.food }, opts.diet);
     if (w) why[p.providerPlaceId] = w;
   }
-  return { ok: true, anchorType: a.anchor.kind, anchorLabel: a.anchor.label, category, places: r.places, why, retrievedAt: r.retrievedAt, note: opts.diet ? `Found using Geoapify's ${opts.diet} search. That's a provider filter, not a check of each place.` : undefined, saved: await savedIds(tripId, userId) };
+  return { ok: true, anchorType: a.anchor.kind, anchorLabel: a.anchor.label, category, places: r.places, why, retrievedAt: r.retrievedAt, note: opts.diet ? `Found using Geoapify's ${opts.diet} search. That's a provider filter, not a check of each place.` : r.note, saved: await savedIds(tripId, userId) };
 }
 
 export async function brandSearchAction(tripId: string, brand: string, opts: { anchor: AnchorType; me?: Me }): Promise<AroundResponse> {
@@ -348,4 +349,35 @@ export async function meetupAction(tripId: string, places: AroundPlace[], opts: 
       .catch(() => undefined);
   }
   return r;
+}
+
+
+// "coffee in Gurgaon" / "shopping in Bangalore" / "things to do near Indiranagar": a plain request, read by words
+// alone (no Vibe Check or preference is consulted) and turned into WHERE + WHAT. The named place is resolved first
+// (Delhivery, labelled Geoapify fallback), and the traveller's own position is never used unless they chose ME.
+export type DiscoverResponse =
+  | { ok: true; category: string | null; where: { lat: number; lng: number; label: string; provider: string } | null; note: string | null }
+  | { ok: false; error: string };
+
+export async function discoverAction(tripId: string, query: string): Promise<DiscoverResponse> {
+  const userId = await member(tripId);
+  if (!userId) return { ok: false, error: "Sign in first." };
+  const q = parseDiscoveryQuery(query.slice(0, 120));
+  if (!q.category && !q.place) return { ok: false, error: "Try something like \"coffee in Gurgaon\"." };
+  let where: { lat: number; lng: number; label: string; provider: string } | null = null;
+  let note: string | null = null;
+  if (q.place) {
+    const anchors = await anchorsFor(tripId, userId);
+    const sug = await suggestPlaces(q.place, { bias: anchors.destination?.point ?? null, tripId, userId });
+    if (!sug.ok || sug.suggestions.length === 0) return { ok: false, error: `I couldn't find "${q.place}" on the map. Try a fuller name.` };
+    // Prefer the suggestion that actually carries the typed name; the provider's first hit otherwise.
+    const want = q.place.toLowerCase();
+    const pick = sug.suggestions.find((s) => s.label.toLowerCase() === want) ?? sug.suggestions.find((s) => s.label.toLowerCase().startsWith(want)) ?? sug.suggestions[0];
+    const pt = await pointForSuggestion(pick.label, pick.lat != null && pick.lng != null ? { lat: pick.lat, lng: pick.lng } : null, { tripId, userId });
+    if (!pt) return { ok: false, error: `I couldn't place "${pick.label}" on the map.` };
+    where = { lat: pt.point.lat, lng: pt.point.lng, label: pick.label, provider: sug.provider };
+    note = sug.note;
+    await personalEvent(tripId, userId, "ANYWHERE_RESOLVED", { label: pick.label.slice(0, 80), provider: sug.provider, via: "search", category: q.category });
+  }
+  return { ok: true, category: q.category && q.category in AROUND_CATEGORIES ? q.category : null, where, note };
 }

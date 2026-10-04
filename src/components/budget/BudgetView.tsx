@@ -1,5 +1,7 @@
 "use client";
 
+import { PayButton } from "@/components/payments/PayButton";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
@@ -71,7 +73,7 @@ function sumLine(rec: Record<string, number>): string {
   return parts.length ? parts.join(" + ") : "—";
 }
 
-export function BudgetView({ data }: { data: BudgetViewData }) {
+export function BudgetView({ data, owe = [] }: { data: BudgetViewData; owe?: { obligationId: string; title: string; amountMinor: number; currency: string; paying: boolean }[] }) {
   const router = useRouter();
   const nameOf = (id: string | null) => data.members.find((m) => m.id === id)?.name ?? "Someone";
   const [sheet, setSheet] = useState<null | { kind: "expense"; edit?: ExpenseRow } | { kind: "settle"; from: string; to: string; amount: number; currency: string } | { kind: "budget" }>(
@@ -97,6 +99,22 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
           <p className={label}>Budget</p>
           <h1 className="headline headline-xl mt-2">Money, without the group chat math.</h1>
         </header>
+
+        {owe.length > 0 && (
+          <section data-you-owe>
+            <p className={label}>You owe</p>
+            <ul className="mt-2 space-y-4">
+              {owe.map((o) => (
+                <li key={o.obligationId}>
+                  <p className="font-display text-[22px] leading-tight tracking-[-0.01em]">{o.title}</p>
+                  <p className="mt-0.5 font-display text-[34px] leading-[1.05] tracking-[-0.02em]">{formatMoney(o.amountMinor, o.currency)}</p>
+                  <PayButton obligationId={o.obligationId} label={o.paying ? "FINISH PAYING SECURELY" : "PAY SECURELY"} className="mt-2" />
+                  <p className="mt-1.5 text-[11.5px] text-muted-foreground">You pay on Pine Labs&apos; secure page. Nothing counts as paid until Pine Labs confirms it.</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {data.you.length > 0 && (
           <section>

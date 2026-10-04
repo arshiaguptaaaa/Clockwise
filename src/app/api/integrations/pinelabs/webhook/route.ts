@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyPineLabsSignature } from "@/lib/payments/webhook-signature";
+import { bookingIdForReference } from "@/lib/payments/obligations";
 import { refreshTripPaymentStatus } from "@/lib/trip-payments";
 
 // Pine Labs webhook receiver. Authenticity: the documented signature scheme
@@ -47,11 +48,14 @@ export async function POST(request: NextRequest) {
 
   const linkId = findKey(payload, "payment_link_id");
   const reference = findKey(payload, "merchant_payment_link_reference");
-  const booking = reference
-    ? await prisma.booking.findUnique({ where: { id: reference } })
-    : linkId
-      ? await prisma.booking.findFirst({ where: { confirmationId: linkId } })
-      : null;
+  const viaObligation = reference ? await bookingIdForReference(reference) : null;
+  const booking = viaObligation
+    ? await prisma.booking.findUnique({ where: { id: viaObligation } })
+    : reference
+      ? ((await prisma.booking.findUnique({ where: { id: reference } })) ?? (linkId ? await prisma.booking.findFirst({ where: { confirmationId: linkId } }) : null))
+      : linkId
+        ? await prisma.booking.findFirst({ where: { confirmationId: linkId } })
+        : null;
 
   if (!booking) {
     // Valid signature but nothing of ours in it (an event type we don't

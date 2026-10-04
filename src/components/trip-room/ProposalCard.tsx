@@ -18,6 +18,7 @@ export type ProposalCardPayload = {
   provider?: string;
   cancellationTerms?: string;
   peopleAffected?: string[];
+  split?: { totalMinor: number; lines: { userId: string; name: string; amountMinor: number; alreadyPaid: boolean }[] };
 };
 
 export type ProposalCardApproval = { userId: string; name: string; decision: "PENDING" | "APPROVED" | "REJECTED" };
@@ -92,7 +93,8 @@ export function ProposalCard({
   const agreed = status === "APPROVED";
   const done = status === "CONFIRMED" || status === "EXECUTED";
   const replaced = status === "CANCELLED";
-  const oneClick = proposal.kind === "reschedule" || proposal.kind === "place";
+  // Creating a split payment charges nothing (each person's own link is made when they press PAY), so it is one tap too.
+  const oneClick = proposal.kind === "reschedule" || proposal.kind === "place" || Boolean(proposal.payload.split);
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -151,7 +153,22 @@ export function ProposalCard({
       )}
       <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>
 
-      {!proposal.change && (proposal.payload.pickup || proposal.payload.destination || proposal.payload.timing || proposal.payload.price) && (
+      {proposal.payload.split && (
+        <div className="mt-3" data-split>
+          <p className="eyebrow">Here&apos;s the split</p>
+          <ul className="mt-1.5 space-y-1">
+            {proposal.payload.split.lines.map((l) => (
+              <li key={l.userId} className="flex items-baseline justify-between gap-3 text-[14px]">
+                <span className="font-medium">{l.name.split(" ")[0]}</span>
+                <span className="font-display text-[17px]">₹{(l.amountMinor / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}{l.alreadyPaid && <span className="ml-1.5 font-sans text-[11px] text-success">already paid</span>}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 border-t border-border pt-1.5 text-[13px]"><span className="font-semibold">₹{(proposal.payload.split.totalMinor / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })} total</span> <span className="text-success">✓ adds up</span></p>
+        </div>
+      )}
+
+      {!proposal.change && !proposal.payload.split && (proposal.payload.pickup || proposal.payload.destination || proposal.payload.timing || proposal.payload.price) && (
         <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
           {proposal.payload.pickup && <div><span className="text-muted-foreground">Pickup: </span><span className="font-medium">{proposal.payload.pickup}</span></div>}
           {proposal.payload.destination && <div><span className="text-muted-foreground">Destination: </span><span className="font-medium">{proposal.payload.destination}</span></div>}
@@ -203,7 +220,7 @@ export function ProposalCard({
           onClick={() => (oneClick ? run(() => organiserHardConfirmAction(proposal.id)) : setConfirmStep(true))}
           className={`mt-3.5 cursor-pointer rounded-full px-6 py-2 text-[12px] font-semibold tracking-[0.12em] disabled:opacity-50 ${agreed ? "bg-accent text-accent-foreground hover:opacity-90" : "border border-accent text-accent-strong hover:bg-accent-tint"}`}
         >
-          {isPending ? "UPDATING…" : agreed ? (proposal.kind === "reschedule" ? "UPDATE PLAN" : "MAKE IT OFFICIAL") : "Confirm without waiting"}
+          {isPending ? "UPDATING…" : agreed ? (proposal.kind === "reschedule" ? "UPDATE PLAN" : proposal.payload.split ? "CREATE PAYMENT" : "MAKE IT OFFICIAL") : "Confirm without waiting"}
         </button>
       )}
       {canConfirm && confirmStep && (

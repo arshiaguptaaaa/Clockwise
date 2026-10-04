@@ -151,8 +151,8 @@ function Decision({ d, viewerId, organiserId, organiserName, compact, index }: {
           <div className="mt-1.5">{num}<Subject d={d} /></div>
           <div className="mt-2.5 flex items-center gap-2">
             <span className="mr-1 text-[13px] text-muted-foreground">Make it official?</span>
-            {d.kind === "reschedule" || d.kind === "place" ? (
-              <button type="button" disabled={pending} onClick={makeOfficial} className="cursor-pointer rounded-full bg-accent px-5 py-1.5 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground hover:opacity-90 disabled:opacity-50">{pending ? "UPDATING…" : d.kind === "reschedule" ? "UPDATE PLAN" : "ADD TO PLAN"}</button>
+            {d.kind === "reschedule" || d.kind === "place" || d.kind === "payment" ? (
+              <button type="button" disabled={pending} onClick={makeOfficial} className="cursor-pointer rounded-full bg-accent px-5 py-1.5 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground hover:opacity-90 disabled:opacity-50">{pending ? "UPDATING…" : d.kind === "reschedule" ? "UPDATE PLAN" : d.kind === "payment" ? "CREATE PAYMENT" : "ADD TO PLAN"}</button>
             ) : (
               <button type="button" onClick={() => document.getElementById(`proposal-${d.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className="cursor-pointer rounded-full bg-accent px-5 py-1.5 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground hover:opacity-90">REVIEW</button>
             )}

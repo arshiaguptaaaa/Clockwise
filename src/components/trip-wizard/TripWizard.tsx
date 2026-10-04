@@ -1,5 +1,6 @@
 "use client";
 
+import { RangeCalendar } from "@/components/DatePicker";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { unstable_rethrow } from "next/navigation";
@@ -357,35 +358,15 @@ export function TripWizard() {
 
             {dateMode === "exact" && (
               <div className="mt-4">
-                <div className="flex gap-2">
-                  <label className="flex-1 text-left">
-                    <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                      Start date
-                    </span>
-                    <input
-                      type="date"
-                      value={exactStart}
-                      onChange={(e) => handleStartChange(e.target.value)}
-                      className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground focus:border-accent focus:outline-none"
-                    />
-                  </label>
-                  <label className="flex-1 text-left">
-                    <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                      End date
-                    </span>
-                    <input
-                      type="date"
-                      value={exactEnd}
-                      min={exactStart || undefined}
-                      onChange={(e) => handleEndChange(e.target.value)}
-                      className={`w-full rounded-xl border bg-surface px-3 py-2.5 text-sm text-foreground focus:outline-none ${
-                        isExactRangeInvalid
-                          ? "border-danger focus:border-danger"
-                          : "border-border focus:border-accent"
-                      }`}
-                    />
-                  </label>
-                </div>
+                <RangeCalendar
+                  start={exactStart}
+                  end={exactEnd}
+                  onChange={(st, en) => {
+                    setExactStart(st);
+                    setExactEnd(en);
+                    setEndDateWasCleared(false);
+                  }}
+                />
 
                 {endDateWasCleared && (
                   <p className="mt-2 text-xs text-muted-foreground">

@@ -250,6 +250,28 @@ export async function searchNearby(
   return placesSearch(params);
 }
 
+// When a category returns little, the SAME intent is widened (never swapped for another): "things to do" also
+// means sights, entertainment and parks; "shopping" also means markets and department stores.
+export const BROAD_CATEGORIES: Record<string, string> = {
+  cafe: "catering.cafe,catering.fast_food",
+  restaurant: "catering.restaurant,catering.fast_food,catering.food_court",
+  attraction: "tourism.attraction,tourism.sights,entertainment,leisure.park",
+  shopping: "commercial.shopping_mall,commercial.clothing,commercial.marketplace,commercial.department_store,commercial.shoes,commercial.gift_and_souvenir",
+  nightlife: "catering.bar,catering.pub,adult.nightclub,entertainment.activity_park",
+  park: "leisure.park,natural",
+  museum: "entertainment.museum,entertainment.culture,tourism.sights",
+};
+
+export async function searchNearbyRaw(categories: string, near: LatLng, radiusMeters: number, limit = 15): Promise<PlaceResult[]> {
+  const params = new URLSearchParams({
+    categories,
+    filter: `circle:${near.lng},${near.lat},${radiusMeters}`,
+    bias: `proximity:${near.lng},${near.lat}`,
+    limit: String(limit),
+  });
+  return placesSearch(params);
+}
+
 export function searchHotels(near: LatLng, radiusMeters = 2500, limit = 8): Promise<PlaceResult[]> {
   return searchNearby("hotel", near, radiusMeters, limit);
 }

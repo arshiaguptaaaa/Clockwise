@@ -39,6 +39,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ tripId:
       (SELECT COUNT(*) FROM "TripEvent" WHERE "tripId" = ${tripId} AND ("scope"::text = 'GROUP' OR "actorUserId" = ${me} OR "subjectUserId" = ${me})),
       (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("createdAt")) * 1000), 0) FROM "TripEvent" WHERE "tripId" = ${tripId} AND ("scope"::text = 'GROUP' OR "actorUserId" = ${me} OR "subjectUserId" = ${me})),
       (SELECT COUNT(*) FROM "MessageReaction" r JOIN "Message" m ON m."id" = r."messageId" WHERE m."tripId" = ${tripId}),
+      (SELECT COUNT(*) FROM "PaymentObligation" WHERE "tripId" = ${tripId} AND "status" = 'PAID'),
+      (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "PaymentObligation" WHERE "tripId" = ${tripId}),
       (SELECT COUNT(*) FROM "Notification" WHERE "tripId" = ${tripId} AND "userId" = ${me}),
       (SELECT COUNT(*) FROM "TravellerJourney" WHERE "tripId" = ${tripId}),
       (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "TravellerJourney" WHERE "tripId" = ${tripId})

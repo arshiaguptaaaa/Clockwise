@@ -8,6 +8,7 @@ import { TripHeader } from "@/components/trip-room/TripHeader";
 import { whosHere } from "@/lib/whos-here";
 import { tripTagline } from "@/lib/copy";
 import { formatDateRange } from "@/lib/format";
+import { collectionsForTrip } from "@/lib/payments/obligations";
 import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
 import { describeProposal } from "@/lib/decisions";
@@ -103,6 +104,7 @@ export default async function TripRoomChatPage({
   const dates = trip.coreStartDate && trip.coreEndDate ? formatDateRange(trip.coreStartDate, trip.coreEndDate, "short").toUpperCase() : "DATES TO DECIDE";
   const days = trip.coreStartDate && trip.coreEndDate ? Math.round((trip.coreEndDate.getTime() - trip.coreStartDate.getTime()) / 86_400_000) + 1 : null;
   const people = await whosHere(trip.id, trip.members);
+  const collections = await collectionsForTrip(trip.id, currentUserId);
   const header = (
     <>
       <TripHeader
@@ -149,6 +151,7 @@ export default async function TripRoomChatPage({
         reactions: groupReactions(m.reactions),
       }))}
       roster={roster}
+      collections={collections}
       currentUserId={currentUserId}
       organiserId={trip.createdBy}
       organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"}

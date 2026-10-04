@@ -7,7 +7,7 @@
 //   DESTINATION the canonical trip destination
 // Walking times are provider routes (never straight-line distance dressed up as
 // minutes). Place existence is all this proves: nothing here says a product is in stock.
-import { NEARBY_CATEGORIES, searchNearby, getRoute, isGeoapifyConfigured } from "./geoapify-provider";
+import { NEARBY_CATEGORIES, BROAD_CATEGORIES, searchNearby, searchNearbyRaw, getRoute, isGeoapifyConfigured } from "./geoapify-provider";
 import { tripAnchors } from "./resolve";
 import { prisma } from "@/lib/prisma";
 import type { LatLng } from "./types";
@@ -121,9 +121,26 @@ async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<Aroun
 export async function searchAroundPoint(anchor: AroundAnchor, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}): Promise<AroundResult> {
   if (!isGeoapifyConfigured()) return { ok: false, error: "Place search isn't connected in this environment." };
   if (!(category in NEARBY_CATEGORIES)) return { ok: false, error: `Unknown category "${category}".` };
-  let raw;
+  // Close first; if little comes back, widen the radius, then widen the category within the same intent.
+  // An empty answer is only given when the widest search genuinely found nothing.
+  const radii = opts.radiusM ? [opts.radiusM] : [1500, 4000, 10000];
+  const usable = (r: { name: string }[]) => r.filter((x) => x.name !== "Unnamed place").length;
+  let raw: Awaited<ReturnType<typeof searchNearby>> = [];
+  let usedRadius = radii[0];
+  let broadened = false;
   try {
-    raw = await searchNearby(category, anchor.point, opts.radiusM ?? 1500, opts.limit ?? 15, opts.diet);
+    for (const radius of radii) {
+      raw = await searchNearby(category, anchor.point, radius, opts.limit ?? 15, opts.diet);
+      usedRadius = radius;
+      if (usable(raw) >= 3) break;
+    }
+    if (usable(raw) < 3 && BROAD_CATEGORIES[category] && !opts.diet) {
+      const wide = await searchNearbyRaw(BROAD_CATEGORIES[category], anchor.point, radii[radii.length - 1], opts.limit ?? 15);
+      const seen = new Set(raw.map((r) => r.providerId));
+      raw = [...raw, ...wide.filter((w) => !seen.has(w.providerId))];
+      broadened = wide.length > 0;
+      usedRadius = radii[radii.length - 1];
+    }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Place search failed." };
   }
@@ -133,8 +150,11 @@ export async function searchAroundPoint(anchor: AroundAnchor, category: string, 
   const base = named.length >= 3 ? named : all;
   const routed = await withWalking(anchor.point, base);
   // Closest by the provider's own walking time first; places beyond the routed set keep provider order.
-  const places = [...routed.filter((p) => p.walkMinutes != null).sort((a, b) => a.walkMinutes! - b.walkMinutes!), ...routed.filter((p) => p.walkMinutes == null)];
-  return { ok: true, anchor, category, places, retrievedAt: raw[0]?.retrievedAt ?? new Date().toISOString() };
+  // A walk of more than 45 minutes is not a walk: show the distance instead of a misleading "90 min walk".
+  const walkable = routed.map((p) => (p.walkMinutes != null && p.walkMinutes > 45 ? { ...p, walkMinutes: null } : p));
+  const places = [...walkable.filter((p) => p.walkMinutes != null).sort((a, b) => a.walkMinutes! - b.walkMinutes!), ...walkable.filter((p) => p.walkMinutes == null).sort((a, b) => (a.distanceMeters ?? 1e9) - (b.distanceMeters ?? 1e9))];
+  const note = places.length === 0 ? undefined : broadened ? `Little matched closely, so I widened the search to everything in this area that fits "${category}" (up to ${usedRadius / 1000} km).` : usedRadius > 1500 ? `Widened to ${usedRadius / 1000} km to find enough real places.` : undefined;
+  return { ok: true, anchor, category, places, retrievedAt: raw[0]?.retrievedAt ?? new Date().toISOString(), note };
 }
 
 export async function searchAround(tripId: string, category: string, opts: { diet?: "vegetarian" | "vegan" | "halal"; radiusM?: number; limit?: number } = {}): Promise<AroundResult> {

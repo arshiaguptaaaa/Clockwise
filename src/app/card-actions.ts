@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { postActionCard, decodeCard } from "@/lib/action-cards";
 import { createTripPaymentRequest } from "@/lib/trip-payments";
+import { rupeesToPaise, PAYMENT_FAILED_TITLE, PAYMENT_FAILED_BODY } from "@/lib/payments/amount";
 
 export async function dismissActionCard(messageId: string) {
   const message = await prisma.message.update({
@@ -34,17 +35,24 @@ export async function confirmPayment(
   const tripId = privateMessage.tripId;
   const privateData = decodeCard(privateMessage.cardData!);
   const currency = privateData.currency ?? "INR";
-  const amount = privateData.amount!;
+  // The card's amount is checked, not trusted: a missing or malformed value never reaches Pine Labs.
+  const amountMinor = rupeesToPaise(privateData.amount);
+  if (amountMinor == null) {
+    return { error: `${PAYMENT_FAILED_TITLE}. ${PAYMENT_FAILED_BODY}` };
+  }
+  const amount = amountMinor / 100;
 
   const result = await createTripPaymentRequest({
     tripId,
     purpose: privateData.title,
-    amountMinorUnits: Math.round(amount * 100),
+    amountMinorUnits: amountMinor,
     currency,
   });
 
   if (!result.ok) {
-    return { error: `Couldn't create the payment link: ${result.reason}` };
+    // The provider's own message is in Developer Evidence; the traveller gets a plain sentence.
+    console.error("[payments] card payment failed:", result.reason.slice(0, 200));
+    return { error: `${PAYMENT_FAILED_TITLE}. ${PAYMENT_FAILED_BODY}` };
   }
 
   await prisma.auditLog.create({

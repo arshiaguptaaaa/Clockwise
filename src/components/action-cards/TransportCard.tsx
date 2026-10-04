@@ -17,6 +17,7 @@ import {
   type PreparedVehicle,
 } from "@/app/transport-actions";
 import type { VehicleOption } from "@/lib/providers/mobility";
+import { uberDeeplink } from "@/lib/uber/deeplink";
 
 type Props = {
   tripId: string;
@@ -395,6 +396,22 @@ export function TransportCard({ tripId, messageId, status, title, context, trans
         })}
       </div>
       {notConnectedNote && <p className="mt-2 text-xs text-muted-foreground">{notConnectedNote}</p>}
+      {/* Level 1 always works: hand off to Uber with the trip filled in. Clockwise books and quotes nothing here. */}
+      {!planState.organiserConnected && (
+        <div className="mt-3" data-uber-handoff>
+          <p className="eyebrow">Uber</p>
+          <p className="mt-0.5 text-[13px]">{planState.plan.pickup} → {planState.plan.destination}</p>
+          <a
+            href={uberDeeplink({ pickup: { label: planState.plan.pickup, address: planState.plan.pickup }, dropoff: { label: planState.plan.destination, address: planState.plan.destination } })}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex min-h-11 items-center rounded-full bg-accent px-6 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground"
+          >
+            OPEN IN UBER
+          </a>
+          <p className="mt-1 text-[11px] text-muted-foreground">You&apos;ll confirm the ride in Uber.</p>
+        </div>
+      )}
       {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </ClockwiseActionCard>
   );

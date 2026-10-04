@@ -51,6 +51,7 @@ export function stageOf(status: ProposalStatus): DecisionStage {
 export function kindOf(payload: ProposalPayload, type: string): DecisionView["kind"] {
   if (payload.reschedule) return "reschedule";
   if (payload.place) return "place";
+  if (payload.split) return "payment";
   if (payload.stay || type === "BOOKING") return "stay";
   if (type === "UBER_RIDE") return "ride";
   return "other";
@@ -68,6 +69,7 @@ export function describeProposal(p: { title: string; type: string; payload: Prop
       because: r.because,
     };
   }
+  if (p.payload.split) return { kind: "payment", headline: p.title.replace(/^Payment needed:\s*/i, "").replace(/\?$/, ""), ask: p.title, change: null, because: null };
   if (p.payload.place) return { kind, headline: p.payload.place.name, ask: p.title, change: null, because: null };
   if (p.payload.stay) return { kind, headline: p.payload.stay.name, ask: p.title, change: null, because: null };
   return { kind, headline: p.title.replace(/\?$/, ""), ask: p.title, change: null, because: null };
