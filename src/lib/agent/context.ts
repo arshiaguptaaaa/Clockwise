@@ -7,6 +7,28 @@ import { formatDateRange } from "@/lib/format";
 import { decodeCard } from "@/lib/action-cards";
 import { excludePrivateSourced } from "@/lib/decision-visibility";
 import { privateStateLines } from "@/lib/personal-state";
+import { localNow, humanMoment } from "@/lib/when";
+import { loadPointers, pointerLine } from "@/lib/pointers/store";
+
+// What the model needs to resolve "tomorrow" and to know what is ALREADY in the Plan, and what has only been
+// PICKED UP from chat (which is not the Plan).
+async function planAndPointerLines(tripId: string): Promise<string> {
+  const now = localNow();
+  const [commitments, pointers, openIdeas] = await Promise.all([
+    prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" } }, orderBy: { targetTime: "asc" }, take: 25 }),
+    loadPointers(tripId),
+    prisma.tripSuggestion.findMany({ where: { tripId, status: { in: ["OPEN", "PROPOSED"] } }, select: { title: true, status: true } }),
+  ]);
+  const lines = [`Right now (trip's local clock, IST): ${humanMoment(`${now.date}T${now.time}`)} — today is ${now.date}. Resolve "today/tomorrow/tonight" from this; pass the words to tools and let them compute dates.`];
+  lines.push(
+    commitments.length
+      ? `CONFIRMED PLAN (what is actually in the Plan):\n${commitments.map((c) => `- ${c.name} · ${humanMoment(c.targetTime.toISOString().slice(0, 16))} · ${c.location}`).join("\n")}`
+      : "CONFIRMED PLAN: nothing yet."
+  );
+  if (pointers.length) lines.push(`PICKED UP from chat (memory only — NOT in the Plan, never present these as planned):\n${pointers.slice(0, 20).map((p) => `- ${pointerLine(p)}`).join("\n")}`);
+  if (openIdeas.length) lines.push(`Ideas Clockwise has offered (suggestions, not proposals): ${openIdeas.map((i) => `${i.title} [${i.status}]`).join("; ")}`);
+  return lines.join("\n");
+}
 
 export type ConversationTurn = {
   id: string;
@@ -192,7 +214,7 @@ export async function buildGroupContext(
     clockwiseUserId,
     actingUserId,
     actingUserName: actingUser?.user.name ?? "Unknown",
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId)),
+    stateSummary: `${buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId))}\n${await planAndPointerLines(tripId)}`,
     history,
   };
 }
@@ -290,7 +312,7 @@ export async function buildPrivateContext(
     clockwiseUserId,
     actingUserId,
     actingUserName,
-    stateSummary: buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId)),
+    stateSummary: `${buildSharedStateSummary(trip, pendingCardTitles, pendingDocTravellers.length, decisions, await getTripStay(tripId))}\n${await planAndPointerLines(tripId)}`,
     history,
     privateProfileSummary: profileLines.join("\n"),
   };

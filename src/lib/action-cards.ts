@@ -60,7 +60,25 @@ export type ActionCardData = {
     distanceMeters: number | null;
     latitude?: number | null;
     longitude?: number | null;
+    walkMinutes?: number | null;
+    // From a provider response only; absent when the provider supplied none.
+    category?: string | null;
+    hours?: string | null;
+    provider?: string | null;
+    mapsUrl?: string | null;
+    why?: string | null;
   }[];
+  // CLOCKWISE HAS AN IDEA: a suggestion (not a proposal, not the Plan). Rendered live from TripSuggestion.
+  idea?: {
+    suggestionId: string;
+    title: string;
+    why: string;
+    intro: string | null;
+    windowLabel: string;
+    steps: { kind: "place" | "food" | "return"; name: string; at: string | null; location: string | null; note: string | null; provider: string | null; providerPlaceId: string | null; lat: number | null; lng: number | null }[];
+  };
+  // Which providers answered a search, in order, shown quietly on the card ("Places · Geoapify").
+  sources?: string[];
   route?: {
     mode: string;
     fromLabel: string;

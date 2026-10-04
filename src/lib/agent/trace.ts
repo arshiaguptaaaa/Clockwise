@@ -164,7 +164,9 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
     case "PLACES_SEARCH_COMPLETED": {
       const when = p.retrievedAt ? new Date(String(p.retrievedAt)).toISOString().replace("T", " ").slice(0, 19) + " UTC" : "n/a";
       return {
-        understanding: `PLACES_SEARCH_COMPLETED — provider ${str(p.provider)}, query ${str(p.category ?? p.tool)}${p.diet ? ` (provider ${str(p.diet)} search)` : ""}, anchor ${p.anchorType ? `${str(p.anchorType)} (${str(p.anchor)})` : str(p.near)}, ${str(p.resultCount)} result(s), retrieved ${when}.`,
+        understanding: p.parsed
+          ? `PLACES_SEARCH_COMPLETED — asked "${str(p.request)}". Read as WHAT ${str((p.parsed as { what?: unknown }).what) || "—"} · CATEGORY ${str((p.parsed as { category?: unknown }).category)} · ANCHOR ${str((p.parsed as { anchor?: unknown }).anchor)}${(p.parsed as { anchorText?: unknown }).anchorText ? ` "${str((p.parsed as { anchorText?: unknown }).anchorText)}"` : ""} → resolved to ${str((p.anchor as { label?: unknown } | undefined)?.label)}. Chain: ${Array.isArray(p.chain) ? (p.chain as { step: string; provider: string; status: string }[]).map((c) => `${c.step} ${c.provider}:${c.status}`).join(", ") : "n/a"}. ${str(p.resultCount)} result(s), ${str(p.keywordMatches)} tagged/named for the dish${p.diet ? `, ${str(p.diet)} filter` : ""}, retrieved ${when}.${p.error ? ` Error: ${str(p.error)}` : ""}`
+          : `PLACES_SEARCH_COMPLETED — provider ${str(p.provider)}, query ${str(p.category ?? p.tool)}${p.diet ? ` (provider ${str(p.diet)} search)` : ""}, anchor ${p.anchorType ? `${str(p.anchorType)} (${str(p.anchor)})` : str(p.near)}, ${str(p.resultCount)} result(s), retrieved ${when}.`,
         state: "Places and ids come from the provider; the model only narrated them.",
       };
     }
@@ -206,7 +208,7 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
     case "PAYMENT_OBLIGATION_PAID":
       return { understanding: `PAYMENT_OBLIGATION_PAID — ${str(p.traveller)} paid ${(Number(p.amountMinor) / 100).toLocaleString("en-IN")} for "${str(p.title)}"; ${str(p.paidCount)} of ${str(p.of)} paid (${(Number(p.collectedMinor) / 100).toLocaleString("en-IN")} / ${(Number(p.totalMinor) / 100).toLocaleString("en-IN")}).`, state: `Applied once, from a status Clockwise fetched from Pine Labs (${str(p.verifiedBy)}). Only this traveller's obligation changed; Budget recorded their share.` };
     case "COMMITMENT_ADDED":
-      return { understanding: `COMMITMENT_ADDED — "${str(p.name)}" at ${str(p.at).replace("T", " ")}${p.location ? `, ${str(p.location)}` : ""}, picked in the calendar.`, state: "Shared Plan item; every traveller's clock is checked against it." };
+      return { understanding: `COMMITMENT_ADDED — "${str(p.name)}" at ${str(p.at).replace("T", " ")}${p.location ? `, ${str(p.location)}` : ""}, ${p.via === "chat" ? `added from chat by ${str(p.by)}; the saved row was read back before anything was acknowledged` : "picked in the calendar"}.`, state: "Shared Plan item; every traveller's clock is checked against it." };
     case "LOCATION_REQUESTED":
       return { understanding: "A traveller pressed USE MY LOCATION; the browser was asked for permission.", state: "Private. Nothing is tracked in the background and no coordinates are recorded here." };
     case "LOCATION_PERMISSION_GRANTED":
@@ -241,6 +243,20 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         state: `Journey updated; provider routes recomputed${p.routeKnown ? "" : " (route unknown — nothing was assumed)"}; Plan arrivals, Ready? and rendezvous refreshed.`,
       };
     }
+    case "COMMITMENT_CANCELLED":
+      return { understanding: `COMMITMENT_CANCELLED — "${str(p.commitment)}" (${str(p.at).replace("T", " ")}) taken out of the Plan${p.via === "proposal" ? " after the group agreed" : " by the organiser from chat"}. Read back from the database: status CANCELLED.`, state: "Canonical Plan changed; every traveller's view refreshed; group notified." };
+    case "POINTER_CAPTURED":
+      return { understanding: `PASSIVE POINTER — ${str(p.label)} ("${str(p.subject)}", ${str(p.kind)}), mentioned ${str(p.mentions)}×. Noticed in ordinary chat; no reply was sent.`, state: "Memory only. This is not a plan item, not a suggestion and not a proposal." };
+    case "POINTER_SUPPORTED":
+      return { understanding: `PASSIVE POINTER — "${str(p.subject)}" got agreement from another traveller (${str(p.supporters)} now). Interest, not permission.`, state: "Still memory only. Nothing was added to the Plan." };
+    case "POINTER_FORGOTTEN":
+      return { understanding: `A traveller removed what Clockwise had picked up ("${str(p.subject)}").`, state: "Memory edited by the person it was about." };
+    case "SUGGESTION_CREATED":
+      return { understanding: `SUGGESTION — Clockwise connected pointers into an idea: ${str(p.title)}. Window ${str((p.window as { start?: unknown } | undefined)?.start).replace("T", " ")} → ${str((p.window as { end?: unknown } | undefined)?.end).replace("T", " ")}.`, state: "Stage 2 of 4. Nothing is in the Plan and nobody has been asked to vote." };
+    case "SUGGESTION_PROPOSED":
+      return { understanding: `PROPOSAL — ${str(p.proposedBy)} pressed PROPOSE TO GROUP on "${str(p.title)}". The group is now being asked.`, state: "Stage 3 of 4. The Plan changes only after every vote and the organiser's confirmation." };
+    case "SUGGESTION_DISMISSED":
+      return { understanding: `"${str(p.title)}" was dismissed (NOT NOW).`, state: "Pointers stay as memory; the idea is not offered again right now." };
     case "COMMITMENT_RESCHEDULE_PROPOSED":
       return { understanding: `Clockwise proposed moving "${str(p.commitment)}" ${str(p.oldTime).replace("T", " ")} → ${str(p.proposedTime).replace("T", " ")} because ${str(p.because)}.`, state: "Group proposal opened. The Plan is unchanged until the group votes and the organiser confirms." };
     case "COMMITMENT_RESCHEDULED": {

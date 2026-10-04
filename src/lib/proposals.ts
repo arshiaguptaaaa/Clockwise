@@ -50,6 +50,10 @@ export type ProposalPayload = {
     // Group-safe reason: whose arrival, and when they can reach the stay.
     because: string;
   };
+  // OTHER proposals that take a shared commitment out of the Plan.
+  cancel?: { commitmentId: string; commitmentName: string; at: string };
+  // OTHER proposals that add a connected idea (TripSuggestion) to the Plan as ordinary plan items once agreed.
+  idea?: { suggestionId: string; title: string; steps: { name: string; at: string | null; location: string | null }[] };
   // OTHER proposals suggesting a real place (a Geoapify result). Agreeing to it
   // books nothing and schedules nothing: the group has only agreed on the place.
   place?: {

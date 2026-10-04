@@ -24,6 +24,9 @@ import { AddToPlan } from "@/components/plan/AddToPlan";
 import { Interlude } from "@/components/Interlude";
 import { INTERLUDES } from "@/lib/copy";
 import { pendingReschedules } from "@/lib/decisions";
+import { PickedUp } from "@/components/plan/PickedUp";
+import { loadPointers } from "@/lib/pointers/store";
+import { tripStory } from "@/lib/trip-story";
 
 export default async function PlanOverviewPage({
   params,
@@ -37,7 +40,7 @@ export default async function PlanOverviewPage({
   // trips show every stop — a real Delhi stop must not vanish.
   const middleStops = trip.isDemo ? stops.filter((s) => s.name !== "Delhi") : stops;
   const currentUserIdForPlan = await getCurrentUserId();
-  const [stay, rendezvous, agreed, pending] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId), agreedPlaces(tripId), pendingReschedules(tripId)]);
+  const [stay, rendezvous, agreed, pending, pickedUp, story, openIdeas] = await Promise.all([getTripStay(tripId), buildRendezvousView(tripId), agreedPlaces(tripId), pendingReschedules(tripId), loadPointers(tripId), tripStory(tripId).catch(() => null), prisma.tripSuggestion.findMany({ where: { tripId, status: { in: ["OPEN", "PROPOSED"] } }, select: { id: true, title: true, status: true } })]);
   const mapMarkers = [
     ...buildDestinationMarkers(stops),
     ...(stay?.status === "CONFIRMED" && stay.latitude != null && stay.longitude != null
@@ -101,6 +104,9 @@ export default async function PlanOverviewPage({
           </p>
         </figure>
       )}
+
+      {/* What Clockwise merely noticed sits ABOVE and apart from the confirmed plan, and says so. */}
+      <PickedUp pointers={pickedUp} story={story} ideas={openIdeas} tripId={tripId} viewerId={currentUserIdForPlan} />
 
       {/* The story first: who lands when, how long they take, and what that does to the plan. */}
       <DayTimeline view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />

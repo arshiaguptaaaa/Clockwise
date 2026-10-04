@@ -17,6 +17,7 @@ import { AROUND_CATEGORIES } from "@/lib/travel/around-categories";
 import { suggestPlaces, pointForSuggestion, reverseLocality, type SuggestOutcome, type SuggestedPlace, type Locality } from "@/lib/travel/locate";
 import { doesThisFit, type FitResult } from "@/lib/travel/fit";
 import { parseDiscoveryQuery } from "@/lib/travel/discovery-query";
+import { parsePlaceIntent } from "@/lib/travel/place-intent";
 import { easiestForEveryone, type MeetupResult, type MeetCandidate } from "@/lib/travel/meetup";
 
 async function member(tripId: string) {
@@ -362,7 +363,15 @@ export type DiscoverResponse =
 export async function discoverAction(tripId: string, query: string): Promise<DiscoverResponse> {
   const userId = await member(tripId);
   if (!userId) return { ok: false, error: "Sign in first." };
-  const q = parseDiscoveryQuery(query.slice(0, 120));
+  let q = parseDiscoveryQuery(query.slice(0, 120));
+  // A dish or cuisine ("dosa places in Bangalore") has no category word of its own: read it with the same intent
+  // parser the chat uses, so the PLACE comes from what was typed and the search is for restaurants there.
+  const intent = parsePlaceIntent(query.slice(0, 120));
+  let dishNote: string | null = null;
+  if (intent.keyword) {
+    q = { category: intent.category ?? intent.keyword.category, place: intent.anchor.kind === "explicit" ? intent.anchor.text : q.place && !/places?|spots?/i.test(q.place) ? q.place : null };
+    dishNote = `Searching ${q.category === "cafe" ? "cafés" : "restaurants"}${q.place ? ` in ${q.place}` : ""} for ${intent.keyword.word}. Ask Clockwise in the Trip Room to match the dish itself against each place's tags.`;
+  }
   if (!q.category && !q.place) return { ok: false, error: "Try something like \"coffee in Gurgaon\"." };
   let where: { lat: number; lng: number; label: string; provider: string } | null = null;
   let note: string | null = null;
@@ -376,8 +385,8 @@ export async function discoverAction(tripId: string, query: string): Promise<Dis
     const pt = await pointForSuggestion(pick.label, pick.lat != null && pick.lng != null ? { lat: pick.lat, lng: pick.lng } : null, { tripId, userId });
     if (!pt) return { ok: false, error: `I couldn't place "${pick.label}" on the map.` };
     where = { lat: pt.point.lat, lng: pt.point.lng, label: pick.label, provider: sug.provider };
-    note = sug.note;
+    note = [dishNote, sug.note].filter(Boolean).join(" ") || null;
     await personalEvent(tripId, userId, "ANYWHERE_RESOLVED", { label: pick.label.slice(0, 80), provider: sug.provider, via: "search", category: q.category });
   }
-  return { ok: true, category: q.category && q.category in AROUND_CATEGORIES ? q.category : null, where, note };
+  return { ok: true, category: q.category && q.category in AROUND_CATEGORIES ? q.category : null, where, note: where ? note : dishNote ?? note };
 }

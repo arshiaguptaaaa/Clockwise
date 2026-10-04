@@ -12,6 +12,8 @@ import { CollectionCard } from "@/components/payments/CollectionCard";
 import type { CollectionView } from "@/lib/payments/obligations";
 import { ActionCardMessage } from "@/components/action-cards/ActionCardMessage";
 import type { CardPerson } from "@/components/action-cards/ClockwiseActionCard";
+import { IdeaCard, type IdeaView } from "@/components/ideas/IdeaCard";
+import { isAgentRequest } from "@/lib/mentions";
 
 export type ChatThreadMessage = {
   id: string;
@@ -44,6 +46,7 @@ export function ChatThread({
   suggestions,
   header,
   collections = [],
+  ideas = [],
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
@@ -65,6 +68,8 @@ export function ChatThread({
   header?: React.ReactNode;
   // Live group-payment state; a payment card in the thread renders from this, never from its stale snapshot.
   collections?: CollectionView[];
+  // Live suggestion state keyed by id: the IDEA card renders from this, never from its first snapshot.
+  ideas?: IdeaView[];
 }) {
   // Only covers the fast DB write — the composer is disabled for
   // milliseconds, not for however long Gemini takes.
@@ -97,7 +102,7 @@ export function ChatThread({
 
   // Urgent (event-handler) update: the indicator appears the instant Send is pressed.
   function noticeSend(content: string) {
-    if (channel === "PRIVATE" || /\bclockwise\b/i.test(content)) setAwaitingClockwise(true);
+    if (channel === "PRIVATE" || /\bclockwise\b/i.test(content) || isAgentRequest(content)) setAwaitingClockwise(true);
   }
 
   useEffect(() => {
@@ -131,6 +136,11 @@ export function ChatThread({
           const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
           const grouped = !message.isClockwise && plain(message) && plain(prev) && prev!.senderId === message.senderId && message.timestamp.getTime() - prev!.timestamp.getTime() < 5 * 60_000;
           const collectionId = message.cardData && message.cardData.includes('"collection":true') ? (/"collectionId":"([^"]+)"/.exec(message.cardData)?.[1] ?? null) : null;
+          if (message.cardType === "IDEA" && message.cardData) {
+            const sid = /"suggestionId":"([^"]+)"/.exec(message.cardData)?.[1];
+            const idea = ideas.find((x) => x.suggestionId === sid);
+            return idea ? <IdeaCard key={message.id} idea={idea} /> : null;
+          }
           if (collectionId) {
             const c = collections.find((x) => x.id === collectionId);
             return c ? <CollectionCard key={message.id} c={c} /> : null;
@@ -176,6 +186,7 @@ export function ChatThread({
               reactable={channel === "GROUP"}
               viewerId={currentUserId}
               grouped={grouped}
+              people={roster}
             />
           );
         })}
@@ -195,6 +206,8 @@ export function ChatThread({
         action={handleSend}
         placeholder={placeholder}
         onSubmitStart={noticeSend}
+        mentionPeople={channel === "GROUP" ? roster : undefined}
+        selfId={currentUserId}
         disabled={isSending}
         suggestions={suggestions}
       />

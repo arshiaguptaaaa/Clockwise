@@ -7,6 +7,7 @@ import { Paperclip, ArrowUp, Mic, Square, Loader2, X } from "lucide-react";
 import { uploadAttachment, deleteAttachment } from "@/app/attachment-actions";
 import { recordingToWav } from "@/lib/audio/to-wav";
 import { DEFAULT_SPEECH_LANGUAGE } from "@/lib/speech/types";
+import { mentionOptions, type MentionOption } from "@/lib/mentions";
 
 function SendButton({ externallyDisabled }: { externallyDisabled?: boolean }) {
   const { pending } = useFormStatus();
@@ -42,6 +43,8 @@ export function Composer({
   disabled = false,
   suggestions,
   onSubmitStart,
+  mentionPeople,
+  selfId,
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
@@ -58,6 +61,9 @@ export function Composer({
   // traveller's first private message. Clicking one fills the input rather
   // than auto-sending, so they can still edit before it goes to Clockwise.
   suggestions?: string[];
+  // The trip's travellers, for the @ menu (Trip Room only). Mentions say who a message is FOR; they don't switch Clockwise on or off.
+  mentionPeople?: { id: string; name: string }[];
+  selfId?: string | null;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -81,6 +87,37 @@ export function Composer({
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+
+  // @ menu: the token being typed right before the caret ("@rid"), the options it matches, and the highlighted row.
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const options: MentionOption[] = mention && mentionPeople ? mentionOptions(mention.query, mentionPeople.map((p) => ({ userId: p.id, name: p.name })), selfId) : [];
+
+  function detectMention(value: string, caret: number) {
+    if (!mentionPeople) return;
+    const before = value.slice(0, caret);
+    const m = /(^|\s)@([\p{L}'’-]*)$/u.exec(before);
+    if (!m) {
+      setMention(null);
+      return;
+    }
+    setMention({ start: caret - m[2].length - 1, query: m[2] });
+    setMentionIdx(0);
+  }
+
+  function pickMention(o: MentionOption) {
+    if (!mention) return;
+    const el = inputRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const next = `${text.slice(0, mention.start)}@${o.label} ${text.slice(caret)}`;
+    setText(next);
+    setMention(null);
+    const pos = mention.start + o.label.length + 2;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  }
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -362,7 +399,7 @@ export function Composer({
             setText("");
             await action(formData);
           }}
-          className="flex items-center gap-1.5 px-3 py-2"
+          className="relative flex items-center gap-1.5 px-3 py-2"
         >
           <button
             type="button"
@@ -380,11 +417,49 @@ export function Composer({
             className="hidden"
             onChange={handleFilePicked}
           />
+          {mention && options.length > 0 && (
+            <ul role="listbox" aria-label="Mention someone" data-mention-menu className="absolute inset-x-3 bottom-full z-20 mb-1 max-h-60 overflow-y-auto rounded-2xl border border-border bg-surface py-1 shadow-lg">
+              {options.map((o, i) => (
+                <li key={o.id} role="option" aria-selected={i === mentionIdx}>
+                  <button
+                    type="button"
+                    data-mention-option={o.label}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pickMention(o)}
+                    className={`flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 text-left text-[15px] ${i === mentionIdx ? "bg-accent-tint" : ""}`}
+                  >
+                    <span className={`flex size-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold ${o.kind === "clockwise" ? "bg-accent text-accent-foreground" : "bg-surface-muted"}`}>{o.kind === "clockwise" ? "✦" : o.kind === "all" ? "@" : o.label[0]}</span>
+                    <span className="font-semibold">{o.label}</span>
+                    <span className="truncate text-[12px] text-muted-foreground">{o.hint}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <input
             ref={inputRef}
             name="content"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            onKeyDown={(e) => {
+              if (!mention || options.length === 0) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setMentionIdx((i) => (i + 1) % options.length);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionIdx((i) => (i - 1 + options.length) % options.length);
+              } else if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                pickMention(options[mentionIdx] ?? options[0]);
+              } else if (e.key === "Escape") {
+                setMention(null);
+              }
+            }}
+            onBlur={() => setTimeout(() => setMention(null), 120)}
             autoComplete="off"
             placeholder={placeholder}
             disabled={disabled}

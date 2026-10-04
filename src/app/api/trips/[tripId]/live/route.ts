@@ -42,6 +42,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ tripId:
       (SELECT COUNT(*) FROM "PaymentObligation" WHERE "tripId" = ${tripId} AND "status" = 'PAID'),
       (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "PaymentObligation" WHERE "tripId" = ${tripId}),
       (SELECT COUNT(*) FROM "Notification" WHERE "tripId" = ${tripId} AND "userId" = ${me}),
+      (SELECT COALESCE(md5(string_agg("id" || "targetTime"::text || "status"::text || "location", ',' ORDER BY "id")), '0') FROM "Commitment" WHERE "tripId" = ${tripId}),
+      (SELECT COUNT(*) FROM "TripPointer" WHERE "tripId" = ${tripId}),
+      (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "TripPointer" WHERE "tripId" = ${tripId}),
+      (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "TripSuggestion" WHERE "tripId" = ${tripId}),
       (SELECT COUNT(*) FROM "TravellerJourney" WHERE "tripId" = ${tripId}),
       (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM MAX("updatedAt")) * 1000), 0) FROM "TravellerJourney" WHERE "tripId" = ${tripId})
     ) AS sig`;

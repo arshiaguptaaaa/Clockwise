@@ -103,7 +103,7 @@ export const toAroundPlace = (r: Raw): AroundPlace => ({
   retrievedAt: r.retrievedAt,
 });
 
-async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<AroundPlace[]> {
+export async function withWalking(anchor: LatLng, places: AroundPlace[]): Promise<AroundPlace[]> {
   const top = places.slice(0, 12);
   const timed = await Promise.all(
     top.map(async (p) => {

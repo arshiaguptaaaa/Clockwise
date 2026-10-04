@@ -20,7 +20,7 @@ export default async function PlanTravellersPage({
   const [trip, pendingInvites, commitments, escalationEvents, readinessRows, currentUserId] = await Promise.all([
     getTripById(tripId),
     prisma.invite.findMany({ where: { tripId, status: "PENDING" }, orderBy: { createdAt: "asc" } }),
-    prisma.commitment.findMany({ where: { tripId } }),
+    prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" } } }),
     prisma.escalationEvent.findMany({ where: { tripId } }),
     currentReadinessRows(tripId),
     getCurrentUserId(),

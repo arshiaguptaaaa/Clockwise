@@ -10,6 +10,7 @@ import {
   MapPin,
   Route,
   CloudSun,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { CardType } from "@prisma/client";
@@ -29,4 +30,5 @@ export const CARD_VISUALS: Record<
   PLACES: { icon: MapPin, tint: "accent", label: "Places" },
   ROUTE: { icon: Route, tint: "accent", label: "Route" },
   WEATHER: { icon: CloudSun, tint: "accent", label: "Weather" },
+  IDEA: { icon: Sparkles, tint: "accent", label: "Idea" },
 };

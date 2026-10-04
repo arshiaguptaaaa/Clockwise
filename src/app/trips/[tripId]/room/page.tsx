@@ -13,6 +13,7 @@ import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
 import { describeProposal } from "@/lib/decisions";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
+import type { IdeaView } from "@/components/ideas/IdeaCard";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -106,6 +107,19 @@ export default async function TripRoomChatPage({
   const days = trip.coreStartDate && trip.coreEndDate ? Math.round((trip.coreEndDate.getTime() - trip.coreStartDate.getTime()) / 86_400_000) + 1 : null;
   const people = await whosHere(trip.id, trip.members);
   const collections = await collectionsForTrip(trip.id, currentUserId);
+  // Ideas render from their LIVE row (OPEN / PROPOSED / DISMISSED / CONFIRMED), not from the card's first snapshot.
+  const suggestionRows = await prisma.tripSuggestion.findMany({ where: { tripId: trip.id } });
+  const introBySuggestion = new Map<string, string | null>();
+  for (const m of messages) {
+    if (m.cardType !== "IDEA" || !m.cardData) continue;
+    try {
+      const d = (JSON.parse(m.cardData) as { idea?: { suggestionId: string; intro: string | null } }).idea;
+      if (d) introBySuggestion.set(d.suggestionId, d.intro ?? null);
+    } catch {
+      // unreadable card: shown without its intro
+    }
+  }
+  const ideas: IdeaView[] = suggestionRows.map((s) => ({ suggestionId: s.id, title: s.title, why: s.why, intro: introBySuggestion.get(s.id) ?? null, windowLabel: "", steps: JSON.parse(s.steps), status: s.status }));
   const late = people.find((p) => p.tone === "late");
   const voiceLine = late ? `${late.name.split(" ")[0]}'s running late. I'll keep everyone together.` : "Everyone's on a different clock. I'll keep them together.";
   const header = (
@@ -155,6 +169,7 @@ export default async function TripRoomChatPage({
       }))}
       roster={roster}
       collections={collections}
+      ideas={ideas}
       currentUserId={currentUserId}
       organiserId={trip.createdBy}
       organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"}

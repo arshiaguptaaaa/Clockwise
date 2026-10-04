@@ -114,7 +114,7 @@ export async function buildRendezvousView(tripId: string): Promise<RendezvousVie
     confirmedStay(tripId),
     prisma.travellerJourney.findMany({ where: { tripId, status: "CONFIRMED" } }),
     prisma.tripMember.findMany({ where: { tripId }, include: { user: { select: { id: true, name: true } } } }),
-    prisma.commitment.findMany({ where: { tripId }, orderBy: { targetTime: "asc" } }),
+    prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" } }, orderBy: { targetTime: "asc" } }),
   ]);
   const nameOf = new Map(members.map((m) => [m.userId, m.user.name]));
   const clocks: TravellerClock[] = journeys.map((j) => {

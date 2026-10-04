@@ -342,6 +342,8 @@ export async function executeConfirmedProposal(proposal: Proposal): Promise<Exec
     case "OTHER": {
       const decoded = decodeProposalPayload(proposal.payload);
       if (decoded.reschedule) return executeReschedule(proposal);
+      if (decoded.cancel) return executeCancel(proposal);
+      if (decoded.idea) return executeIdea(proposal);
       if (decoded.place) return agreeOnPlace({ id: proposal.id, tripId: proposal.tripId }, decoded.place);
       return { ok: false, error: "Execution for this proposal type isn't implemented yet." };
     }
@@ -398,4 +400,40 @@ async function executeReschedule(proposal: Proposal): Promise<ExecutionResult> {
   const members = (await prisma.tripMember.findMany({ where: { tripId: proposal.tripId }, select: { userId: true } })).map((m) => m.userId);
   await notify({ tripId: proposal.tripId, recipientIds: members, severity: "IMPORTANT", kind: "COMMITMENT_RESCHEDULED", title: `${c.name} moved to ${timeLabel(r.newTime)}`, body: `It was ${timeLabel(current)}. The group approved the change.`, href: `/trips/${proposal.tripId}/plan` });
   return { ok: true, summary: `Moved ${c.name} from ${timeLabel(current)} to ${timeLabel(r.newTime)}.` };
+}
+
+// The approved removal of a shared commitment. Soft: the row stays (CANCELLED) so history still points at it.
+async function executeCancel(proposal: Proposal): Promise<ExecutionResult> {
+  const c = decodeProposalPayload(proposal.payload).cancel;
+  if (!c) return { ok: false, error: "No cancellation in this proposal." };
+  const row = await prisma.commitment.findUnique({ where: { id: c.commitmentId } });
+  if (!row || row.tripId !== proposal.tripId) return { ok: false, error: "That commitment no longer exists." };
+  if (row.status === "CANCELLED") return { ok: true, summary: `${row.name} was already cancelled.` };
+  await prisma.commitment.update({ where: { id: row.id }, data: { status: "CANCELLED" } });
+  const stored = await prisma.commitment.findUnique({ where: { id: row.id } });
+  if (stored?.status !== "CANCELLED") return { ok: false, error: "The Plan didn't change. Try confirming again." };
+  await prisma.tripEvent.create({
+    data: { tripId: proposal.tripId, kind: "COMMITMENT_CANCELLED", scope: "GROUP", actorUserId: proposal.organiserConfirmedBy ?? null, sourceChannel: "SYSTEM", confidence: "HIGH", payload: JSON.stringify({ commitment: row.name, commitmentId: row.id, at: c.at, proposalId: proposal.id, via: "proposal", readBack: true }), propagation: JSON.stringify(["plan", "rendezvous", "notifications"]) },
+  });
+  const members = (await prisma.tripMember.findMany({ where: { tripId: proposal.tripId }, select: { userId: true } })).map((m) => m.userId);
+  await notify({ tripId: proposal.tripId, recipientIds: members, severity: "IMPORTANT", kind: "COMMITMENT_CANCELLED", title: `${row.name} cancelled`, body: "The group agreed to take it out of the Plan.", href: `/trips/${proposal.tripId}/plan` });
+  return { ok: true, summary: `Cancelled ${row.name}.` };
+}
+
+// A connected idea the group agreed to: its timed steps become ordinary Plan items. Until this runs the idea is
+// only a suggestion/proposal; nothing in the Plan changed.
+async function executeIdea(proposal: Proposal): Promise<ExecutionResult> {
+  const idea = decodeProposalPayload(proposal.payload).idea;
+  if (!idea) return { ok: false, error: "No idea in this proposal." };
+  const { createCommitmentChecked } = await import("./plan/apply");
+  const made: string[] = [];
+  for (const step of idea.steps) {
+    if (!step.at) continue;
+    const r = await createCommitmentChecked({ tripId: proposal.tripId, actorId: proposal.organiserConfirmedBy ?? proposal.createdBy, name: step.name, local: step.at, location: step.location ?? step.name, participantIds: null });
+    if (!r.ok) return { ok: false, error: r.reply };
+    made.push(step.name);
+  }
+  await prisma.tripSuggestion.updateMany({ where: { id: idea.suggestionId }, data: { status: "CONFIRMED" } });
+  await prisma.tripPointer.updateMany({ where: { tripId: proposal.tripId, status: "PROPOSED" }, data: { status: "DONE" } });
+  return { ok: true, summary: `Added to the Plan: ${made.join(" → ")}.` };
 }

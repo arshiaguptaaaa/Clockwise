@@ -76,14 +76,27 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
             <p className="text-xs text-muted-foreground">No results found.</p>
           )}
           {data.places.map((p, i) => (
-            <div key={i} className="rounded-lg border border-border px-2.5 py-2 text-xs">
+            <div key={i} className="rounded-lg border border-border px-2.5 py-2 text-xs" data-place-card>
               <p className="font-medium text-foreground">{p.name}</p>
+              {(p.category || p.hours) && (
+                <p className="mt-0.5 text-muted-foreground">
+                  {p.category}
+                  {p.category && p.hours && " · "}
+                  {p.hours && <span className={p.hours.startsWith("Open") ? "text-success" : ""}>{p.hours}</span>}
+                </p>
+              )}
               <p className="mt-0.5 text-muted-foreground">
                 {(p as { walkMinutes?: number | null }).walkMinutes != null && <span className="font-semibold text-foreground">{(p as { walkMinutes?: number | null }).walkMinutes} min walk{(p.formattedAddress || formatDistance(p.distanceMeters)) && " · "}</span>}
                 {(p as { walkMinutes?: number | null }).walkMinutes == null && formatDistance(p.distanceMeters) && `${formatDistance(p.distanceMeters)} away`}
                 {(p as { walkMinutes?: number | null }).walkMinutes == null && formatDistance(p.distanceMeters) && p.formattedAddress && " · "}
                 {p.formattedAddress}
               </p>
+              {p.why && <p className="mt-1 text-[11.5px] font-medium text-accent-strong">WHY THIS WORKS ✦ {p.why}</p>}
+              {p.mapsUrl && (
+                <a href={p.mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[11.5px] underline underline-offset-4">
+                  Open in Maps{p.provider ? ` · ${p.provider === "geoapify" ? "Geoapify" : p.provider}` : ""}
+                </a>
+              )}
             </div>
           ))}
         </div>
@@ -92,7 +105,11 @@ export function TravelResultCard({ cardType, data }: { cardType: CardType; data:
             <TripMapLoader markers={placeMarkers} heightClassName="h-48" />
           </div>
         )}
-        {sourceNote && <p className="mt-2 text-[11px] text-muted-foreground">{sourceNote}</p>}
+        {data.sources && data.sources.length > 0 ? (
+          <p className="mt-2 text-[11px] text-muted-foreground" data-sources>{data.sources.join(" · ")}{data.retrievedAt ? ` · ${new Date(data.retrievedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
+        ) : (
+          sourceNote && <p className="mt-2 text-[11px] text-muted-foreground">{sourceNote}</p>
+        )}
       </ClockwiseActionCard>
     );
   }

@@ -190,7 +190,7 @@ export async function recomputeTravellerReadiness(
   const now = new Date();
   const horizon = new Date(now.getTime() - 90 * 60_000);
   const [commitments, location, user, existing] = await Promise.all([
-    prisma.commitment.findMany({ where: { tripId, targetTime: { gt: horizon } }, orderBy: { targetTime: "asc" } }),
+    prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" }, targetTime: { gt: horizon } }, orderBy: { targetTime: "asc" } }),
     prisma.travellerLocation.findUnique({ where: { tripId_userId: { tripId, userId } } }),
     prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
     prisma.travellerReadiness.findMany({ where: { tripId, userId } }),
@@ -302,7 +302,7 @@ export async function liveLocationOffer(tripId: string, userId: string) {
   const now = Date.now();
   const [upcoming, location] = await Promise.all([
     prisma.commitment.findMany({
-      where: { tripId, targetTime: { gt: new Date(now - 60 * 60_000), lt: new Date(now + 3 * 60 * 60_000) } },
+      where: { tripId, status: { not: "CANCELLED" }, targetTime: { gt: new Date(now - 60 * 60_000), lt: new Date(now + 3 * 60 * 60_000) } },
       orderBy: { targetTime: "asc" },
     }),
     prisma.travellerLocation.findUnique({ where: { tripId_userId: { tripId, userId } } }),

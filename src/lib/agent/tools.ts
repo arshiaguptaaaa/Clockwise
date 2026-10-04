@@ -43,6 +43,11 @@ import { getPrefs } from "@/lib/traveller/vibe";
 import { savedOverlaps, savedByEveryone } from "@/lib/travel/saved-overlap";
 import { tripWindow } from "@/lib/stays";
 import { recordPersonalConstraint, checkFeasibility, parseHHMM, groupSafeLine, type ConstraintKind } from "@/lib/personal-state";
+import { createCommitmentChecked, moveCommitmentChecked, cancelCommitmentChecked, buildPlanCtx } from "@/lib/plan/apply";
+import { matchCommitment } from "@/lib/plan/parse";
+import { parseDay, parseTime, localNow, stripMatched } from "@/lib/when";
+import { recordPointer, rememberDiet } from "@/lib/pointers/store";
+import { buildIdea, tripDayWindow } from "@/lib/ideas";
 import { TripUnderstandingSchema, resolveDecisionFields, resolveAffectedUserIds } from "./decision-schema";
 import type { LatLng, TravelMode } from "@/lib/travel/types";
 import type { AgentContext } from "./context";
@@ -124,21 +129,66 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   {
     name: "create_commitment",
     description:
-      "Log a shared or personal commitment (a time-bound plan the group or one traveller needs to keep) into structured trip state.",
+      "Add a shared or personal plan item to the Plan (dinner, a visit, coffee). The day and time are read in CODE from the words you pass, so pass them as the traveller said them: day = 'tomorrow' / 'saturday' / '12 Dec' / '2026-12-12', time = '8 PM' / '20:00' / '5'. Do NOT compute a date yourself. The result states what was actually saved and read back from the database; speak only from it. If it reports it could not update the Plan, say so — never say it was added.",
     parameters: {
       type: "object",
       properties: {
-        name: { type: "string" },
-        targetTimeIso: { type: "string", description: "ISO timestamp for when this needs to happen" },
-        location: { type: "string" },
-        participantNames: {
-          type: "array",
-          items: { type: "string" },
-          description: "Who this applies to; omit for a personal commitment for the current traveller only",
-        },
+        name: { type: "string", description: "Short title, e.g. 'Birthday dinner'" },
+        day: { type: "string", description: "The day as said: 'tomorrow', 'saturday', '12 Dec', '2026-12-12'." },
+        time: { type: "string", description: "The time as said: '8 PM', '20:00', 'at 5'." },
+        location: { type: "string", description: "Where, if stated" },
+        participantNames: { type: "array", items: { type: "string" }, description: "Only if the plan is for specific people ('Ridhima and I'); omit for a plan for the whole group." },
       },
-      required: ["name", "targetTimeIso", "location"],
+      required: ["name", "day", "time"],
     },
+  },
+  {
+    name: "move_commitment",
+    description:
+      "Change the time (and/or day) of a plan item that is already in the Plan: 'move birthday dinner to 10', 'let's do dinner at 9 instead'. The tool applies it only if the speaker has the authority (the organiser, or their own personal item); otherwise it opens a group proposal and the Plan stays unchanged. Speak ONLY from its result.",
+    parameters: {
+      type: "object",
+      properties: {
+        commitmentName: { type: "string", description: "Which plan item, as the traveller named it" },
+        newTime: { type: "string", description: "New time as said: '10', '9 PM', '21:30'" },
+        newDay: { type: "string", description: "Only if a different day was named" },
+      },
+      required: ["commitmentName", "newTime"],
+    },
+  },
+  {
+    name: "cancel_commitment",
+    description: "Remove a plan item from the Plan: 'cancel tomorrow's breakfast'. Organiser (or the item's own owner) only; for a shared item anyone else triggers a group proposal instead. Speak ONLY from its result.",
+    parameters: {
+      type: "object",
+      properties: { commitmentName: { type: "string", description: "Which plan item, as named, e.g. 'tomorrow's breakfast'" } },
+      required: ["commitmentName"],
+    },
+  },
+  {
+    name: "note_trip_pointer",
+    description:
+      "QUIETLY remember something a traveller said about THEMSELVES or plainly wants, without replying: a diet ('I'm vegetarian'), something they want to do or eat ('I want dosa', 'Cubbon Park also pls'), something they love, a must-have ('X is non-negotiable'), or a window to keep free. This is memory only — it NEVER adds anything to the Plan. Do not use it for passing moods, jokes, or anything about another person. Do not infer anything that wasn't said.",
+    parameters: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["DIET", "LIKE", "WANT", "MUST", "AVOID", "WINDOW"] },
+        subject: { type: "string", description: "The thing, lower case, e.g. 'dosa', 'cubbon park', 'vegetarian', 'saturday evening'" },
+      },
+      required: ["kind", "subject"],
+    },
+  },
+  {
+    name: "build_idea",
+    description:
+      "Connect what the group has said they want (picked-up pointers) with a real free stretch of the Plan and real provider places into ONE suggestion, posted as a 'CLOCKWISE HAS AN IDEA' card with PROPOSE TO GROUP / NOT NOW buttons. Use for 'what should we do Saturday afternoon?'. It changes nothing in the Plan and asks nobody to vote. Pass the day/part-of-day as said.",
+    parameters: { type: "object", properties: { when: { type: "string", description: "e.g. 'Saturday afternoon'" } }, required: ["when"] },
+  },
+  {
+    name: "find_places",
+    description:
+      "Find REAL places for a request in the traveller's own words — 'dosa places in Bengaluru', 'vegetarian dosa in Indiranagar', 'coffee near our hotel', 'things to do around Cubbon Park', 'shopping near where Ridhima lands'. Pass the request VERBATIM: the place, dish and anchor are read from it in code, and an explicit place in the words always wins. Posts a card of provider-sourced places. Prefer this over search_nearby for any place request.",
+    parameters: { type: "object", properties: { request: { type: "string", description: "The traveller's request, verbatim" } }, required: ["request"] },
   },
   {
     name: "report_delay",
@@ -549,7 +599,9 @@ export const AGENT_TOOLS: AgentToolSchema[] = [
   },
 ];
 
-export type ToolExecutionResult = { output: string; posted?: boolean };
+// finalReply: the exact, truthful sentence to send as Clockwise's answer when a state change was attempted (so a
+// model can never claim success the database didn't confirm).
+export type ToolExecutionResult = { output: string; posted?: boolean; finalReply?: string };
 
 export async function executeTool(
   name: string,
@@ -567,6 +619,16 @@ export async function executeTool(
       return preparePayment(input, ctx);
     case "create_commitment":
       return createCommitment(input, ctx);
+    case "move_commitment":
+      return moveCommitmentTool(input, ctx);
+    case "cancel_commitment":
+      return cancelCommitmentTool(input, ctx);
+    case "note_trip_pointer":
+      return noteTripPointerTool(input, ctx);
+    case "build_idea":
+      return buildIdeaTool(input, ctx);
+    case "find_places":
+      return findPlacesTool(input, ctx);
     case "report_delay":
       return reportDelay(input, ctx);
     case "record_trip_understanding":
@@ -839,32 +901,80 @@ async function reportDelay(input: Record<string, unknown>, ctx: AgentContext): P
   };
 }
 
+const lastHumanId = (ctx: AgentContext) => [...ctx.history].reverse().find((h) => !h.isClockwise)?.id ?? null;
+
 async function createCommitment(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
-  const name = input.name as string;
-  const targetTime = new Date(input.targetTimeIso as string);
-  const location = input.location as string;
-  const participantNames = (input.participantNames as string[] | undefined) ?? [ctx.actingUserName];
-
-  if (isNaN(targetTime.getTime())) {
-    return { output: "The target time given was not a valid date/time — ask for clarification." };
+  const name = String(input.name ?? "").trim();
+  const now = localNow();
+  const win = await tripDayWindow(ctx.trip.id);
+  let local: string | null = null;
+  if (typeof input.targetTimeIso === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(input.targetTimeIso)) local = input.targetTimeIso.slice(0, 16);
+  else {
+    const day = parseDay(String(input.day ?? ""), now, win);
+    const time = parseTime(String(input.time ?? ""), name);
+    if (day && time) local = `${day.date}T${time.time}`;
   }
+  if (!local) return { output: "I couldn't work out the exact day and time, so nothing was added. Ask for the day and time in one short question.", finalReply: "What day and time should I put that in the Plan for? I haven't added anything yet." };
+  const participantNames = (input.participantNames as string[] | undefined) ?? [];
+  const participantIds = participantNames.length ? resolveTravellerIds(participantNames, ctx) : null;
+  const plan = await buildPlanCtx(ctx.trip.id, ctx.actingUserId);
+  const r = await createCommitmentChecked({ tripId: ctx.trip.id, actorId: ctx.actingUserId, name: name.replace(/^./, (c) => c.toUpperCase()), local, location: String(input.location ?? "").trim() || plan.defaultLocation, participantIds: participantIds && participantIds.length ? participantIds : null, sourceMessageId: lastHumanId(ctx) });
+  return { output: `${r.reply} (Verified by reading the saved row back. Say this and nothing different.)`, finalReply: r.reply };
+}
 
-  const participantIds =
-    participantNames.length > 0
-      ? resolveTravellerIds(participantNames, ctx)
-      : [ctx.actingUserId];
+async function moveCommitmentTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const plan = await buildPlanCtx(ctx.trip.id, ctx.actingUserId);
+  const { hit, candidates } = matchCommitment(String(input.commitmentName ?? ""), plan.commitments);
+  if (!hit) {
+    const reply = candidates.length > 1 ? `Which one should I move: ${candidates.map((c) => c.name).join(" or ")}?` : `I can't find "${String(input.commitmentName ?? "").trim()}" in the Plan, so nothing was changed.`;
+    return { output: reply, finalReply: reply };
+  }
+  const day = input.newDay ? parseDay(String(input.newDay), plan.now, plan.window) : null;
+  const rawTime = String(input.newTime ?? "");
+  const time = parseTime(/^\d{1,2}([:.]\d{2})?$/.test(rawTime.trim()) ? `at ${rawTime.trim()}` : rawTime, hit.name);
+  if (!time) return { output: "Couldn't read the new time.", finalReply: `What time should ${hit.name} move to? I haven't changed anything.` };
+  const r = await moveCommitmentChecked({ tripId: ctx.trip.id, actorId: ctx.actingUserId, commitmentId: hit.id, local: `${day?.date ?? hit.target.slice(0, 10)}T${time.time}`, sourceMessageId: lastHumanId(ctx) });
+  return { output: `${r.reply} (Verified. Say this and nothing different.)`, finalReply: r.reply };
+}
 
-  await prisma.commitment.create({
-    data: {
-      tripId: ctx.trip.id,
-      name,
-      targetTime,
-      location,
-      participantIds: JSON.stringify(participantIds.length > 0 ? participantIds : [ctx.actingUserId]),
-    },
-  });
+async function cancelCommitmentTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const plan = await buildPlanCtx(ctx.trip.id, ctx.actingUserId);
+  const phrase = String(input.commitmentName ?? "");
+  const day = parseDay(phrase, plan.now, plan.window);
+  const { hit, candidates } = matchCommitment(stripMatched(phrase, day?.matched), plan.commitments, day?.date);
+  if (!hit) {
+    const reply = candidates.length > 1 ? `Which one should I cancel: ${candidates.map((c) => c.name).join(" or ")}?` : `I can't find "${phrase.trim()}" in the Plan, so nothing was cancelled.`;
+    return { output: reply, finalReply: reply };
+  }
+  const r = await cancelCommitmentChecked({ tripId: ctx.trip.id, actorId: ctx.actingUserId, commitmentId: hit.id, sourceMessageId: lastHumanId(ctx) });
+  return { output: `${r.reply} (Verified. Say this and nothing different.)`, finalReply: r.reply };
+}
 
-  return { output: `Logged commitment "${name}" at ${location}, target time ${targetTime.toISOString()}.` };
+const POINTER_VERB: Record<string, string> = { DIET: "is", LIKE: "likes", WANT: "wants", MUST: "says a must:", AVOID: "isn't keen on", WINDOW: "wants to keep open:" };
+async function noteTripPointerTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  if (ctx.mode !== "GROUP") return { output: "Pointers are only captured from the group room." };
+  const kind = String(input.kind ?? "");
+  const subject = String(input.subject ?? "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!POINTER_VERB[kind] || !subject) return { output: "Not noted: need a kind and a subject." };
+  const label = kind === "WANT" ? `wants ${subject}` : `${POINTER_VERB[kind]} ${subject}`;
+  const r = await recordPointer({ tripId: ctx.trip.id, userId: ctx.actingUserId, messageId: lastHumanId(ctx), kind: kind as never, subject, label });
+  if (kind === "DIET") await rememberDiet(ctx.trip.id, ctx.actingUserId, subject);
+  return { output: `Noted quietly (${kind}: ${subject}). It is memory only and NOT in the Plan. Do not reply to the group about it.` };
+}
+
+async function buildIdeaTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const out = await buildIdea({ tripId: ctx.trip.id, userId: ctx.actingUserId, when: String(input.when ?? "") });
+  if (!out.ok) return { output: out.reason, finalReply: out.reason };
+  const reply = `CLOCKWISE HAS AN IDEA ✦ ${out.card.title}. ${out.card.why} Want me to propose it to the group? Nothing changes in the Plan unless everyone's in.`;
+  return { output: `Posted an idea card. ${reply}`, finalReply: reply, posted: true };
+}
+
+async function findPlacesTool(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolExecutionResult> {
+  const { runPlaceRequest } = await import("./router");
+  const request = String(input.request ?? "").trim();
+  if (!request) return { output: "Need the request in the traveller's words." };
+  const r = await runPlaceRequest(ctx, request, ctx.mode === "PRIVATE" ? "PRIVATE" : "GROUP");
+  return { output: r.reply, finalReply: r.reply, posted: r.outcome.ok && r.outcome.places.length > 0 };
 }
 
 // Real Zod validation, not just a JSON-schema hint the model might
@@ -1114,7 +1224,7 @@ async function proposeCommitmentReschedule(input: Record<string, unknown>, ctx: 
   const name = String(input.commitmentName ?? "").trim();
   const newTime = String(input.newTime ?? "").trim();
   if (!name || !/^([01]\d|2[0-3]):[0-5]\d$/.test(newTime)) return { output: "Need the commitment's name and the new time in 24-hour HH:MM." };
-  const commitments = await prisma.commitment.findMany({ where: { tripId: ctx.trip.id } });
+  const commitments = await prisma.commitment.findMany({ where: { tripId: ctx.trip.id, status: { not: "CANCELLED" } } });
   const c = commitments.find((x) => x.name.toLowerCase() === name.toLowerCase()) ?? commitments.find((x) => x.name.toLowerCase().includes(name.toLowerCase()));
   if (!c) return { output: `There's no logged commitment called "${name}", so there is nothing to reschedule.` };
   const oldTime = c.targetTime.toISOString().slice(0, 16);

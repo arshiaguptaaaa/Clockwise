@@ -4,6 +4,8 @@ import { AGENT_TOOLS, executeTool } from "./tools";
 import { GeminiAgentProvider } from "./providers/gemini";
 import { acknowledgeOpenReminders } from "@/lib/readiness";
 import { isObviousNonTripChatter, isDirectlyAddressed, mentionsClockwise, mentionsOwnJourneyChange, QUIET_CAPTURE_TOOLS } from "./intervention-gate";
+import { classifyMessage } from "@/lib/mentions";
+import { routeAddressed, observePassive } from "./router";
 import type { AgentModelProvider, AgentMessage, AgentToolSchema } from "./provider";
 
 const MAX_TOOL_ROUNDS = 4;
@@ -53,6 +55,9 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     "- Readiness escalation is YOUR decision, never a human's instruction to wait for. If check_readiness shows a commitment is AT_RISK/MISSED and a specific traveller hasn't checked in, first call send_readiness_reminder and nudge them yourself in-chat (low-friction, short, in character — e.g. 'Arjun, alive? 👀 We leave in 30'). Only call escalate_via_voice_call later, once there has genuinely been no response from them since — never as your first move, and never because a human told you to call someone. escalate_via_voice_call will refuse itself if the preconditions (an unacknowledged reminder, opt-in, a phone on file) aren't actually met, so attempt it honestly rather than second-guessing whether it'll work.",
     "- You have two kinds of knowledge. TRIP KNOWLEDGE (travellers, dates, bookings, commitments, decisions — already in the structured state below) you can answer directly. LIVE WORLD KNOWLEDGE (hotels, places, addresses, distances, travel time, weather) you do NOT know yourself — you MUST call search_places/search_hotels/search_nearby/get_route/get_weather and answer only from what the tool actually returned. Never guess a hotel name, address, distance, or fare — if a live tool isn't configured or fails, say so honestly and still answer whatever part of the question trip state alone can cover.",
     "- Places and time windows. A traveller may search ANY named place, in any city, whether or not it is the trip's destination (they may be planning from Gurgaon or exploring somewhere else): 'coffee in Gurgaon', 'shopping in Jaipur', 'things to do in Goa' are all valid. Never refuse because the place isn't the trip destination; call search_nearby with category cafe / shopping / attraction / restaurant and near set to the place they named. 'Things to do' means category attraction; 'coffee' means cafe. These searches never depend on the traveller's preferences or Vibe Check. Any real café, restaurant, pharmacy, ATM, shop, park, museum or attraction you name must come from a search_nearby / free_time_options result this turn; never from memory, and never a rating, opening hour, website, phone number or 'best/amazing/locals love it' claim. 'Near me' is the traveller's CURRENT location, which only exists if they press USE MY LOCATION in Around You: search_nearby with anchor user_location tells them how; never substitute the hotel or destination for it unless they ask. 'Our hotel' and 'near us / around us' mean the group's CONFIRMED stay (anchor hotel; if there is no stay, say so). 'Near ME' alone is the traveller's current location. For 'within N minutes' pass maxMinutes; for 'what can we do in the next 90 minutes / before dinner' call free_time_options. For tickets or city-to-city travel ('tickets Delhi to Amritsar') call travel_options; an airport origin does NOT mean a flight, so offer FLIGHT · TRAIN · BUS, and never invent fares, timetables or availability. For 'can we do X before dinner?' about ONE named place call does_this_fit. Never judge what fits or convert distance to minutes yourself.",
+    "- THE PLAN IS ONE SYSTEM. Chat, the Plan, Around and notifications all read the same saved state. To add, move or cancel a plan item you MUST call create_commitment / move_commitment / cancel_commitment and answer ONLY from the sentence the tool returns (it has been read back from the database). If a tool says it could not update the Plan, say exactly that; never say something was added, moved or cancelled unless a tool reported it. Pass days and times as the traveller said them ('tomorrow', 'saturday', '8 PM'): the tools compute the date, you never do.",
+    "- Four levels, never collapsed: PICKED UP (a passing comment: memory only), IDEA (you connected comments into a possible plan: a suggestion), PROPOSAL (the group was formally asked and votes), CONFIRMED PLAN. A casual 'Cubbon Park also pls' is only ever picked up; it never becomes a plan item, and you never turn an idea into a proposal yourself — the card's PROPOSE TO GROUP button does. For 'what should we do Saturday afternoon?' call build_idea.",
+    "- For ANY request for places ('dosa places in Bengaluru', 'coffee near our hotel', 'things to do around Cubbon Park', 'shopping near where Ridhima lands') call find_places with the traveller's words verbatim. The place, the dish and the anchor are read from the words in code; an explicit place in the message always wins over where anyone currently is. Never answer a place request with a paraphrase of the question or with names you remember.",
     "- Reply in 1-3 short, conversational sentences. No headings, no bullet lists, no markdown formatting — the tool result is already shown to the user as a card, so don't repeat it verbatim, just add the reasoning/recommendation on top of it.",
     "- Facts about the world come only from tools: never state a travel time, distance, restaurant, hotel, price or opening hour from memory. For any \"how long / how far\" question call get_route; for places call the search tools. If a tool fails or returns nothing, say you couldn't get it — do not substitute your own answer. A search request (\"find hotels in Udaipur\") is never a decision and never changes the trip route.",
     "- update_my_arrival: when the SPEAKER says THEIR OWN arrival changed (a delay, an earlier flight — \"my flight is delayed, I'll reach around 8:15\"), call it with the new time in 24-hour form. It updates only their own journey. If it's unclear whether they mean morning or evening, or which day, ask ONE short question and do not call it. It also reports which shared commitments are now at risk.",
@@ -124,22 +129,22 @@ function logAgentTiming(ctx: AgentContext, timing: { contextBuildMs?: number; ge
   );
 }
 
-async function runAgentTurnTimed(ctx: AgentContext, contextBuildMs?: number): Promise<AgentTurnResult> {
+async function runAgentTurnTimed(ctx: AgentContext, contextBuildMs?: number, addressed = true): Promise<AgentTurnResult> {
   const geminiMs: number[] = [];
   const toolMs: number[] = [];
   const turnStart = Date.now();
   try {
-    return await runAgentTurn(ctx, geminiMs, toolMs);
+    return await runAgentTurn(ctx, geminiMs, toolMs, addressed);
   } finally {
     logAgentTiming(ctx, { contextBuildMs, geminiMs, toolMs, totalMs: Date.now() - turnStart });
   }
 }
 
-async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: number[]): Promise<AgentTurnResult> {
+async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: number[], addressed: boolean): Promise<AgentTurnResult> {
   const provider = getAgentProvider();
   const lastHuman = [...ctx.history].reverse().find((h) => !h.isClockwise);
   // Group chat is human-first: an unaddressed message gets quiet capture only.
-  const quiet = ctx.mode === "GROUP" && !(lastHuman && mentionsClockwise(lastHuman.content));
+  const quiet = ctx.mode === "GROUP" && !addressed;
   const system =
     buildSystemPrompt(ctx) +
     (quiet
@@ -147,7 +152,7 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
       : "");
   // Directly addressed => a reply is mandatory, so silence isn't an option.
   const tools = toolsForMode(ctx.mode)
-    .filter((t) => !(t.name === "stay_silent" && lastHuman && isDirectlyAddressed(lastHuman.content)))
+    .filter((t) => !(t.name === "stay_silent" && (addressed || (lastHuman && isDirectlyAddressed(lastHuman.content)))))
     .filter((t) => !quiet || QUIET_CAPTURE_TOOLS.has(t.name));
   let messages = toAgentMessages(ctx.history);
   const executedTools: { name: string; input: unknown }[] = [];
@@ -214,16 +219,21 @@ async function runAgentTurn(ctx: AgentContext, geminiMs: number[], toolMs: numbe
       { role: "assistant", content: result.text, toolCalls: result.toolCalls },
     ];
 
+    const finals: string[] = [];
     for (const call of result.toolCalls) {
       executedTools.push({ name: call.name, input: call.input });
       const toolStart = Date.now();
       const toolResult = await executeTool(call.name, call.input, ctx);
       toolMs.push(Date.now() - toolStart);
+      if (toolResult.finalReply) finals.push(toolResult.finalReply);
       messages = [
         ...messages,
         { role: "tool", toolCallId: call.id, name: call.name, output: toolResult.output },
       ];
     }
+    // A tool that changed (or refused to change) the Plan has already said exactly what is true. That sentence is
+    // the answer: the model is not given a chance to embellish it into a claim the database didn't confirm.
+    if (finals.length > 0) return { spoke: true, replyText: [...new Set(finals)].join(" "), toolCalls: executedTools };
     // loop again so the model can narrate the tool result(s) in natural language
   }
 
@@ -244,21 +254,54 @@ export async function respondToGroupMessage(
   const contextStart = Date.now();
   const ctx = await buildGroupContext(tripId, actingUserId);
 
-  // Deterministic gate in front of the Gemini call — see
-  // intervention-gate.ts for exactly what this does and doesn't catch.
-  // Deliberately checked against the real last human message in history,
-  // never against anything Clockwise itself said.
   const lastHumanTurn = [...ctx.history].reverse().find((h) => !h.isClockwise);
-  if (lastHumanTurn && isObviousNonTripChatter(lastHumanTurn.content)) {
-    console.log(`[InterventionGate] trip=${tripId} skipped obvious chatter, no Gemini call`);
-    await recordSilence(tripId, lastHumanTurn.id, "GATE", "Pure reaction or filler — not sent to the model.");
-    return { spoke: false, toolCalls: [] };
+  const people = ctx.trip.members.map((m) => ({ userId: m.userId, name: m.user.name }));
+  const klass = lastHumanTurn ? classifyMessage(lastHumanTurn.content, people) : null;
+  const addressed = klass ? klass.mode === "EXPLICIT" || klass.mode === "REQUEST" : false;
+
+  // PASSIVE: Clockwise listens without answering. Pointers and soft agreement are captured, the speaker's own
+  // arrival change is applied, and a connected idea may surface. Nothing here posts a chat reply.
+  let passiveCalls: { name: string; input: unknown }[] = [];
+  let needsModel = true;
+  if (lastHumanTurn && !addressed) {
+    const obs = await observePassive(ctx, lastHumanTurn, { mentionedAll: Boolean(klass?.mentions.all) }).catch((err) => {
+      console.error("[observe] failed:", err instanceof Error ? err.message : err);
+      return { calls: [], needsModel: true };
+    });
+    passiveCalls = obs.calls;
+    needsModel = obs.needsModel;
+  } else if (lastHumanTurn) {
+    // "@Clockwise I'm vegetarian" - still remember it.
+    const { observeMessage } = await import("@/lib/pointers/store");
+    await observeMessage({ tripId, userId: actingUserId, messageId: lastHumanTurn.id, text: lastHumanTurn.content }).catch(() => undefined);
   }
 
-  const rawResult = await runAgentTurnTimed(ctx, Date.now() - contextStart);
-  // Unaddressed group message: whatever the model said is dropped; only its
-  // captures (tool effects, which post their own cards) remain.
-  const unaddressed = !(lastHumanTurn && mentionsClockwise(lastHumanTurn.content));
+  if (lastHumanTurn && !addressed && (!needsModel || isObviousNonTripChatter(lastHumanTurn.content))) {
+    await recordSilence(tripId, lastHumanTurn.id, "GATE", passiveCalls.length ? `Noticed quietly: ${passiveCalls.map((c) => c.name).join(", ")}.` : "Ordinary conversation between travellers.");
+    return { spoke: false, toolCalls: passiveCalls };
+  }
+
+  // EXPLICIT / REQUEST: understood in code first (plan edits, place searches, ideas), answered from what was persisted.
+  if (lastHumanTurn && addressed && klass) {
+    const routed = await routeAddressed(ctx, lastHumanTurn, klass.mode as "EXPLICIT" | "REQUEST").catch((err) => {
+      console.error("[router] failed:", err instanceof Error ? err.message : err);
+      return { handled: false as const };
+    });
+    if (routed.handled) {
+      if (routed.reply) {
+        await prisma.message.create({
+          data: { tripId, senderId: ctx.clockwiseUserId, channel: "GROUP", content: routed.reply, toolCalls: routed.calls.length ? JSON.stringify(routed.calls) : null },
+        });
+      }
+      return { spoke: Boolean(routed.reply), replyText: routed.reply ?? undefined, toolCalls: routed.calls };
+    }
+  }
+
+  const rawResult = await runAgentTurnTimed(ctx, Date.now() - contextStart, addressed);
+  rawResult.toolCalls = [...passiveCalls, ...rawResult.toolCalls];
+  // Unaddressed group message: whatever the model said is dropped; only its captures (tool effects, which post
+  // their own cards) remain.
+  const unaddressed = !addressed;
   const allowQuestion = Boolean(lastHumanTurn && mentionsOwnJourneyChange(lastHumanTurn.content)) && /\?\s*$/.test(rawResult.replyText ?? "");
   const result = unaddressed && rawResult.spoke && !rawResult.failed && !allowQuestion ? { ...rawResult, spoke: false, replyText: undefined } : rawResult;
   if (!result.spoke && lastHumanTurn) {

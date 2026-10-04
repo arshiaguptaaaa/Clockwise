@@ -114,7 +114,7 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
 
   return (
     <section className="section" data-day-timeline data-shared-plan>
-      <p className="eyebrow">The plan so far</p>
+      <p className="eyebrow">Confirmed plan</p>
       {days.map((day) => (
         <div key={day} className="mt-6">
           <h2 className="t-display text-[26px]">{dayHead(`${day}T00:00`)}</h2>

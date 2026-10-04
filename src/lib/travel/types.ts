@@ -20,6 +20,9 @@ export type PlaceResult = {
   openingHours?: string | null;
   website?: string | null;
   phone?: string | null;
+  // The provider's own cuisine tag(s) ("south_indian;dosa") and dietary tags, only when it supplied them.
+  cuisine?: string | null;
+  dietTags?: string[];
 };
 
 export type TravelMode = "walk" | "drive" | "transit" | "bicycle";

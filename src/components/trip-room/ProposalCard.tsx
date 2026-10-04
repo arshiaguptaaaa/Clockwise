@@ -19,6 +19,7 @@ export type ProposalCardPayload = {
   cancellationTerms?: string;
   peopleAffected?: string[];
   split?: { totalMinor: number; lines: { userId: string; name: string; amountMinor: number; alreadyPaid: boolean }[] };
+  idea?: { title: string; steps: { name: string; at: string | null; location: string | null }[] };
 };
 
 export type ProposalCardApproval = { userId: string; name: string; decision: "PENDING" | "APPROVED" | "REJECTED" };
@@ -95,7 +96,7 @@ export function ProposalCard({
   const done = status === "CONFIRMED" || status === "EXECUTED";
   const replaced = status === "CANCELLED";
   // Creating a split payment charges nothing (each person's own link is made when they press PAY), so it is one tap too.
-  const oneClick = proposal.kind === "reschedule" || proposal.kind === "place" || Boolean(proposal.payload.split);
+  const oneClick = proposal.kind === "reschedule" || proposal.kind === "place" || Boolean(proposal.payload.split) || Boolean(proposal.payload.idea);
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -137,13 +138,13 @@ export function ProposalCard({
     <div id={`proposal-${proposal.id}`} key={status} className="vote-in w-full max-w-md border-l-[3px] border-accent bg-surface-muted/70 py-5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
       <p className="eyebrow !text-accent-strong">
         <span className="cw-mark">◷</span>{" "}
-        {proposal.retry ? "One more try." : agreed ? "Everyone's aligned" : proposal.change ? "Something changed." : "A decision"}
+        {proposal.retry ? "One more try." : agreed ? "Everyone's aligned" : open ? "Clockwise proposed ✦" : "A decision"}
       </p>
 
       {proposal.change ? (
         <>
           {proposal.because && <p className="mt-2 font-display text-[19px] leading-snug tracking-[-0.01em]" data-because>{proposal.because}. {proposal.headline} is at {proposal.change.from}.</p>}
-          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground">Move {proposal.headline}?</p>
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground">{proposal.change.to === "Cancelled" ? "Cancel" : "Move"} {proposal.headline}?</p>
           <p className="t-number mt-1.5 flex flex-wrap items-baseline gap-x-3 text-[46px]" data-change>
             <span className="text-[26px] text-muted-foreground line-through decoration-[1.5px]">{proposal.change.from}</span>
             <span className="text-[24px] text-muted-foreground">→</span>
@@ -156,6 +157,17 @@ export function ProposalCard({
           <p className="mt-2.5 font-display text-[26px] leading-[1.08] tracking-[-0.015em] text-foreground">{proposal.title}</p>
           <p className="mt-2 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>
         </>
+      )}
+
+      {proposal.payload.idea && (
+        <ol className="mt-3 space-y-1.5" data-idea-steps>
+          {proposal.payload.idea.steps.map((s, i) => (
+            <li key={i} className="flex items-baseline gap-3 text-[14px]">
+              <span className="t-number w-[4.5rem] shrink-0 text-right text-[15px] text-muted-foreground">{s.at ? new Date(`${s.at}:00Z`).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "UTC" }).toUpperCase() : ""}</span>
+              <span className="font-medium">{s.name}</span>
+            </li>
+          ))}
+        </ol>
       )}
 
       {proposal.payload.split && (
@@ -198,7 +210,7 @@ export function ProposalCard({
       {canVote && open && myApproval?.decision === "PENDING" && (
         <div className="mt-4 grid grid-cols-2 gap-2.5">
           <button type="button" disabled={isPending} onClick={() => vote("APPROVED")} className="btn btn-primary">Accept</button>
-          <button type="button" disabled={isPending} onClick={() => vote("REJECTED")} className="btn btn-ghost">Can&apos;t</button>
+          <button type="button" disabled={isPending} onClick={() => vote("REJECTED")} className="btn btn-ghost">Decline</button>
         </div>
       )}
       {canVote && open && myApproval?.decision === "APPROVED" && (

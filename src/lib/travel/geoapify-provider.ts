@@ -200,7 +200,8 @@ type GeoapifyPlaceFeature = {
     opening_hours?: string;
     website?: string;
     contact?: { phone?: string };
-    datasource?: { raw?: { opening_hours?: string; website?: string; phone?: string } };
+    datasource?: { raw?: { opening_hours?: string; website?: string; phone?: string; cuisine?: string } };
+    catering?: { cuisine?: string; diet?: Record<string, boolean | string> };
   };
   geometry: { coordinates: [number, number] };
 };
@@ -226,6 +227,8 @@ async function placesSearch(params: URLSearchParams): Promise<PlaceResult[]> {
     openingHours: f.properties.opening_hours ?? f.properties.datasource?.raw?.opening_hours ?? null,
     website: f.properties.website ?? f.properties.datasource?.raw?.website ?? null,
     phone: f.properties.contact?.phone ?? f.properties.datasource?.raw?.phone ?? null,
+    cuisine: f.properties.catering?.cuisine ?? f.properties.datasource?.raw?.cuisine ?? null,
+    dietTags: f.properties.catering?.diet ? Object.entries(f.properties.catering.diet).filter(([, v]) => v === true || v === "yes" || v === "only").map(([k]) => k) : [],
   }));
 }
 
@@ -262,9 +265,10 @@ export const BROAD_CATEGORIES: Record<string, string> = {
   museum: "entertainment.museum,entertainment.culture,tourism.sights",
 };
 
-export async function searchNearbyRaw(categories: string, near: LatLng, radiusMeters: number, limit = 15): Promise<PlaceResult[]> {
+export async function searchNearbyRaw(categories: string, near: LatLng, radiusMeters: number, limit = 15, diet?: "vegetarian" | "vegan" | "halal"): Promise<PlaceResult[]> {
   const params = new URLSearchParams({
     categories,
+    ...(diet ? { conditions: diet } : {}),
     filter: `circle:${near.lng},${near.lat},${radiusMeters}`,
     bias: `proximity:${near.lng},${near.lat}`,
     limit: String(limit),

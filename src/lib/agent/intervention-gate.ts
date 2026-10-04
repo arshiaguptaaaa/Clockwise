@@ -70,6 +70,7 @@ export const QUIET_CAPTURE_TOOLS = new Set([
   "propose_expense",
   "update_my_arrival",
   "propose_commitment_reschedule",
+  "note_trip_pointer",
 ]);
 
 // A traveller saying their OWN journey changed. Clockwise may ask one short clarifying

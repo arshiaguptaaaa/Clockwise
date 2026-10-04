@@ -15,6 +15,8 @@ import { formatMoney } from "@/lib/budget/money";
 import { timeLabel } from "@/lib/traveller/journey";
 import { VibeCheck } from "@/components/vibe/VibeCheck";
 import { getVibeStatus, getPrefs, questionsToAsk } from "@/lib/traveller/vibe";
+import { loadPointers } from "@/lib/pointers/store";
+import { ForgetButton } from "@/components/plan/ForgetButton";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -85,6 +87,9 @@ export default async function MyClockwisePage({
     currentUserId ? owedBy(tripId, currentUserId) : [],
   ]);
   const owedTotal = owed.reduce((n, o) => n + o.amountMinor, 0);
+  // What Clockwise picked up about THIS traveller from the group chat (they can remove any of it).
+  const remembered = currentUserId ? (await loadPointers(tripId)).filter((p) => p.userId === currentUserId) : [];
+  const foodPrefs = currentUserId ? (await getPrefs(tripId, currentUserId)).food ?? [] : [];
   const rows: { href: string; label: string; value: string; hot?: boolean }[] = [
     { href: `/trips/${tripId}/agent/journey`, label: "Journey", value: journey ? `${journey.originName ?? "?"} → ${journey.destinationName ?? "?"}${journey.arriveLocal ? ` · lands ${timeLabel(journey.arriveLocal)}` : ""}` : "Add your ticket or flight" },
     { href: `/trips/${tripId}/agent/ready`, label: "Before you go", value: "Weather and packing" },
@@ -115,6 +120,26 @@ export default async function MyClockwisePage({
           </Link>
         ))}
       </nav>
+
+      {(remembered.length > 0 || foodPrefs.length > 0) && (
+        <section className="mx-5 mt-4" data-remembered>
+          <p className="eyebrow">What Clockwise knows about you ✦</p>
+          <ul className="mt-2 divide-y divide-border border-y border-border">
+            {foodPrefs.filter((f) => !remembered.some((p) => p.kind === "DIET" && p.subject === f.toLowerCase())).map((f) => (
+              <li key={`food-${f}`} className="flex min-h-11 items-center py-2 text-[14px]" data-remembered-item={f.toLowerCase()}>
+                {f.charAt(0) + f.slice(1).toLowerCase().replace(/_/g, " ")}
+              </li>
+            ))}
+            {remembered.map((p) => (
+              <li key={p.id} className="flex min-h-11 items-center justify-between gap-3 py-2 text-[14px]" data-remembered-item={p.subject}>
+                <span>{p.kind === "DIET" ? p.subject.replace(/^./, (c) => c.toUpperCase()) : `You ${p.label.replace(/^(is|says|wants|likes|mentioned) /, (m) => (m.startsWith("is") ? "are " : m))}`}</span>
+                <ForgetButton pointerId={p.id} />
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[12px] text-muted-foreground">Picked up from what you said in the group. Remove anything that&apos;s wrong.</p>
+        </section>
+      )}
 
       {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && <p className="mx-5 mt-3 text-[13px]">{UBER_STATUS_MESSAGES[uberStatus]}</p>}
 

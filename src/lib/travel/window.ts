@@ -42,7 +42,7 @@ async function commitmentPoint(tripId: string, location: string): Promise<{ poin
 }
 
 export async function nextCommitment(tripId: string, userId: string, nowLocal: string): Promise<NextCommitment | null> {
-  const rows = await prisma.commitment.findMany({ where: { tripId }, orderBy: { targetTime: "asc" } });
+  const rows = await prisma.commitment.findMany({ where: { tripId, status: { not: "CANCELLED" } }, orderBy: { targetTime: "asc" } });
   const c = rows.find((x) => appliesTo(x.participantIds)(userId) && x.targetTime.toISOString().slice(0, 16) > nowLocal);
   if (!c) return null;
   const p = await commitmentPoint(tripId, c.location);

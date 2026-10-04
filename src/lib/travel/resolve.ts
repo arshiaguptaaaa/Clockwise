@@ -230,7 +230,7 @@ export async function resolveTripLocationText(
   }
 
   const commitment = await prisma.commitment.findFirst({
-    where: { tripId, name: { contains: trimmed } },
+    where: { tripId, status: { not: "CANCELLED" }, name: { contains: trimmed } },
   });
   const searchText = commitment?.location || trimmed;
 

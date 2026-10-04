@@ -68,6 +68,9 @@ enum CommitmentStatus {
   AT_RISK
   MISSED
   RECOVERING
+  // Removed from the Plan by someone with the authority to. Kept (not deleted) so the audit trail and any
+  // readiness history still point at a real row; every Plan view filters it out.
+  CANCELLED
 }
 
 enum CardType {
@@ -85,6 +88,8 @@ enum CardType {
   PLACES
   ROUTE
   WEATHER
+  // Clockwise connected loose comments into a possible plan. A SUGGESTION: not yet a proposal, not the Plan.
+  IDEA
 }
 
 enum CardStatus {
@@ -1351,4 +1356,57 @@ model PaymentObligation {
 
   @@unique([collectionId, userId])
   @@index([tripId, userId])
+}
+
+// Something Clockwise PICKED UP from ordinary group conversation ("Ridhima wants dosa", "Cubbon Park is
+// non-negotiable", "Ridhima is vegetarian"). A PASSIVE POINTER: it is memory, not a plan item. It never becomes
+// a Commitment on its own; the ladder is POINTER -> SUGGESTION (TripSuggestion) -> PROPOSAL (Proposal) -> PLAN.
+// `supporterIds` are other travellers who said "same" / "yes" about it, and `mentions` counts distinct times it
+// came up, so "mentioned three times" is a fact, not a feeling.
+model TripPointer {
+  id              String   @id @default(cuid())
+  tripId          String
+  userId          String
+  // DIET | LIKE | WANT | MUST | AVOID | WINDOW
+  kind            String
+  // normalised key, lower case: "dosa", "cubbon park", "vegetarian", "saturday evening"
+  subject         String
+  // third-person display line without the name: "wants to try dosa"
+  label           String
+  supporterIds    String   @default("[]")
+  mentions        Int      @default(1)
+  sourceMessageId String?
+  // ACTIVE | SUGGESTED | PROPOSED | DONE | DISMISSED
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tripId, userId, kind, subject])
+  @@index([tripId, status])
+}
+
+// Clockwise's connected idea: several pointers + a real free window + real provider places. Offered to the group
+// as a card (PROPOSE TO GROUP / NOT NOW). Nothing here touches the Plan; PROPOSE creates a normal Proposal that
+// the usual vote + organiser confirmation then decides.
+model TripSuggestion {
+  id          String   @id @default(cuid())
+  tripId      String
+  title       String
+  // one grounded sentence: why this fits (built from pointers + state, never invented)
+  why         String
+  // JSON: ordered steps [{ kind, name, at?, address?, provider?, providerPlaceId?, lat?, lng?, note? }]
+  steps       String
+  // local wall-clock window the idea sits in
+  windowStart String?
+  windowEnd   String?
+  pointerIds  String   @default("[]")
+  // OPEN | PROPOSED | DISMISSED
+  status      String   @default("OPEN")
+  proposalId  String?
+  messageId   String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tripId, status])
 }

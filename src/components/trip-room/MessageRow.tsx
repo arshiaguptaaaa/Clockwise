@@ -6,6 +6,7 @@ import { toggleReactionAction } from "@/app/actions";
 import { Clock, Volume2, Square, Paperclip } from "lucide-react";
 import { Face } from "@/components/art/CharacterScene";
 import { faceIndexForId } from "@/lib/characters";
+import { splitMentions } from "@/lib/mentions";
 
 export type MessageAttachment = { id: string; filename: string };
 
@@ -25,6 +26,8 @@ type Props = {
   timestamp: Date;
   isClockwise: boolean;
   attachments?: MessageAttachment[];
+  // Trip travellers, so @Ridhima / @Clockwise / @all are picked out in the text.
+  people?: { id: string; name: string }[];
 };
 
 // Downloads through the authorization-checked proxy route (src/app/api/
@@ -133,7 +136,7 @@ function Reactions({ messageId, reactions, viewerId }: { messageId: string; reac
   );
 }
 
-export function MessageRow({ messageId, reactions = [], reactable = false, viewerId, grouped = false, senderId, senderName, content, timestamp, isClockwise, attachments = [] }: Props) {
+export function MessageRow({ messageId, reactions = [], reactable = false, viewerId, grouped = false, senderId, senderName, content, timestamp, isClockwise, attachments = [], people = [] }: Props) {
   if (isClockwise) {
     return (
       <div className="flex items-start gap-3">
@@ -168,7 +171,15 @@ export function MessageRow({ messageId, reactions = [], reactable = false, viewe
           </div>
         )}
         <p className={`${grouped ? "" : "mt-0.5"} max-w-full whitespace-pre-wrap text-[15px] leading-relaxed text-foreground`}>
-          {content}
+          {splitMentions(content, people.map((x) => ({ userId: x.id, name: x.name }))).map((part, i) =>
+            part.mention ? (
+              <span key={i} data-mention={part.mention} className={`rounded px-1 font-semibold ${part.mention === "clockwise" ? "bg-accent-tint text-accent-strong" : "bg-surface-muted"}`}>
+                {part.text}
+              </span>
+            ) : (
+              <span key={i}>{part.text}</span>
+            )
+          )}
         </p>
         <AttachmentChips attachments={attachments} />
         {reactable && messageId && <Reactions messageId={messageId} reactions={reactions} viewerId={viewerId} />}
