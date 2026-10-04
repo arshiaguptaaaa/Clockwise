@@ -6,6 +6,8 @@ import {
   createInvite,
   sendInviteEmailAction,
   getPendingInvites,
+  getJoinCodeAction,
+  rotateJoinCodeAction,
   type PendingInviteView,
 } from "@/app/invite-actions";
 
@@ -38,6 +40,38 @@ export function InviteTravellersPanel({
   const [emailState, setEmailState] = useState<Record<string, "sending" | "sent" | "failed">>({});
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [groupCode, setGroupCode] = useState<string | null>(null);
+  const [groupCopied, setGroupCopied] = useState(false);
+  const [byName, setByName] = useState(false);
+
+  useEffect(() => {
+    getJoinCodeAction(tripId).then((r) => setGroupCode(r.ok ? r.code : null));
+  }, [tripId]);
+
+  const groupUrl = groupCode ? `${typeof window === "undefined" ? "" : window.location.origin}/join/${groupCode}` : "";
+
+  async function copyGroup() {
+    if (!groupUrl) return;
+    await navigator.clipboard.writeText(groupUrl);
+    setGroupCopied(true);
+    setTimeout(() => setGroupCopied(false), 2000);
+  }
+  async function shareGroup() {
+    if (!groupUrl) return;
+    try {
+      if (navigator.share) await navigator.share({ title: "Join our trip on Clockwise", url: groupUrl });
+      else await copyGroup();
+    } catch {
+      // the share sheet was dismissed
+    }
+  }
+  function newGroupLink() {
+    startCreating(async () => {
+      const r = await rotateJoinCodeAction(tripId);
+      if (r.ok) setGroupCode(r.code);
+      else setError(r.error);
+    });
+  }
 
   useEffect(() => {
     if (!isOrganiser) return;
@@ -102,8 +136,11 @@ export function InviteTravellersPanel({
         className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-t-2xl bg-surface p-5 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between">
-          <p className="text-base font-medium text-foreground">Invite your group</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="eyebrow">Bring the group</p>
+            <p className="headline headline-md mt-1.5">One link. Everyone in.</p>
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -114,10 +151,20 @@ export function InviteTravellersPanel({
           </button>
         </div>
 
-        {!isOrganiser ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            Only the trip organiser can invite new travellers.
-          </p>
+        <div className="mt-4" data-group-link>
+          <p className="break-all border-b border-foreground/20 pb-2 font-mono text-[12.5px] text-foreground">{groupUrl || "Making your link…"}</p>
+          <div className="mt-3 flex items-center gap-2">
+            <button type="button" onClick={copyGroup} disabled={!groupUrl} className="cursor-pointer rounded-full bg-accent px-5 py-2 text-[12px] font-semibold tracking-[0.12em] text-accent-foreground hover:opacity-90 disabled:opacity-50">{groupCopied ? "COPIED ✓" : "COPY LINK"}</button>
+            <button type="button" onClick={shareGroup} disabled={!groupUrl} className="cursor-pointer rounded-full border border-foreground/25 px-5 py-2 text-[12px] font-semibold tracking-[0.12em] hover:border-foreground disabled:opacity-50">SHARE</button>
+          </div>
+          <p className="mt-2.5 text-[11.5px] leading-snug text-muted-foreground">Anyone with this link can join and pick a name. They see only the trip&apos;s name, place and dates until they&apos;re in. No email needed.</p>
+          {isOrganiser && (
+            <button type="button" onClick={newGroupLink} disabled={isCreating} className="mt-1.5 cursor-pointer text-[11.5px] text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50">Make a new link (the old one stops working)</button>
+          )}
+        </div>
+
+        {!isOrganiser ? null : !byName ? (
+          <button type="button" onClick={() => setByName(true)} className="mt-6 block cursor-pointer text-[12.5px] text-muted-foreground underline underline-offset-4 hover:text-foreground">Or invite someone by name or email</button>
         ) : (
           <>
             <form onSubmit={generate} className="mt-4 flex flex-col gap-2.5">

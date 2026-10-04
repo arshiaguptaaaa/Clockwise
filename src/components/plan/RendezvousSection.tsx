@@ -1,5 +1,6 @@
 import { MODE_ICON, timeLabel } from "@/lib/traveller/journey";
 import type { RendezvousView } from "@/lib/rendezvous";
+import { HUMAN } from "@/lib/copy";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
 
 const hhmm = (local: string) => timeLabel(local);
@@ -88,6 +89,7 @@ export function RendezvousSection({ view, pending = {}, organiserName = "the org
               );
             })}
           </ul>
+          {atRisk.length === 0 && view.commitments.every((c) => c.allAtHotelBy) && <p className="mt-3 font-display text-[18px] italic text-muted-foreground" data-clocks-agree>{HUMAN.clocksAgree}</p>}
           {atRisk.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Clockwise suggests the smallest change that works; the plan only moves after the group agrees.</p>}
         </section>
       )}

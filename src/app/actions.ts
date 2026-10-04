@@ -260,3 +260,19 @@ export async function retryAgentResponse(messageId: string) {
 
   revalidatePath(`/trips/${tripId}/room`);
 }
+
+// A quick reaction on a GROUP message. Toggles: the same person + emoji again removes it.
+const REACTIONS = ["👍", "❤️", "😂", "🙌"];
+export async function toggleReactionAction(messageId: string, emoji: string): Promise<{ ok: boolean }> {
+  const userId = await getCurrentUserId();
+  if (!userId || !REACTIONS.includes(emoji)) return { ok: false };
+  const message = await prisma.message.findUnique({ where: { id: messageId }, select: { tripId: true, channel: true } });
+  if (!message || message.channel !== "GROUP") return { ok: false };
+  const member = await prisma.tripMember.findUnique({ where: { tripId_userId: { tripId: message.tripId, userId } }, select: { id: true } });
+  if (!member) return { ok: false };
+  const existing = await prisma.messageReaction.findUnique({ where: { messageId_userId_emoji: { messageId, userId, emoji } } });
+  if (existing) await prisma.messageReaction.delete({ where: { id: existing.id } });
+  else await prisma.messageReaction.create({ data: { messageId, userId, emoji } });
+  revalidatePath(`/trips/${message.tripId}/room`);
+  return { ok: true };
+}

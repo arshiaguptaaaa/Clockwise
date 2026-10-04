@@ -11,8 +11,6 @@ export default async function RoomLayout({
   const base = `/trips/${tripId}/room`;
   const tabs = [
     { href: base, label: "Chat" },
-    { href: `${base}/plan`, label: "Plan" },
-    { href: `${base}/tasks`, label: "Tasks" },
     { href: `${base}/files`, label: "Files" },
   ];
 

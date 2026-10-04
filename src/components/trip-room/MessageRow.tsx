@@ -1,13 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toggleReactionAction } from "@/app/actions";
 import { Clock, Volume2, Square, Paperclip } from "lucide-react";
 import { Face } from "@/components/art/CharacterScene";
 import { faceIndexForId } from "@/lib/characters";
 
 export type MessageAttachment = { id: string; filename: string };
 
+export type MessageReactionView = { emoji: string; userIds: string[]; names: string[] };
+
 type Props = {
+  messageId?: string;
+  reactions?: MessageReactionView[];
+  // Only group messages can be reacted to.
+  reactable?: boolean;
+  viewerId?: string | null;
+  // Same person as the message above, close in time: no repeated face and name.
+  grouped?: boolean;
   senderId?: string;
   senderName: string;
   content: string;
@@ -79,7 +90,50 @@ function PlayResponseButton({ text }: { text: string }) {
   );
 }
 
-export function MessageRow({ senderId, senderName, content, timestamp, isClockwise, attachments = [] }: Props) {
+const REACTIONS = ["👍", "❤️", "😂", "🙌"];
+
+// Quiet reactions: existing ones as small chips (names on hover), and a small + to add yours.
+function Reactions({ messageId, reactions, viewerId }: { messageId: string; reactions: MessageReactionView[]; viewerId?: string | null }) {
+  const router = useRouter();
+  const [, start] = useTransition();
+  const [picking, setPicking] = useState(false);
+  function toggle(emoji: string) {
+    setPicking(false);
+    start(async () => {
+      await toggleReactionAction(messageId, emoji);
+      router.refresh();
+    });
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      {reactions.map((r) => {
+        const mine = viewerId ? r.userIds.includes(viewerId) : false;
+        return (
+          <button
+            key={r.emoji}
+            type="button"
+            title={r.names.join(", ")}
+            onClick={() => toggle(r.emoji)}
+            className={`cursor-pointer rounded-full border px-2 py-0.5 text-[12px] leading-none transition-colors ${mine ? "border-accent bg-accent-tint" : "border-border hover:border-foreground/40"}`}
+          >
+            {r.emoji} <span className="text-[11px] text-muted-foreground">{r.userIds.length}</span>
+          </button>
+        );
+      })}
+      {picking ? (
+        <span className="flex items-center gap-0.5 rounded-full border border-border bg-surface px-1.5 py-0.5 shadow-sm">
+          {REACTIONS.map((e) => (
+            <button key={e} type="button" onClick={() => toggle(e)} className="cursor-pointer rounded-full px-1 text-[15px] hover:bg-surface-muted">{e}</button>
+          ))}
+        </span>
+      ) : (
+        <button type="button" aria-label="Add a reaction" onClick={() => setPicking(true)} className="cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/60 transition-colors hover:text-foreground">☺</button>
+      )}
+    </div>
+  );
+}
+
+export function MessageRow({ messageId, reactions = [], reactable = false, viewerId, grouped = false, senderId, senderName, content, timestamp, isClockwise, attachments = [] }: Props) {
   if (isClockwise) {
     return (
       <div className="flex items-start gap-3">
@@ -104,17 +158,20 @@ export function MessageRow({ senderId, senderName, content, timestamp, isClockwi
   const key = senderId ?? senderName;
 
   return (
-    <div className="flex items-start gap-3">
-      <Face index={faceIndexForId(key)} className="mt-0.5 size-9" />
+    <div className={`flex items-start gap-3 ${grouped ? "-mt-2.5" : ""}`}>
+      {grouped ? <span className="size-9 shrink-0" /> : <Face index={faceIndexForId(key)} className="mt-0.5 size-9" />}
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="font-display text-[15px] font-medium text-foreground">{senderName}</span>
-          <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
-        </div>
-        <p className="mt-1 inline-block max-w-full rounded-2xl rounded-tl-md bg-surface-muted px-3.5 py-2 text-[14.5px] leading-relaxed text-foreground">
+        {!grouped && (
+          <div className="flex items-baseline gap-2">
+            <span className="font-display text-[15px] font-medium text-foreground">{senderName}</span>
+            <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
+          </div>
+        )}
+        <p className={`${grouped ? "" : "mt-0.5"} max-w-full whitespace-pre-wrap text-[15px] leading-relaxed text-foreground`}>
           {content}
         </p>
         <AttachmentChips attachments={attachments} />
+        {reactable && messageId && <Reactions messageId={messageId} reactions={reactions} viewerId={viewerId} />}
       </div>
     </div>
   );

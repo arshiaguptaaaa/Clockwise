@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { castApprovalVoteAction, organiserHardConfirmAction, cancelProposalAction } from "@/app/proposal-actions";
 import { PersonFace, firstName } from "@/components/decisions/People";
+import { HUMAN } from "@/lib/copy";
 import { ReasonForm } from "@/components/decisions/ReasonForm";
 
 export type ProposalCardPayload = {
@@ -85,6 +86,9 @@ export function ProposalCard({
   const canConfirm = isOrganiser && CONFIRMABLE.includes(status);
   const canCancel = isOrganiser && ["AWAITING_APPROVAL", "APPROVED", "REJECTED", "FAILED"].includes(status);
   const open = status === "AWAITING_APPROVAL";
+  const waiting = proposal.approvals.filter((a) => a.decision === "PENDING");
+  // Only when exactly one person is holding things up, and never says it to them.
+  const lookingAt = open && waiting.length === 1 && waiting[0].userId !== viewerId ? waiting[0] : null;
   const agreed = status === "APPROVED";
   const done = status === "CONFIRMED" || status === "EXECUTED";
   const replaced = status === "CANCELLED";
@@ -121,6 +125,7 @@ export function ProposalCard({
         </p>
         <p className="mt-2 text-[13px] text-muted-foreground">Plan updated.</p>
         <People approvals={proposal.approvals} />
+        {proposal.approvals.length >= 3 && proposal.approvals.every((a) => a.decision === "APPROVED") && <p className="mt-2 font-display text-[16px] italic text-muted-foreground">{HUMAN.unanimous}</p>}
       </div>
     );
   }
@@ -158,7 +163,7 @@ export function ProposalCard({
       <People approvals={proposal.approvals} />
 
       {/* Proposal is not Plan: say exactly which one this is. */}
-      {open && <p className="mt-3 text-[12px] text-muted-foreground">Proposed. The Plan hasn&apos;t changed.</p>}
+      {open && <p className="mt-3 text-[12px] text-muted-foreground">Proposed. The Plan hasn&apos;t changed.{lookingAt && <> <span className="font-display italic">{HUMAN.lookingAt(firstName(lookingAt.name))}</span></>}</p>}
       {agreed && <p className="mt-3 text-[12.5px] font-medium text-success">Everyone accepted ✓ <span className="font-normal text-muted-foreground">· the Plan changes when {isOrganiser ? "you confirm" : `${firstName(organiserName)} confirms`}.</span></p>}
       {status === "REJECTED" && <p className="mt-3 text-[12.5px] text-danger">Not everyone could make it. The Plan hasn&apos;t changed.</p>}
       {status === "EXECUTED" && proposal.executionResult && !proposal.change && <p className="mt-3 text-[12.5px] text-success">✓ {proposal.executionResult}</p>}

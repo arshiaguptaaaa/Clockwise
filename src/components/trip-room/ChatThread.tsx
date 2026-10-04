@@ -1,8 +1,8 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import type { CardStatus, CardType } from "@prisma/client";
-import { MessageRow, type MessageAttachment } from "./MessageRow";
+import { MessageRow, type MessageAttachment, type MessageReactionView } from "./MessageRow";
 import { FailedClockwiseMessage } from "./FailedClockwiseMessage";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { Composer } from "./Composer";
@@ -24,6 +24,7 @@ export type ChatThreadMessage = {
   cardStatus: CardStatus | null;
   attachments: MessageAttachment[];
   proposal: ProposalCardData | null;
+  reactions?: MessageReactionView[];
 };
 
 export function ChatThread({
@@ -39,6 +40,7 @@ export function ChatThread({
   placeholder,
   emptyText,
   suggestions,
+  header,
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
@@ -56,6 +58,8 @@ export function ChatThread({
   placeholder: string;
   emptyText: string;
   suggestions?: string[];
+  // Rendered at the top of the scrolling thread (the Trip Room's editorial header).
+  header?: React.ReactNode;
 }) {
   // Only covers the fast DB write — the composer is disabled for
   // milliseconds, not for however long Gemini takes.
@@ -64,6 +68,23 @@ export function ChatThread({
   // the composer's disabled state, so a human can keep typing/sending
   // while Clockwise is still working on a previous message.
   const [isThinking, startThinkTransition] = useTransition();
+
+  // New messages (yours, or a friend's arriving live) keep the latest in view - but only if you
+  // were already near the bottom, so reading history is never yanked away. A short thread opens
+  // at the top so the header is seen; a long one opens at the latest message.
+  const scroller = useRef<HTMLDivElement>(null);
+  const seen = useRef<number | null>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const count = messages.length;
+    if (seen.current === null) {
+      if (el.scrollHeight - el.clientHeight > 900) el.scrollTop = el.scrollHeight;
+    } else if (count > seen.current && el.scrollHeight - el.scrollTop - el.clientHeight < 320) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+    seen.current = count;
+  }, [messages.length]);
 
   function handleSend(formData: FormData) {
     startSendTransition(async () => {
@@ -77,9 +98,14 @@ export function ChatThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto px-4 py-4">
-        {messages.map((message) =>
-          message.proposal ? (
+      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {header}
+        <div className="flex flex-1 flex-col space-y-4 px-4 py-4">
+        {messages.map((message, index) => {
+          const prev = index > 0 ? messages[index - 1] : null;
+          const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
+          const grouped = !message.isClockwise && plain(message) && plain(prev) && prev!.senderId === message.senderId && message.timestamp.getTime() - prev!.timestamp.getTime() < 5 * 60_000;
+          return message.proposal ? (
             <ProposalCard
               key={message.id}
               proposal={message.proposal}
@@ -115,15 +141,21 @@ export function ChatThread({
               timestamp={message.timestamp}
               isClockwise={message.isClockwise}
               attachments={message.attachments}
+              messageId={message.id}
+              reactions={message.reactions}
+              reactable={channel === "GROUP"}
+              viewerId={currentUserId}
+              grouped={grouped}
             />
-          )
-        )}
+          );
+        })}
         {messages.length === 0 && !(isThinking && channel === "PRIVATE") && (
           <p className="pt-12 text-center text-sm text-muted-foreground">{emptyText}</p>
         )}
         {/* Group chat is human-first: Clockwise works silently there. A working
             state belongs only to the private Clockwise conversation. */}
         {isThinking && channel === "PRIVATE" && <ThinkingIndicator />}
+        </div>
       </div>
 
       {channel === "GROUP" && <AskClockwise tripId={tripId} />}

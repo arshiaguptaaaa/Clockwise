@@ -18,6 +18,8 @@ import { RendezvousSection } from "@/components/plan/RendezvousSection";
 import { AgreedPlacesSection } from "@/components/plan/AgreedPlacesSection";
 import { agreedPlaces } from "@/lib/places/place-proposals";
 import { buildRendezvousView } from "@/lib/rendezvous";
+import { Interlude } from "@/components/Interlude";
+import { INTERLUDES } from "@/lib/copy";
 import { pendingReschedules } from "@/lib/decisions";
 
 export default async function PlanOverviewPage({
@@ -97,6 +99,7 @@ export default async function PlanOverviewPage({
       )}
 
       {stay && <StaySection stay={stay} />}
+      <Interlude {...(/bengaluru|bangalore/i.test(heroStop?.name ?? trip.name) ? INTERLUDES.bengaluru : INTERLUDES.impossible)} />
       <AgreedPlacesSection places={agreed} />
       <RendezvousSection view={rendezvous} pending={Object.fromEntries(pending)} organiserName={trip.members.find((m) => m.userId === trip.createdBy)?.user.name ?? "the organiser"} />
 

@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, User, ClipboardList, Wallet, MoreHorizontal } from "lucide-react";
+import { MessagesSquare, CalendarRange, User } from "lucide-react";
 
+// Three places, no more: the group's room, the shared plan, and everything that is yours.
 const TABS = [
-  { segment: "room", label: "Trip Room", icon: Home },
-  { segment: "agent", label: "My Agent", icon: User },
-  { segment: "plan", label: "Plan", icon: ClipboardList },
-  { segment: "budget", label: "Budget", icon: Wallet },
-  { segment: "more", label: "More", icon: MoreHorizontal },
+  { segment: "room", also: [] as string[], label: "Trip", icon: MessagesSquare },
+  { segment: "plan", also: [] as string[], label: "Plan", icon: CalendarRange },
+  { segment: "agent", also: ["budget"], label: "My Clockwise", icon: User },
 ] as const;
 
 export function BottomNav({ tripId }: { tripId: string }) {
@@ -20,7 +19,7 @@ export function BottomNav({ tripId }: { tripId: string }) {
       <div className="flex w-full items-stretch">
         {TABS.map((tab) => {
           const href = `/trips/${tripId}/${tab.segment}`;
-          const active = pathname.startsWith(href);
+          const active = [tab.segment, ...tab.also].some((seg) => pathname.startsWith(`/trips/${tripId}/${seg}`));
           const Icon = tab.icon;
           return (
             <Link

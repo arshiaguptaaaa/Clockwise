@@ -24,9 +24,18 @@ export default function JoinByCodePage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const token = extractToken(value);
-    if (token) {
-      router.push(`/invite/${token}`);
+    if (!token) return;
+    // A pasted group link (/join/CODE) opens the group join page; anything else is a personal invite.
+    const groupMarker = "/join/";
+    const gi = value.indexOf(groupMarker);
+    if (gi >= 0) {
+      const code = value.slice(gi + groupMarker.length).toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (code) {
+        router.push(`/join/${code}`);
+        return;
+      }
     }
+    router.push(`/invite/${token}`);
   }
 
   return (

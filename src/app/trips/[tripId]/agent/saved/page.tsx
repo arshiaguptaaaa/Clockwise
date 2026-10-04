@@ -1,3 +1,4 @@
+import { HUMAN } from "@/lib/copy";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
 import { savedOverlaps } from "@/lib/travel/saved-overlap";
@@ -42,7 +43,7 @@ export default async function SavedPage({ params }: { params: Promise<{ tripId: 
       {rows.length === 0 ? (
         <section className="section text-center">
           <BengaluruArt scene="saved" className="mx-auto w-56 -rotate-2 shadow-[0_14px_30px_-16px_rgba(20,24,26,0.5)]" />
-          <p className="headline headline-md mt-6">Nothing saved yet.</p>
+          <p className="headline headline-md mt-6">{HUMAN.savedEmpty}</p>
           <p className="lede mx-auto mt-2 max-w-[17rem]">Tap SAVE on a place in Around You, or on a stay. Only you will see it.</p>
         </section>
       ) : (

@@ -13,7 +13,6 @@ export default async function PlanLayout({
     { href: base, label: "Overview" },
     { href: `${base}/itinerary`, label: "Itinerary" },
     { href: `${base}/travellers`, label: "Travellers" },
-    { href: `${base}/tasks`, label: "Tasks" },
   ];
 
   return (

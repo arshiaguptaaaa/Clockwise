@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Heart } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
 import { BengaluruArt } from "@/components/art/BengaluruArt";
+import { HUMAN } from "@/lib/copy";
 import { aroundSearchAction, brandSearchAction, toggleSavePlaceAction, locationEventAction, routeToPlaceAction, proposePlaceAction, nextUpAction, freeTimeAction, type AroundResponse, type AnchorStatus, type RouteResponse } from "@/app/traveller-actions";
 import type { NextUp, FreeTime } from "@/lib/travel/window";
 import type { AroundPlace } from "@/lib/travel/around";
@@ -513,7 +514,12 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       </form>
 
       {err && <p className="text-sm text-danger" data-around-error>{err}</p>}
-      {res?.note && <p className="border-l-2 border-accent pl-3 text-[12.5px] leading-snug text-foreground" data-around-note>{res.note}</p>}
+      {res?.note && (
+        <div className="border-l-2 border-accent pl-3" data-around-note>
+          {brand.trim() && <p className="font-display text-[19px] leading-snug tracking-[-0.01em]">{HUMAN.noBrand(brand.trim(), null)}</p>}
+          <p className="mt-0.5 text-[12.5px] leading-snug text-foreground">{res.note}</p>
+        </div>
+      )}
       {overlap && (
         <div className="border-l-2 border-accent pl-3" data-overlap>
           <p className="eyebrow text-accent">◷ Wait.</p>

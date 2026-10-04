@@ -359,6 +359,8 @@ model Message {
   // before any tool in that turn could have executed.
   failed     Boolean     @default(false)
 
+  reactions MessageReaction[]
+
   trip      Trip  @relation(fields: [tripId], references: [id])
   sender    User? @relation("MessageSender", fields: [senderId], references: [id])
   recipient User? @relation("MessageRecipient", fields: [recipientId], references: [id])
@@ -1278,4 +1280,18 @@ model RailCall {
   createdAt         DateTime @default(now())
 
   @@index([tripId, createdAt])
+}
+
+// A friend's quick reaction to a GROUP message. One row per (message, person, emoji);
+// toggling removes it. Group messages only: private conversations carry no reactions.
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
