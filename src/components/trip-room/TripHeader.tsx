@@ -30,18 +30,18 @@ export function TripHeader({
   const tone = (t: HerePerson["tone"]) => (t === "late" ? "text-danger" : t === "early" ? "text-success" : "text-muted-foreground");
   const names = people.map((p) => firstName(p.name)).join(" · ");
   return (
-    <header className="shrink-0 px-5 pb-5 pt-4" data-trip-header>
+    <header className="shrink-0 px-5 pb-2 pt-4" data-trip-header>
       <p className="eyebrow">{dates}</p>
       <h1 className="t-display mt-2 text-[clamp(44px,15vw,64px)] break-words">{place}</h1>
       <p className="t-voice mt-3 text-[15px]">{tagline}</p>
 
       <div className="mt-4 flex items-center gap-3">
         <FaceStack people={people} max={5} className="size-9" />
-        <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{names}</p>
-        <button type="button" onClick={() => setInviteOpen(true)} className="btn btn-ghost !px-4 !text-[11px]">
+        <button type="button" onClick={() => setInviteOpen(true)} className="btn btn-ghost ml-auto !px-4 !text-[11px]">
           + Invite
         </button>
       </div>
+      <p className="mt-2 text-[13px] leading-snug text-muted-foreground" data-names>{names}</p>
 
       <p className="mt-5 flex items-start gap-2 font-display text-[19px] leading-snug tracking-[-0.01em]" data-voice>
         <span className="cw-mark mt-0.5">◷</span>
@@ -62,7 +62,7 @@ export function TripHeader({
           </li>
         ))}
       </ul>
-      <Link href={`/trips/${tripId}/room/files`} className="mt-3 inline-block min-h-8 text-[11.5px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground">
+      <Link href={`/trips/${tripId}/room/files`} className="mt-2 inline-block min-h-8 text-[11.5px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground">
         Files →
       </Link>
       {inviteOpen && <InviteTravellersPanel tripId={tripId} isOrganiser={isOrganiser} onClose={() => setInviteOpen(false)} />}

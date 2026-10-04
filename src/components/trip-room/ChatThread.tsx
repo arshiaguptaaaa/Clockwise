@@ -95,10 +95,16 @@ export function ChatThread({
   // name it. That decides whether "Clockwise is thinking" appears (background work stays silent).
   const [awaitingClockwise, setAwaitingClockwise] = useState(false);
 
+  // Urgent (event-handler) update: the indicator appears the instant Send is pressed.
+  function noticeSend(content: string) {
+    if (channel === "PRIVATE" || /\bclockwise\b/i.test(content)) setAwaitingClockwise(true);
+  }
+
+  useEffect(() => {
+    if (awaitingClockwise) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+  }, [awaitingClockwise]);
+
   function handleSend(formData: FormData) {
-    const content = String(formData.get("content") ?? "");
-    const direct = channel === "PRIVATE" || /\bclockwise\b/i.test(content);
-    if (direct) setAwaitingClockwise(true);
     startSendTransition(async () => {
       const result = await postAction(formData);
       if (!result) {
@@ -119,7 +125,7 @@ export function ChatThread({
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {header}
-        <div className="flex flex-1 flex-col space-y-4 px-4 py-4">
+        <div className="flex flex-1 flex-col space-y-3 px-4 pb-4 pt-2">
         {messages.map((message, index) => {
           const prev = index > 0 ? messages[index - 1] : null;
           const plain = (m: ChatThreadMessage | null) => Boolean(m) && !m!.proposal && !m!.failed && !(m!.cardType && m!.cardData) && !m!.isClockwise;
@@ -178,7 +184,7 @@ export function ChatThread({
         )}
         {/* Group chat is human-first: Clockwise works silently there. A working
             state belongs only to the private Clockwise conversation. */}
-        {(isThinking || isSending) && awaitingClockwise && <ThinkingIndicator />}
+        {awaitingClockwise && <ThinkingIndicator />}
         </div>
       </div>
 
@@ -188,6 +194,7 @@ export function ChatThread({
         channel={channel}
         action={handleSend}
         placeholder={placeholder}
+        onSubmitStart={noticeSend}
         disabled={isSending}
         suggestions={suggestions}
       />

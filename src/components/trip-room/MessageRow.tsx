@@ -105,7 +105,7 @@ function Reactions({ messageId, reactions, viewerId }: { messageId: string; reac
     });
   }
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+    <div className="-mt-0.5 flex min-h-6 flex-wrap items-center gap-1.5">
       {reactions.map((r) => {
         const mine = viewerId ? r.userIds.includes(viewerId) : false;
         return (
@@ -127,7 +127,7 @@ function Reactions({ messageId, reactions, viewerId }: { messageId: string; reac
           ))}
         </span>
       ) : (
-        <button type="button" aria-label="Add a reaction" onClick={() => setPicking(true)} className="cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-40">☺</button>
+        <button type="button" aria-label="Add a reaction" onClick={() => setPicking(true)} className="cursor-pointer rounded-full px-1.5 text-[12px] leading-5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-40">☺</button>
       )}
     </div>
   );

@@ -41,9 +41,13 @@ export function Composer({
   placeholder = "Message the group…",
   disabled = false,
   suggestions,
+  onSubmitStart,
 }: {
   tripId: string;
   channel: "GROUP" | "PRIVATE";
+  // Called synchronously the instant Send is pressed (an urgent update, unlike the form action, which React
+  // holds as a transition) so the UI can react immediately, e.g. "Clockwise is thinking".
+  onSubmitStart?: (content: string) => void;
   action: (formData: FormData) => void | Promise<void>;
   placeholder?: string;
   // Set while a Clockwise turn from a PREVIOUS submit is still in flight —
@@ -343,6 +347,10 @@ export function Composer({
         <form
           ref={formRef}
           data-form="composer"
+          onSubmit={(e) => {
+            const content = String(new FormData(e.currentTarget).get("content") ?? "");
+            if (content.trim() && !disabled) onSubmitStart?.(content);
+          }}
           action={async (formData) => {
             if (disabled) return;
             if (pendingAttachment) formData.set("attachmentId", pendingAttachment.id);

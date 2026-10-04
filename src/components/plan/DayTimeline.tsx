@@ -120,13 +120,13 @@ export function DayTimeline({ view, pending = {}, organiserName = "the organiser
           <h2 className="t-display text-[26px]">{dayHead(`${day}T00:00`)}</h2>
           <ol className="relative mt-4">
             {/* the spine that connects the day */}
-            <span aria-hidden className="absolute bottom-3 left-[5.6rem] top-3 w-px bg-border" />
+            <span aria-hidden className="absolute bottom-3 left-[6.6rem] top-3 w-px bg-border" />
             {items
               .filter((i) => i.local.startsWith(day))
               .map((i) => (
-                <li key={i.key} className={`relative grid grid-cols-[5rem_1fr] gap-x-[1.1rem] ${i.kind === "reach" ? "py-1.5" : i.kind === "commitment" ? "tile-in py-5" : "py-3"}`} {...(i.commitmentName ? { "data-commitment": i.commitmentName } : {})}>
+                <li key={i.key} className={`relative grid grid-cols-[6rem_1fr] gap-x-[1.1rem] ${i.kind === "reach" ? "py-1.5" : i.kind === "commitment" ? "tile-in py-5" : "py-3"}`} {...(i.commitmentName ? { "data-commitment": i.commitmentName } : {})}>
                   <p className={`t-number whitespace-nowrap text-right ${i.kind === "commitment" ? "text-[24px]" : i.kind === "reach" ? "text-[14px] text-muted-foreground" : "text-[19px]"} ${i.risk ? "text-danger" : ""}`}>{timeLabel(i.local)}</p>
-                  <span aria-hidden className={`absolute left-[5.6rem] top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${i.kind === "commitment" ? `size-3 ${i.risk ? "bg-danger" : "bg-accent"}` : i.kind === "reach" ? "size-1.5 bg-border" : "size-2 bg-foreground"}`} />
+                  <span aria-hidden className={`absolute left-[6.6rem] top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${i.kind === "commitment" ? `size-3 ${i.risk ? "bg-danger" : "bg-accent"}` : i.kind === "reach" ? "size-1.5 bg-border" : "size-2 bg-foreground"}`} />
                   <div className="min-w-0 pl-1">
                     {i.leg && (
                       <p className="mb-0.5 text-[11.5px] text-muted-foreground" data-leg>

@@ -147,12 +147,16 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
 
   const me = anchor === "me" && fix ? { lat: fix.lat, lng: fix.lng } : anchor === "anywhere" && custom ? custom : null;
 
+  // Only a new SEARCH dims the list; routing or saving a place must not.
+  const [searching, setSearching] = useState(false);
   const run = (c: string, a: Anchor, diet?: "vegetarian") =>
     start(async () => {
       setErr(null);
       setRouteFor(null);
       setMeet(null);
+      setSearching(true);
       const r = await aroundSearchAction(tripId, c, { diet, anchor: a, me });
+      setSearching(false);
       if (r.ok) {
         setRes(r);
         setSaved(r.saved);
@@ -350,7 +354,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
               <p className="mt-1.5 text-[12.5px] text-muted-foreground" data-hours>
                 {p.hoursNow?.state === "open" && <span className="font-semibold text-accent-strong">{p.hoursNow.until ? `Open until ${p.hoursNow.until}` : "Open now"} · </span>}
                 {p.hoursNow?.state === "closed" && <span className="font-semibold text-danger">{p.hoursNow.opensAt ? `Closed now, opens ${p.hoursNow.opensAt}` : "Closed now"} · </span>}
-                {p.openingHours ? `Hours: ${p.openingHours}` : "Hours unavailable"}
+                {p.openingHours ? `Hours: ${p.openingHours}` : p.hoursNow ? "" : "Hours not listed"}
               </p>
               {whyText && (
                 <p className="t-voice mt-2 text-[14px] leading-snug" data-why>
@@ -430,7 +434,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
               {open && (
                 <div className="sheet-in mt-4 space-y-3 border-t border-border pt-4" data-route-panel>
                   {routeErr && <p className="text-xs text-danger">{routeErr}</p>}
-                  {!route && !routeErr && <p className="text-xs text-muted-foreground">Working out the way…</p>}
+                  {!route && !routeErr && (<div className="space-y-2" aria-hidden><div className="skeleton h-3 w-24" /><div className="skeleton h-7 w-40" /><div className="skeleton h-24 w-full" /></div>)}
                   {route && (
                     <>
                       <p className="text-xs">
@@ -588,7 +592,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
       </div>
 
       {/* RIGHT NOW: the traveller's clock + where they are + what's next. Deterministic; no model involved. */}
-      <details className="section space-y-2" data-right-now>
+      <details className="section !mt-4 !pt-2 space-y-2" data-right-now>
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between [&::-webkit-details-marker]:hidden">
           <span className="eyebrow">Got time to kill?</span>
           <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Right now ▾</span>
@@ -761,7 +765,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           )}
         </div>
       )}
-      {busy && !res && !err && (
+      {searching && !res && !err && (
         <div className="space-y-6 py-2" aria-hidden data-skeleton>
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-2.5">
@@ -838,7 +842,7 @@ export function AroundYou({ tripId, ordered, initialCategory, anchors, wantsMe, 
           )}
         </div>
       )}
-      <ul className={`row-rule transition-opacity duration-200 ${busy && res ? "opacity-50" : ""}`}>
+      <ul className={`row-rule transition-opacity duration-200 ${searching && res ? "opacity-50" : ""}`}>
         {shown.map((p) => renderCard(p, res?.category ?? cat, res?.why[p.providerPlaceId]))}
         {res && shown.length === 0 && !busy && <li className="text-sm text-muted-foreground">Nothing found{maxWalk ? ` within a ${maxWalk}-minute walk` : " here"} in the provider&apos;s data.</li>}
       </ul>

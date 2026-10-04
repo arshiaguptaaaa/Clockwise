@@ -240,6 +240,6 @@ html { -webkit-text-size-adjust: 100%; }
 body { overscroll-behavior-y: none; }
 .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
 /* rows that scroll sideways (chips, anchors) hide the bar and snap */
-.hscroll { display: flex; gap: var(--space-5); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.hscroll { display: flex; gap: var(--space-5); overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: var(--gutter); scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .hscroll::-webkit-scrollbar { display: none; }
 .hscroll > * { flex: 0 0 auto; scroll-snap-align: start; }
