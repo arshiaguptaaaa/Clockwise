@@ -11,7 +11,7 @@
 // keeps a DEMO_SCENARIO_READY event saying exactly what was background setup.
 import { prisma } from "@/lib/prisma";
 import { destinationSearchProvider } from "@/lib/destination-search/open-meteo-provider";
-import { resolveLocationText, searchStays, isGeoapifyConfigured } from "@/lib/travel/geoapify-provider";
+import { resolveLocationText, searchStays, searchNearby, isGeoapifyConfigured } from "@/lib/travel/geoapify-provider";
 import { approveStayFromProposal, markStayBooked } from "@/lib/stays";
 import { createPendingJourney, confirmJourney } from "@/lib/traveller/journey";
 import { setPref } from "@/lib/traveller/vibe";
@@ -114,6 +114,31 @@ export async function ensureDemoScenario(tripId: string): Promise<{ ready: boole
       if (v.food) await setPref(tripId, uid, "food", [v.food]);
       await prisma.vibeCheck.upsert({ where: { tripId_userId: { tripId, userId: uid } }, create: { tripId, userId: uid, status: "COMPLETED", completedAt: new Date() }, update: { status: "COMPLETED", completedAt: new Date() } });
     }
+  });
+
+  // 6. Private saves that overlap: three friends independently saved the same REAL vegetarian-search
+  //    restaurant near the stay; two saved the same real café. The places come from Geoapify now.
+  await step("saves", async () => {
+    const stay = await prisma.booking.findFirst({ where: { tripId, type: "STAY", status: "CONFIRMED" } });
+    if (!stay?.latitude || !stay.longitude) throw new Error("no confirmed stay to search around");
+    const near = { lat: stay.latitude, lng: stay.longitude };
+    const named = <T extends { name: string }>(xs: T[]) => xs.filter((x) => x.name && x.name !== "Unnamed place");
+    const [food, cafes] = await Promise.all([searchNearby("restaurant", near, 1500, 15, "vegetarian"), searchNearby("cafe", near, 1500, 15)]);
+    const rest = named(food)[0];
+    const cafe = named(cafes)[0];
+    const save = (uid: string, p: (typeof food)[number], kind: string) =>
+      prisma.savedPlace.create({ data: { tripId, userId: uid, kind, provider: p.provider, providerPlaceId: p.providerId, name: p.name, address: p.formattedAddress, latitude: p.latitude, longitude: p.longitude, retrievedAt: new Date(p.retrievedAt) } });
+    const out: string[] = [];
+    if (rest) {
+      for (const n of ["Arshia", "Shreya", "Eva"]) await save(userId(n), rest, "RESTAURANT");
+      out.push(`${rest.name} x3`);
+    }
+    if (cafe) {
+      for (const n of ["Arshia", "Harnoor"]) await save(userId(n), cafe, "CAFE");
+      out.push(`${cafe.name} x2`);
+    }
+    if (!out.length) throw new Error("no named places returned");
+    return `saved (private): ${out.join(", ")}`;
   });
 
   // Start with a clean bell: setup notifications are not part of the story.
