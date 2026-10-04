@@ -71,25 +71,52 @@ export default async function PlanOverviewPage({
     .filter((s) => !DESTINATION_PHOTOS[s.name] && !curatedPhotoFor(s.name) && fallbackPhotos.get(s.name))
     .map((s) => ({ id: s.id, name: s.name, photo: fallbackPhotos.get(s.name)! }));
 
+  const heroStop = middleStops.length === 1 ? middleStops[0] : null;
+  const heroPhoto = heroStop ? curatedPhotoFor(heroStop.name) : null;
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-      <TripMapLoader
-        markers={mapMarkers}
-        journeyLine={journeyLine}
-        heightClassName="h-72"
-        emptyStateMessage="No mapped locations yet — add destinations with a place search to see them here."
-      />
-      {unmapped.length > 0 && mapMarkers.length > 0 && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Not shown on the map (no stored location yet): {unmapped.map((d) => d.name).join(", ")}.
-        </p>
+    <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-5">
+      {heroStop && heroPhoto && (
+        <figure className="-mx-1 mb-8" data-plan-hero>
+          <div className="relative aspect-[5/4] overflow-hidden rounded-[22px] bg-surface-muted">
+            <Image src={heroPhoto.src} alt={heroPhoto.alt} fill priority className="object-cover" style={{ objectPosition: heroPhoto.objectPosition }} sizes="(max-width: 512px) 100vw, 512px" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/0 to-black/0" />
+            <figcaption className="absolute inset-x-5 bottom-5 text-white">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/85">
+                {heroStop.startDate && heroStop.endDate ? formatDateRange(heroStop.startDate, heroStop.endDate, "short") : "Dates to decide"}
+              </p>
+              <p className="mt-1 font-display text-[40px] leading-none tracking-[-0.02em]">{heroStop.name}</p>
+              <p className="mt-2 text-[13px] text-white/90">{heroPhoto.tagline}</p>
+            </figcaption>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">
+            Photo: {heroPhoto.credit}, <a href={heroPhoto.licenseUrl} target="_blank" rel="noopener noreferrer" className="underline">{heroPhoto.license}</a>
+          </p>
+        </figure>
       )}
 
       {stay && <StaySection stay={stay} />}
       <AgreedPlacesSection places={agreed} />
       <RendezvousSection view={rendezvous} />
 
-      {middleStops.length > 0 && (
+      <section className="section">
+        <p className="eyebrow">Where</p>
+        <div className="mt-3 overflow-hidden rounded-[18px]">
+          <TripMapLoader
+            markers={mapMarkers}
+            journeyLine={journeyLine}
+            heightClassName="h-60"
+            emptyStateMessage="No mapped locations yet — add destinations with a place search to see them here."
+          />
+        </div>
+        {unmapped.length > 0 && mapMarkers.length > 0 && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Not shown on the map (no stored location yet): {unmapped.map((d) => d.name).join(", ")}.
+          </p>
+        )}
+      </section>
+
+      {middleStops.length > 0 && !(heroStop && heroPhoto) && (
         <>
           <div className="mt-6 grid grid-cols-2 gap-2.5">
             {middleStops.map((stop) => {
@@ -155,15 +182,15 @@ export default async function PlanOverviewPage({
         </>
       )}
 
-      <div className="mt-6">
-        <RouteTimeline stops={stops} transportPlans={transportPlans} />
-      </div>
+      {stops.length > 1 && (
+        <div className="section">
+          <RouteTimeline stops={stops} transportPlans={transportPlans} />
+        </div>
+      )}
 
-      <div className="mt-6 border-t border-border pt-5">
+      <section className="section">
         <div className="mb-3 flex items-center justify-between">
-          <p className="font-display text-lg font-medium text-foreground">
-            Travellers ({trip.members.length})
-          </p>
+          <p className="eyebrow">Travellers · {trip.members.length}</p>
           <div className="flex items-center gap-3">
             <Link
               href={`/trips/${tripId}/agent/trace`}
@@ -202,7 +229,7 @@ export default async function PlanOverviewPage({
             );
           })}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

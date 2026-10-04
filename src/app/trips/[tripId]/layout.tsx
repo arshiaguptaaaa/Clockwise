@@ -46,7 +46,7 @@ export default async function TripShellLayout({
         tripId={tripId}
         isOrganiser={member.userId === trip.createdBy}
       />
-      <div className="mx-auto flex w-full min-h-0 max-w-lg flex-1 flex-col bg-surface lg:max-w-2xl lg:border-x lg:border-border lg:shadow-sm">
+      <div className="mx-auto flex w-full min-h-0 max-w-lg flex-1 flex-col bg-surface lg:max-w-2xl lg:border-x lg:border-border">
         {children}
       </div>
       <BottomNav tripId={tripId} />

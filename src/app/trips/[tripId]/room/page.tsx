@@ -3,7 +3,7 @@ import { getTripById } from "@/lib/trip";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { getCurrentUserId } from "@/lib/session";
 import { ChatThread } from "@/components/trip-room/ChatThread";
-import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
+import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { postGroupMessage, runGroupAgentTurn } from "@/app/actions";
 import { decodeProposalPayload } from "@/lib/proposals";
 import type { ProposalCardData } from "@/components/trip-room/ProposalCard";
@@ -77,15 +77,12 @@ export default async function TripRoomChatPage({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {isFresh && (
-        <div className="relative mx-4 mt-3 flex shrink-0 items-center gap-4 overflow-hidden rounded-3xl bg-pop-yellow-tint px-4 py-3">
-          <CharacterScene scene="map" tilt={-4} sizes="96px" className="w-20 shrink-0" />
+        <div className="mx-5 mt-4 flex shrink-0 items-center gap-4 border-b border-border pb-4">
+          <BengaluruArt scene="converge" className="tile-in w-24 shrink-0 -rotate-2 shadow-[0_12px_26px_-16px_rgba(20,24,26,0.55)]" />
           <div className="min-w-0">
-            <p className="font-display text-xl italic leading-tight text-foreground">Start plotting.</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Say where, when, or what you&apos;re dreaming of — Clockwise keeps it all in step.</p>
+            <p className="headline headline-md">Start plotting.</p>
+            <p className="mt-1 text-[12.5px] leading-snug text-muted-foreground">Say where, when, or what you&apos;re dreaming of. Clockwise keeps everyone&apos;s clock in step.</p>
           </div>
-          <SpeechBubble className="absolute right-3 top-2 hidden sm:block" tail="bottom-right">
-            Prague? Jaipur?
-          </SpeechBubble>
         </div>
       )}
     <ChatThread

@@ -63,7 +63,7 @@ const METHODS: { id: SplitMethod; label: string }[] = [
   { id: "SHARES", label: "Shares" },
 ];
 
-const label = "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
+const label = "eyebrow";
 const input = "w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-accent";
 
 function sumLine(rec: Record<string, number>): string {
@@ -92,29 +92,29 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 space-y-6 overflow-y-auto px-5 pb-28 pt-6">
+      <div className="flex-1 overflow-y-auto px-5 pb-28 pt-6 stack-sections">
         <header>
           <p className={label}>Budget</p>
-          <h1 className="mt-2 font-display text-[28px] leading-[1.05] tracking-tight">MONEY, WITHOUT THE GROUP CHAT MATH.</h1>
+          <h1 className="headline headline-xl mt-2">Money, without the group chat math.</h1>
         </header>
 
         {data.you.length > 0 && (
-          <section className="rounded-2xl border border-border bg-pop-yellow-tint p-4">
+          <section>
             <p className={label}>You</p>
             {data.you.map((y) => (
               <div key={y.currency} className="mt-3 first:mt-2">
                 <div className="grid grid-cols-3 gap-2 text-sm">
                   <div>
                     <p className="text-[11px] text-muted-foreground">You paid</p>
-                    <p className="font-semibold">{formatMoney(y.paid, y.currency)}</p>
+                    <p className="font-display text-[22px] leading-tight tracking-[-0.01em]">{formatMoney(y.paid, y.currency)}</p>
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground">Your share</p>
-                    <p className="font-semibold">{formatMoney(y.share, y.currency)}</p>
+                    <p className="font-display text-[22px] leading-tight tracking-[-0.01em]">{formatMoney(y.share, y.currency)}</p>
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground">{y.net >= 0 ? "You're owed" : "You owe"}</p>
-                    <p className={`font-semibold ${y.net > 0 ? "text-success" : y.net < 0 ? "text-danger" : ""}`}>{formatMoney(Math.abs(y.net), y.currency)}</p>
+                    <p className={`font-display text-[22px] leading-tight tracking-[-0.01em] ${y.net > 0 ? "text-success" : y.net < 0 ? "text-danger" : ""}`}>{formatMoney(Math.abs(y.net), y.currency)}</p>
                   </div>
                 </div>
               </div>
@@ -132,9 +132,9 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
                 ["PAID", data.totals.paid, "Money moved"],
               ] as const
             ).map(([stage, rec, hint]) => (
-              <div key={stage} className="rounded-xl border border-border p-3">
+              <div key={stage} className="border-l border-border pl-3 first:border-l-0 first:pl-0">
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${STAGE_STYLE[stage]}`}>{STAGE_WORD[stage]}</span>
-                <p className="mt-2 text-[15px] font-semibold leading-tight" data-stage-total={stage}>{sumLine(rec)}</p>
+                <p className="mt-2 font-display text-[20px] leading-tight tracking-[-0.01em]" data-stage-total={stage}>{sumLine(rec)}</p>
                 <p className="text-[11px] text-muted-foreground">{hint}</p>
               </div>
             ))}
@@ -146,7 +146,7 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
             <p className={label}>Waiting for your yes ✦</p>
             <div className="mt-2 space-y-2">
               {data.proposed.map((e) => (
-                <div key={e.id} className="rounded-xl border border-dashed border-border p-3">
+                <div key={e.id} className="border-l-2 border-accent pl-3">
                   <p className="text-sm font-semibold">{e.title}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatMoney(e.amountMinor, e.currency)} · paid by {nameOf(e.paidByUserId)} · split {e.participants.length} ways
@@ -182,10 +182,10 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
               {empty ? "No money talk yet. Suspiciously peaceful." : settledUp ? "All square ✦ Nobody owes anybody." : "Nothing to settle yet — only paid expenses count."}
             </p>
           ) : (
-            <div className="mt-2 space-y-2">
+            <div className="row-rule mt-2">
               {data.balances.flatMap((b) =>
                 b.transfers.map((t, i) => (
-                  <div key={`${b.currency}-${i}`} className="flex items-center justify-between gap-3 rounded-xl border border-border p-3" data-transfer>
+                  <div key={`${b.currency}-${i}`} className="flex items-center justify-between gap-3 py-3" data-transfer>
                     <p className="text-sm">
                       <span className="font-semibold">{nameOf(t.fromUserId)}</span> pays <span className="font-semibold">{nameOf(t.toUserId)}</span>{" "}
                       <span className="font-semibold">{formatMoney(t.amountMinor, b.currency)}</span>
@@ -219,10 +219,10 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
           {empty ? (
             <p className="mt-2 text-sm text-muted-foreground">Tell Clockwise in chat — &ldquo;I paid 6k for dinner, split between us&rdquo; — or add one below.</p>
           ) : (
-            <ul className="mt-2 divide-y divide-border rounded-xl border border-border">
+            <ul className="row-rule mt-1">
               {data.expenses.map((e) => (
                 <li key={e.id}>
-                  <button className="flex w-full cursor-pointer items-center justify-between gap-3 p-3 text-left" onClick={() => setSheet({ kind: "expense", edit: e })} data-expense={e.title}>
+                  <button className="flex w-full cursor-pointer items-center justify-between gap-3 py-3.5 text-left" onClick={() => setSheet({ kind: "expense", edit: e })} data-expense={e.title}>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-semibold">{e.title}</span>
                       <span className="block text-xs text-muted-foreground">
@@ -230,7 +230,7 @@ export function BudgetView({ data }: { data: BudgetViewData }) {
                       </span>
                     </span>
                     <span className="shrink-0 text-right">
-                      <span className="block text-sm font-semibold">{formatMoney(e.amountMinor, e.currency)}</span>
+                      <span className="block font-display text-[18px] leading-tight">{formatMoney(e.amountMinor, e.currency)}</span>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${STAGE_STYLE[e.stage]}`}>{STAGE_WORD[e.stage]}</span>
                     </span>
                   </button>

@@ -163,7 +163,34 @@ export const CURATED_PHOTOS: CuratedPhoto[] = [
     lift: -2,
     matches: ["reykjavik", "reykjavík"],
   },
+  {
+    key: "bengaluru",
+    src: "/destinations/bengaluru.jpg",
+    label: "Bengaluru",
+    country: "India",
+    alt: "A rain-wet paved path under trees in Lalbagh Botanical Garden, Bengaluru",
+    tagline: "Rain at four. Dinner at eight.",
+    signals: ["Lalbagh · 16:00", "Plan synced"],
+    credit: "Ashwin Kumar / Flickr",
+    license: "CC BY-SA 2.0",
+    licenseUrl: "https://creativecommons.org/licenses/by-sa/2.0/",
+    sourceUrl: "https://www.flickr.com/photos/34501870@N00/51347333834",
+    objectPosition: "50% 60%",
+    tilt: -1,
+    lift: 0,
+    matches: ["bengaluru", "bangalore"],
+  },
 ];
+
+// Extra Bengaluru frame (wide), same photographer and licence; used for editorial headers.
+export const BENGALURU_WIDE = {
+  src: "/destinations/bengaluru-lalbagh.jpg",
+  alt: "Lalbagh Botanical Garden lawn and trees under a monsoon sky, Bengaluru",
+  credit: "Ashwin Kumar / Flickr",
+  license: "CC BY-SA 2.0",
+  licenseUrl: "https://creativecommons.org/licenses/by-sa/2.0/",
+  sourceUrl: "https://www.flickr.com/photos/34501870@N00/51347333994",
+} as const;
 
 export function curatedPhotoFor(name: string | null | undefined): CuratedPhoto | null {
   const n = (name ?? "").toLowerCase();

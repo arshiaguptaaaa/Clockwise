@@ -2,12 +2,12 @@
 
 :root {
   --background: #ffffff;
-  --page: #f7f8f6;
+  --page: #fbfaf7;
   --surface: #ffffff;
-  --surface-muted: #f2f4f1;
+  --surface-muted: #f3f1ec;
   --foreground: #14181a;
   --muted-foreground: #6b716c;
-  --border: #e6e8e4;
+  --border: #ebe8e1;
 
   --accent: #1e4b3a;
   --accent-strong: #163a2c;
@@ -22,7 +22,7 @@
   --pop-blue-tint: #e1e9ff;
   --pop-orange: #f28a2e;
   --pop-orange-tint: #ffe6cf;
-  --trip-canvas: #fff5ea;
+  --trip-canvas: #fbfaf7;
 
   --success: #1d8a4f;
   --success-tint: #e6f4ea;
@@ -122,3 +122,22 @@ body {
     animation: none;
   }
 }
+
+
+/* ---- Editorial layer: travel-magazine typography, hairlines instead of boxes. ---- */
+.eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted-foreground); }
+.headline { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; line-height: 1.02; color: var(--foreground); }
+.headline-xl { font-size: 38px; }
+.headline-lg { font-size: 30px; }
+.headline-md { font-size: 22px; letter-spacing: -0.01em; line-height: 1.12; }
+.lede { font-size: 14px; line-height: 1.55; color: var(--muted-foreground); }
+.hairline { border-top: 1px solid var(--border); }
+.section { padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--border); }
+.section:first-child { padding-top: 0; margin-top: 0; border-top: 0; }
+.row-rule > * + * { border-top: 1px solid var(--border); }
+.tile-in { animation: tile-in 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes tile-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .tile-in { animation: none; } }
+
+.stack-sections > section { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border); }
+.stack-sections > header + section { margin-top: 24px; }

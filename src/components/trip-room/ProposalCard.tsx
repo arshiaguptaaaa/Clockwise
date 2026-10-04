@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, Circle, ShieldCheck, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, Circle, AlertTriangle } from "lucide-react";
 import { avatarColor } from "@/lib/avatar";
 import { castApprovalVoteAction, organiserHardConfirmAction, cancelProposalAction } from "@/app/proposal-actions";
 
@@ -99,22 +99,19 @@ export function ProposalCard({
   }
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-border bg-surface px-4 py-3.5 sm:max-w-lg">
+    <div className="w-full max-w-md border-l-[3px] border-accent bg-surface-muted/60 py-3.5 pl-4 pr-3 sm:max-w-lg" data-proposal-card>
       <div className="flex items-start gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <ShieldCheck className="size-4" strokeWidth={2} />
-        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="text-xs font-medium text-accent-strong">Clockwise</span>
-            <span className="text-[11px] text-muted-foreground">· Proposal</span>
-            <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium ${status.className}`}>
+            <span className="eyebrow !text-accent-strong">Clockwise</span>
+            <span className="eyebrow">· Proposal</span>
+            <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${status.className}`}>
               {status.label}
             </span>
           </div>
 
-          <p className="mt-1 text-sm font-medium leading-snug text-foreground">{proposal.title}</p>
-          <p className="mt-0.5 text-sm leading-snug text-muted-foreground">{proposal.summary}</p>
+          <p className="mt-2 font-display text-[22px] leading-[1.1] tracking-[-0.01em] text-foreground">{proposal.title}</p>
+          <p className="mt-1.5 text-[13.5px] leading-snug text-muted-foreground">{proposal.summary}</p>
 
           {(proposal.payload.pickup || proposal.payload.destination || proposal.payload.timing || proposal.payload.price) && (
             <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -184,7 +181,7 @@ export function ProposalCard({
                 type="button"
                 disabled={isPending}
                 onClick={() => vote("APPROVED")}
-                className={`cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`cursor-pointer rounded-full px-5 py-2 text-[12px] font-semibold tracking-[0.1em] transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${
                   myApproval?.decision === "APPROVED"
                     ? "bg-success text-white"
                     : "border border-border text-muted-foreground hover:border-success hover:text-success"
@@ -196,7 +193,7 @@ export function ProposalCard({
                 type="button"
                 disabled={isPending}
                 onClick={() => vote("REJECTED")}
-                className={`cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`cursor-pointer rounded-full px-5 py-2 text-[12px] font-semibold tracking-[0.1em] transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${
                   myApproval?.decision === "REJECTED"
                     ? "bg-danger text-white"
                     : "border border-border text-muted-foreground hover:border-danger hover:text-danger"

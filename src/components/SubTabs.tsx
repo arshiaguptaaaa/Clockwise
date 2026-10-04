@@ -11,20 +11,20 @@ export function SubTabs({
   const pathname = usePathname();
 
   return (
-    <div className="flex gap-2 overflow-x-auto border-b border-border px-4 py-2.5">
+    <div className="flex gap-6 overflow-x-auto border-b border-border px-5 [scrollbar-width:none]">
       {tabs.map((tab) => {
         const active = pathname === tab.href;
         return (
           <Link
             key={tab.href}
             href={tab.href}
-            className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-              active
-                ? "bg-accent font-medium text-accent-foreground shadow-sm"
-                : "bg-pop-yellow-tint/70 text-muted-foreground hover:bg-pop-yellow-tint hover:text-foreground"
+            aria-current={active ? "page" : undefined}
+            className={`relative shrink-0 cursor-pointer py-3 text-[13.5px] tracking-wide transition-colors ${
+              active ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {tab.label}
+            <span className={`absolute inset-x-0 -bottom-px h-[2px] rounded-full transition-colors ${active ? "bg-accent" : "bg-transparent"}`} />
           </Link>
         );
       })}

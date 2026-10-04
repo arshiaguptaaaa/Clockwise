@@ -7,7 +7,7 @@ import { uploadAttachment } from "@/app/attachment-actions";
 import { confirmJourneyAction, discardJourneyAction, addManualJourneyAction } from "@/app/traveller-actions";
 
 type Pending = { id: string; mode: string; carrier: string | null; originName: string | null; destinationName: string | null; departLocal: string | null; arriveLocal: string | null };
-const label = "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
+const label = "eyebrow";
 const input = "w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-accent";
 const MODES = [
   ["FLIGHT", "✈ Flight"],
@@ -61,8 +61,8 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
   return (
     <div className="space-y-5">
       {pending && (
-        <div className="rounded-2xl border border-dashed border-accent p-4" data-pending-journey>
-          <p className="font-display text-xl">CLOCKWISE FOUND THIS ✦</p>
+        <div className="border-l-2 border-accent pl-4" data-pending-journey>
+          <p className="headline headline-md">Clockwise found this ✦</p>
           <p className="text-xs text-muted-foreground">Read from your ticket. It stays private until you confirm — then your arrival goes to the Plan.</p>
           {edit ? (
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -113,7 +113,7 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
                 setMode(m);
                 fileRef.current?.click();
               }}
-              className="cursor-pointer rounded-2xl border border-border bg-page px-2 py-3 text-xs font-semibold"
+              className="cursor-pointer rounded-full border border-foreground/20 px-2 py-3 text-[11px] font-semibold tracking-[0.1em]"
               data-upload-mode={m}
             >
               {uploading && mode === m ? <Loader2 className="mx-auto size-4 animate-spin" /> : `UPLOAD ${l.toUpperCase()}`}
@@ -129,7 +129,7 @@ export function JourneyPanel({ tripId, pending, hasConfirmed }: { tripId: string
       </div>
 
       {manual && (
-        <div className="space-y-2 rounded-2xl border border-border p-4">
+        <div className="space-y-2">
           <div className="grid grid-cols-3 gap-2">
             {MODES.map(([m, l]) => (
               <button key={m} type="button" onClick={() => setMode(m)} className={`cursor-pointer rounded-xl border px-2 py-2 text-xs font-semibold ${mode === m ? "border-accent bg-accent-tint" : "border-border"}`}>

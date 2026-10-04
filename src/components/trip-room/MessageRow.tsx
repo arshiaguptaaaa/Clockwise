@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Clock, Volume2, Square, Paperclip } from "lucide-react";
 import { Face } from "@/components/art/CharacterScene";
-import { faceIndexForId, popTintForId } from "@/lib/characters";
+import { faceIndexForId } from "@/lib/characters";
 
 export type MessageAttachment = { id: string; filename: string };
 
@@ -83,15 +83,15 @@ export function MessageRow({ senderId, senderName, content, timestamp, isClockwi
   if (isClockwise) {
     return (
       <div className="flex items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground ring-2 ring-pop-pink">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
           <Clock className="size-4" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-medium text-accent-strong">Clockwise</span>
+            <span className="eyebrow !text-accent-strong">Clockwise</span>
             <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
           </div>
-          <div className="mt-1 rounded-2xl rounded-tl-md border border-accent/15 bg-accent-tint px-3.5 py-2.5 text-sm leading-relaxed text-foreground shadow-[0_6px_16px_-10px_rgba(30,75,58,0.5)]">
+          <div className="mt-1 border-l-2 border-accent/40 pl-3 font-display text-[17px] leading-[1.35] tracking-[-0.005em] text-foreground">
             {content}
           </div>
           <AttachmentChips attachments={attachments} />
@@ -111,10 +111,7 @@ export function MessageRow({ senderId, senderName, content, timestamp, isClockwi
           <span className="font-display text-[15px] font-medium text-foreground">{senderName}</span>
           <span className="text-[11px] text-muted-foreground">{formatTime(timestamp)}</span>
         </div>
-        <p
-          className="mt-1 inline-block max-w-full rounded-2xl rounded-tl-md px-3.5 py-2 text-sm leading-relaxed text-foreground"
-          style={{ backgroundColor: popTintForId(key) }}
-        >
+        <p className="mt-1 inline-block max-w-full rounded-2xl rounded-tl-md bg-surface-muted px-3.5 py-2 text-[14.5px] leading-relaxed text-foreground">
           {content}
         </p>
         <AttachmentChips attachments={attachments} />

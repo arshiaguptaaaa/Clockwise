@@ -24,13 +24,13 @@ export function TopBar({
   const containerRef = useRef<HTMLDivElement>(null);
 
   return (
-    <header className="sticky top-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-start justify-between border-b border-border bg-surface/95 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur lg:max-w-2xl lg:border-x">
+    <header className="sticky top-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-start justify-between bg-surface/95 px-5 pb-2.5 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur lg:max-w-2xl lg:border-x lg:border-border">
       <div className="flex w-full items-start justify-between">
         <div>
-          <p className="font-display text-xl font-medium leading-tight tracking-tight text-foreground">
+          <p className="font-display text-[21px] leading-[1.1] tracking-[-0.015em] text-foreground">
             {title}
           </p>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <p className="mt-0.5 text-[11.5px] tracking-wide text-muted-foreground">{subtitle}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -38,9 +38,9 @@ export function TopBar({
             type="button"
             aria-label="Invite travellers"
             onClick={() => setInviteOpen(true)}
-            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-accent hover:text-accent"
+            className="flex size-9 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
           >
-            <UserPlus className="size-3.5" /> Invite
+            <UserPlus className="size-[18px]" strokeWidth={1.75} />
           </button>
 
           {inviteOpen && (
@@ -60,7 +60,7 @@ export function TopBar({
             onClick={() => setOpen((v) => !v)}
             className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
           >
-            <MoreVertical className="size-5" />
+            <MoreVertical className="size-[18px]" strokeWidth={1.75} />
           </button>
 
           {open && (

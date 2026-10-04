@@ -15,9 +15,9 @@ export function ReadyList({ tripId, items }: { tripId: string; items: ReadyItem[
   const [done, setDone] = useState<Record<string, boolean>>(Object.fromEntries(items.map((i) => [i.key, i.done])));
   const [, start] = useTransition();
   return (
-    <ul className="space-y-2">
+    <ul className="row-rule">
       {items.map((it) => (
-        <li key={it.key} className="rounded-xl border border-border p-3" data-ready-item={it.key}>
+        <li key={it.key} className="py-4" data-ready-item={it.key}>
           <div className="flex items-start gap-3">
             {it.auto ? (
               <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] ${done[it.key] ? "bg-success text-white" : "border border-border"}`}>{done[it.key] ? "✓" : ""}</span>
@@ -33,11 +33,11 @@ export function ReadyList({ tripId, items }: { tripId: string; items: ReadyItem[
               />
             )}
             <div className="min-w-0 flex-1">
-              <p className={`text-sm font-semibold ${done[it.key] && !it.auto ? "text-muted-foreground line-through" : ""}`}>{it.label}</p>
-              {it.detail && <p className="text-xs text-muted-foreground">{it.detail}</p>}
+              <p className={`font-display text-[19px] leading-tight tracking-[-0.01em] ${done[it.key] && !it.auto ? "text-muted-foreground line-through" : ""}`}>{it.label}</p>
+              {it.detail && <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{it.detail}</p>}
               {it.source && <p className="text-[11px] text-muted-foreground">{it.source}</p>}
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${KIND[it.kind].cls}`}>{KIND[it.kind].label}</span>
+                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${KIND[it.kind].cls}`}>{KIND[it.kind].label}</span>
                 {it.href && !done[it.key] && (
                   <Link href={it.href} className="text-xs font-semibold text-accent underline-offset-2 hover:underline">
                     Do this →

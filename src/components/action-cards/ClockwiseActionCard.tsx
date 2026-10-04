@@ -85,15 +85,15 @@ export function ClockwiseActionCard({
   }
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-border bg-surface px-4 py-3.5 sm:max-w-lg">
+    <div className={`w-full max-w-md border-l-[3px] py-3 pl-4 pr-2 sm:max-w-lg ${visual.tint === "accent" ? "border-accent" : "border-warning"}`}>
       <div className="flex items-start gap-3">
-        <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${tintClasses}`}>
+        <span className={`hidden ${tintClasses}`}>
           <Icon className="size-4" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="text-xs font-medium text-accent-strong">Clockwise</span>
-            <span className="text-[11px] text-muted-foreground">· {visual.label}</span>
+            <span className="eyebrow !text-accent-strong">Clockwise</span>
+            <span className="eyebrow">· {visual.label}</span>
             {status === "CONFIRMED" && (
               <span className="inline-flex items-center gap-1 rounded-full bg-success-tint px-1.5 py-0.5 text-[10px] font-medium text-success">
                 <Check className="size-2.5" /> Confirmed
@@ -117,11 +117,11 @@ export function ClockwiseActionCard({
             )}
           </div>
 
-          <p className="mt-1 text-sm font-medium leading-snug text-foreground">
+          <p className="mt-2 font-display text-[21px] leading-[1.12] tracking-[-0.01em] text-foreground">
             {title}
           </p>
           {context && (
-            <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
+            <p className="mt-1.5 text-[13.5px] leading-snug text-muted-foreground">
               {context}
             </p>
           )}
@@ -166,7 +166,7 @@ export function ClockwiseActionCard({
                   type="button"
                   disabled={pending}
                   onClick={() => runAction(primaryAction, "primary")}
-                  className="cursor-pointer rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="cursor-pointer rounded-full bg-accent px-5 py-2 text-[12px] font-semibold tracking-[0.08em] text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {pendingWhich === "primary" && pending
                     ? (primaryAction.pendingLabel ?? "Working…")
@@ -178,7 +178,7 @@ export function ClockwiseActionCard({
                   type="button"
                   disabled={pending}
                   onClick={() => runAction(secondaryAction, "secondary")}
-                  className="cursor-pointer rounded-full border border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="cursor-pointer rounded-full border border-foreground/20 px-5 py-2 text-[12px] font-semibold tracking-[0.08em] text-muted-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {pendingWhich === "secondary" && pending
                     ? (secondaryAction.pendingLabel ?? "Working…")

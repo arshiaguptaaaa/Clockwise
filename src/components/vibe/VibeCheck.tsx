@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { X } from "lucide-react";
 import { ClockwiseMark } from "@/components/ClockwiseMark";
+import { BengaluruArt } from "@/components/art/BengaluruArt";
 import { saveVibeAnswerAction, deferVibeAction, completeVibeAction, searchOriginAction } from "@/app/traveller-actions";
 import type { Question, QuestionId } from "@/lib/traveller/vibe";
 
@@ -73,16 +74,17 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
 
         {stage === "intro" && (
           <div className="flex flex-1 flex-col justify-center text-center">
-            <h1 className="font-display text-[34px] leading-[1.05] tracking-tight">HEY {firstName.toUpperCase()}.</h1>
-            <p className="mt-4 text-lg text-foreground">
+            <BengaluruArt scene="coffee" className="tile-in mx-auto w-44 -rotate-2 shadow-[0_16px_32px_-18px_rgba(20,24,26,0.55)]" />
+            <h1 className="headline headline-xl mt-8">Hey {firstName}.</h1>
+            <p className="mt-3 font-display text-[22px] leading-snug tracking-[-0.01em] text-foreground">
               Before we plan around you,
               <br />
               quick vibe check?
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">30 seconds. Private — your answers never go to the group chat.</p>
+            <p className="lede mx-auto mt-3 max-w-[18rem]">30 seconds. Private. Your answers never go to the group chat.</p>
             {knownLine && <p className="mt-3 text-xs text-muted-foreground">I already have: {knownLine}. I won&apos;t ask that again.</p>}
             <div className="mt-8 flex flex-col items-center gap-3">
-              <button type="button" onClick={() => (total === 0 ? next() : setStage("q"))} className="w-56 cursor-pointer rounded-full bg-accent py-3 text-sm font-semibold text-accent-foreground">
+              <button type="button" onClick={() => (total === 0 ? next() : setStage("q"))} className="w-60 cursor-pointer rounded-full bg-accent py-3.5 text-[13px] font-semibold tracking-[0.14em] text-accent-foreground">
                 LET&apos;S GO
               </button>
               <button type="button" onClick={later} disabled={busy} className="cursor-pointer text-sm font-semibold text-muted-foreground">
@@ -100,7 +102,7 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
               ))}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto py-6">
-              <h2 className="font-display text-[30px] leading-[1.05] tracking-tight">{q.title}</h2>
+              <h2 className="headline headline-lg">{q.title.charAt(0) + q.title.slice(1).toLowerCase()}</h2>
               {q.hint && <p className="mt-1 text-xs text-muted-foreground">{q.hint}</p>}
 
               {q.kind === "place" && (
@@ -143,7 +145,7 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
                             ? setSingle((s) => ({ ...s, [q.id]: o.value }))
                             : setMulti((m) => ({ ...m, [q.id]: m[q.id]?.includes(o.value) ? m[q.id].filter((x) => x !== o.value) : [...(m[q.id] ?? []), o.value] }))
                         }
-                        className={`cursor-pointer rounded-full border px-4 py-2.5 text-sm font-medium transition-colors ${on ? "border-accent bg-pop-pink-tint text-accent-strong" : "border-border bg-page"}`}
+                        className={`cursor-pointer rounded-full border px-4 py-2.5 text-sm font-medium transition-colors ${on ? "border-accent bg-accent text-accent-foreground" : "border-foreground/15 bg-surface"}`}
                         data-option={o.value}
                       >
                         {o.icon && <span className="mr-1.5">{o.icon}</span>}
@@ -185,10 +187,8 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
 
         {stage === "done" && (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <span className="text-accent-strong">
-              <ClockwiseMark size={56} working />
-            </span>
-            <h2 className="mt-4 font-display text-[34px] leading-[1.05] tracking-tight">GOT YOUR VIBE.</h2>
+            <BengaluruArt scene="ready" className="tile-in w-44 rotate-2 shadow-[0_16px_32px_-18px_rgba(20,24,26,0.55)]" />
+            <h2 className="headline headline-xl mt-8">Got your vibe.</h2>
             {summary.length > 0 && <p className="mt-3 max-w-xs text-sm text-muted-foreground">{summary.join(" · ")}</p>}
             <button
               type="button"
@@ -196,7 +196,7 @@ export function VibeCheck({ tripId, firstName, questions, knownLine }: { tripId:
                 setOpen(false);
                 router.push(`/trips/${tripId}/agent/around`);
               }}
-              className="mt-8 w-60 cursor-pointer rounded-full bg-accent py-3 text-sm font-semibold text-accent-foreground"
+              className="mt-8 w-60 cursor-pointer rounded-full bg-accent py-3.5 text-[13px] font-semibold tracking-[0.14em] text-accent-foreground"
             >
               SEE AROUND YOU
             </button>

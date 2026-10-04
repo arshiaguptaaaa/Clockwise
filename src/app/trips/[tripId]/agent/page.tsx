@@ -7,7 +7,6 @@ import { postPrivateMessage, runPrivateAgentTurn } from "@/app/actions";
 import { ConnectedServices } from "@/components/my-clockwise/ConnectedServices";
 import { CriticalTripAlerts } from "@/components/my-clockwise/CriticalTripAlerts";
 import { liveLocationOffer } from "@/lib/readiness-engine";
-import { CharacterScene, SpeechBubble } from "@/components/art/CharacterScene";
 import { LiveLocationCard } from "@/components/my-clockwise/LiveLocationCard";
 import { getTripStay } from "@/lib/stays";
 import { VibeCheck } from "@/components/vibe/VibeCheck";
@@ -78,28 +77,20 @@ export default async function MyClockwisePage({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {vibeGate}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
-        <div>
-          <p className="font-display text-xl font-medium leading-tight text-foreground">My Clockwise</p>
-          <p className="text-xs text-muted-foreground">Private · Only you and Clockwise</p>
-        </div>
-        <div className="relative w-14 shrink-0">
-          <CharacterScene scene="memories" tilt={4} sizes="60px" />
-          <SpeechBubble className="absolute -left-[5.5rem] top-0 z-10 w-max" tail="right">
-            Just between us.
-          </SpeechBubble>
-        </div>
+      <div className="shrink-0 px-5 pb-3 pt-5">
+        <p className="eyebrow">My Clockwise · Private</p>
+        <p className="headline headline-lg mt-1.5">Just between us.</p>
       </div>
 
       {stay && (
-        <div className="shrink-0 border-b border-border bg-surface-muted px-4 py-2 text-xs text-foreground" data-my-stay>
-          <span className="font-semibold uppercase tracking-wider text-muted-foreground">Your stay</span>{" "}
+        <div className="shrink-0 border-y border-border px-5 py-2.5 text-[12.5px] text-foreground" data-my-stay>
+          <span className="eyebrow mr-2">Your stay</span>
           {stay.placeName} {stay.status === "CONFIRMED" ? "✓ booked" : "· approved, not booked yet"}
         </div>
       )}
 
       {uberStatus && UBER_STATUS_MESSAGES[uberStatus] && (
-        <div className="shrink-0 border-b border-border bg-surface-muted px-4 py-2 text-xs text-foreground">
+        <div className="shrink-0 border-b border-border px-5 py-2 text-xs text-foreground">
           {UBER_STATUS_MESSAGES[uberStatus]}
         </div>
       )}

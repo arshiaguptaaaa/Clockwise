@@ -16,7 +16,7 @@ export function BottomNav({ tripId }: { tripId: string }) {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky bottom-0 pb-[env(safe-area-inset-bottom)] z-20 mx-auto flex w-full shrink-0 max-w-lg items-stretch border-t border-border bg-surface/95 backdrop-blur lg:max-w-2xl lg:border-x">
+    <nav className="sticky bottom-0 z-20 mx-auto flex w-full shrink-0 max-w-lg items-stretch border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:max-w-2xl lg:border-x">
       <div className="flex w-full items-stretch">
         {TABS.map((tab) => {
           const href = `/trips/${tripId}/${tab.segment}`;
@@ -26,16 +26,12 @@ export function BottomNav({ tripId }: { tripId: string }) {
             <Link
               key={tab.segment}
               href={href}
-              className={`flex flex-1 cursor-pointer flex-col items-center gap-1 px-2 py-2.5 text-center transition-colors ${
-                active
-                  ? "text-accent"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              aria-current={active ? "page" : undefined}
+              className={`relative flex flex-1 cursor-pointer flex-col items-center gap-0.5 px-2 pb-2 pt-2.5 text-center transition-colors ${active ? "text-accent" : "text-muted-foreground hover:text-foreground"}`}
             >
-              <span className={`flex h-7 w-12 items-center justify-center rounded-full transition-colors ${active ? "bg-pop-pink-tint" : ""}`}>
-                <Icon className="size-5" strokeWidth={active ? 2.25 : 1.75} />
-              </span>
-              <span className="text-[11px] font-medium">{tab.label}</span>
+              <span className={`absolute inset-x-5 top-0 h-[2px] rounded-full transition-colors ${active ? "bg-accent" : "bg-transparent"}`} />
+              <Icon className="size-[20px]" strokeWidth={active ? 2 : 1.6} />
+              <span className={`text-[10.5px] tracking-wide ${active ? "font-semibold" : "font-medium"}`}>{tab.label}</span>
             </Link>
           );
         })}
