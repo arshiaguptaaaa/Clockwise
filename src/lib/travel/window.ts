@@ -99,14 +99,16 @@ export async function nextUpFor(tripId: string, userId: string, anchor: AroundAn
   if (!c) return { none: "Nothing is coming up in the Plan for you." };
   const minutesUntil = minutesBetween(nowLocal, c.targetLocal);
   const walk = c.point && isGeoapifyConfigured() ? await walkMin(anchor.point, c.point) : null;
+  // Beyond 12 hours "leave around" and today's rain say nothing about that commitment: leave them out.
+  const near = minutesUntil <= 12 * 60;
   return {
     commitment: { name: c.name, targetLocal: c.targetLocal, location: c.pointLabel ?? c.location },
     minutesUntil,
     walkMinutes: walk,
-    leaveByLocal: walk != null ? addMinutes(c.targetLocal, -(walk + BUFFER_MIN)) : null,
+    leaveByLocal: near && walk != null ? addMinutes(c.targetLocal, -(walk + BUFFER_MIN)) : null,
     toPoint: c.point,
     fromLabel: anchor.kind === "me" ? "here" : anchor.kind === "stay" ? "your hotel" : anchor.label,
-    rain: rainInWindow(h, nowLocal, c.targetLocal),
+    rain: near ? rainInWindow(h, nowLocal, c.targetLocal) : null,
     weatherRetrievedAt: h.retrievedAt,
     windowMinutes: minutesUntil,
   };
