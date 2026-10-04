@@ -4,6 +4,8 @@
 //   POST /geocode   POST /rvg   POST /route   POST /matrix   POST /validate   GET /search
 // Delhivery supplies facts (a location, a route, a duration). Clockwise makes the decisions.
 // Every call is recorded as sanitised Developer Evidence (partner DELHIVERY).
+import { createHash } from "node:crypto";
+import { prisma } from "@/lib/prisma";
 import { logRailCall } from "@/lib/rails/evidence";
 import type { LatLng } from "@/lib/travel/types";
 
@@ -24,28 +26,88 @@ export function compactForEvidence(v: unknown, depth = 0): unknown {
 }
 
 export type DelhiveryOutcome =
-  | { ok: true; httpStatus: number; latencyMs: number; data: unknown; evidenceId: string | null }
+  | { ok: true; httpStatus: number; latencyMs: number; data: unknown; evidenceId: string | null; cachedAt?: string }
   | { ok: false; blocked: "DELHIVERY_CREDENTIALS_REQUIRED" | "DELHIVERY_TOKEN_REJECTED" | "DELHIVERY_RATE_LIMITED" | null; httpStatus: number | null; latencyMs: number; error: string; data?: unknown; evidenceId: string | null };
 
-// After a 429 this server instance stops asking for a while, so a rate-limited token isn't burned
-// further by retries. The window follows Retry-After when Delhivery sends it.
+// After a 429 Clockwise stops asking until Delhivery's stated reset, so a rate-limited token isn't burned
+// further by retries. The marker is shared across server instances through the database.
+// Delhivery sends x-ratelimit-limit / -remaining / -reset (an epoch) and a retry-after that, in practice,
+// is the same epoch rather than a number of seconds; both readings are handled.
 let rateLimitedUntil = 0;
+const RL_KEY = "__ratelimit__";
 export const delhiveryRateLimitedFor = () => Math.max(0, rateLimitedUntil - Date.now());
 
-export type EvidenceCtx = { tripId?: string | null; userId?: string | null; decision?: string };
+async function sharedRateLimitUntil(): Promise<number> {
+  if (Date.now() < rateLimitedUntil) return rateLimitedUntil;
+  try {
+    const row = await prisma.delhiveryCache.findUnique({ where: { key: RL_KEY } });
+    if (row && row.expiresAt.getTime() > Date.now()) {
+      rateLimitedUntil = row.expiresAt.getTime();
+      return rateLimitedUntil;
+    }
+  } catch {
+    // the marker is an optimisation; never block a call because the lookup failed
+  }
+  return 0;
+}
+
+export function resetFromHeaders(h: { get(name: string): string | null }, now = Date.now()): number {
+  const raw = Number(h.get("x-ratelimit-reset") ?? h.get("retry-after"));
+  if (!Number.isFinite(raw) || raw <= 0) return now + 60_000;
+  const ms = raw > 1e9 ? raw * 1000 : now + raw * 1000;
+  return Math.min(Math.max(ms, now + 5_000), now + 26 * 3_600_000);
+}
+
+// Real responses are kept so a redeploy, or the same question twice, costs no quota. Hour-of-day traffic
+// estimates and place lookups are stable; a live location is never cached.
+const DAY = 86_400_000;
+const CACHE_TTL: Record<string, number> = { "maps.route": 14 * DAY, "maps.geocode": 60 * DAY, "maps.autosuggest": 7 * DAY, "maps.isochrone": 7 * DAY, "maps.matrix": 7 * DAY };
+const cacheKey = (op: string, payload: Record<string, unknown>) => {
+  const { req_id: _ignored, ...rest } = payload;
+  void _ignored;
+  const canon = (v: unknown): unknown => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, canon(x)])) : typeof v === "number" ? Math.round(v * 1e5) / 1e5 : typeof v === "string" ? v.trim().toLowerCase() : v);
+  return createHash("sha256").update(`${op}:${JSON.stringify(canon(rest))}`).digest("hex");
+};
+
+export type EvidenceCtx = { tripId?: string | null; userId?: string | null; decision?: string; fresh?: boolean };
 
 // `evidenceOverride` replaces what is RECORDED (never what is sent): used so a live location or a
 // resolved home address never lands in the evidence log.
 export type EvidenceOverride = { request?: unknown; response?: unknown | ((data: unknown) => unknown) };
 
-export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string, evidenceOverride?: EvidenceOverride): Promise<DelhiveryOutcome> {
+export async function delhiveryCall(op: string, method: "GET" | "POST", path: string, payload: Record<string, unknown>, ctx?: EvidenceCtx | string, evidenceOverride?: EvidenceOverride, opts: { fresh?: boolean } = {}): Promise<DelhiveryOutcome> {
   const evCtx: EvidenceCtx = typeof ctx === "string" ? { decision: ctx } : (ctx ?? {});
   const token = process.env.DELHIVERY_MAPS_TOKEN?.trim();
   if (!token) return { ok: false, blocked: "DELHIVERY_CREDENTIALS_REQUIRED", httpStatus: null, latencyMs: 0, error: "DELHIVERY_MAPS_TOKEN is not set", evidenceId: null };
-  if (Date.now() < rateLimitedUntil) {
-    return { ok: false, blocked: "DELHIVERY_RATE_LIMITED", httpStatus: 429, latencyMs: 0, error: `Delhivery rate limit: not retried for another ${Math.ceil((rateLimitedUntil - Date.now()) / 1000)}s`, evidenceId: null };
-  }
   const url = new URL(`${delhiveryBase()}${path}`);
+  const ttl = CACHE_TTL[op];
+  const key = ttl && !evidenceOverride ? cacheKey(op, method === "GET" ? { ...payload } : payload) : null;
+  if (key && !opts.fresh && !evCtx.fresh) {
+    try {
+      const hit = await prisma.delhiveryCache.findUnique({ where: { key } });
+      if (hit && hit.expiresAt.getTime() > Date.now()) {
+        const data = JSON.parse(hit.responseJson) as unknown;
+        const evidenceId = await logRailCall({
+          partner: "DELHIVERY",
+          operation: op,
+          endpoint: `${method} ${url.origin}${url.pathname}`,
+          method,
+          request: method === "GET" ? Object.fromEntries(new URL(`${delhiveryBase()}${path}`).searchParams) : payload,
+          response: compactForEvidence(data),
+          httpStatus: 200,
+          durationMs: 0,
+          context: { ...evCtx, decision: `${evCtx.decision ?? op} · SERVED FROM SAVED REAL RESPONSE (originally fetched ${hit.createdAt.toISOString()}), no new API call` },
+        });
+        return { ok: true, httpStatus: 200, latencyMs: 0, data, evidenceId, cachedAt: hit.createdAt.toISOString() };
+      }
+    } catch {
+      // a broken cache must never break a call
+    }
+  }
+  const until = await sharedRateLimitUntil();
+  if (until > Date.now()) {
+    return { ok: false, blocked: "DELHIVERY_RATE_LIMITED", httpStatus: 429, latencyMs: 0, error: `Delhivery rate limit (50 calls per window on this token): not retried until ${new Date(until).toISOString()}`, evidenceId: null };
+  }
   if (method === "GET") for (const [k, v] of Object.entries(payload)) if (v != null) url.searchParams.set(k, String(v));
   const started = Date.now();
   let status: number | null = null;
@@ -61,8 +123,10 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
     });
     status = res.status;
     if (res.status === 429) {
-      const ra = Number(res.headers.get("retry-after"));
-      rateLimitedUntil = Date.now() + (ra > 0 && ra < 3600 ? ra * 1000 : 60_000);
+      rateLimitedUntil = resetFromHeaders(res.headers);
+      await prisma.delhiveryCache
+        .upsert({ where: { key: RL_KEY }, create: { key: RL_KEY, op: "ratelimit", requestJson: "{}", responseJson: "{}", expiresAt: new Date(rateLimitedUntil) }, update: { expiresAt: new Date(rateLimitedUntil), createdAt: new Date() } })
+        .catch(() => undefined);
     }
     // Only rate-limit headers (never auth or cookies) are kept, so the evidence shows the actual limit.
     rateHeaders = {};
@@ -91,7 +155,17 @@ export async function delhiveryCall(op: string, method: "GET" | "POST", path: st
     durationMs: latencyMs,
     context: evCtx,
   });
-  if (status != null && status >= 200 && status < 300) return { ok: true, httpStatus: status, latencyMs, data, evidenceId };
+  if (status != null && status >= 200 && status < 300) {
+    if (key && data != null) {
+      const body = JSON.stringify(data);
+      if (body.length < 400_000) {
+        await prisma.delhiveryCache
+          .upsert({ where: { key }, create: { key, op, requestJson: JSON.stringify(evidenceOverride?.request ?? payload).slice(0, 4000), responseJson: body, expiresAt: new Date(Date.now() + ttl) }, update: { responseJson: body, createdAt: new Date(), expiresAt: new Date(Date.now() + ttl) } })
+          .catch(() => undefined);
+      }
+    }
+    return { ok: true, httpStatus: status, latencyMs, data, evidenceId };
+  }
   return { ok: false, blocked: status === 401 ? "DELHIVERY_TOKEN_REJECTED" : null, httpStatus: status, latencyMs, error: error || "failed", data: data ?? undefined, evidenceId };
 }
 
@@ -124,7 +198,7 @@ export function extractRouteSummary(data: unknown): { distanceMeters: number; du
   return null;
 }
 
-export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "auto" | "motorcycle" | "pedestrian"; trafficAware?: boolean; departureTime?: string | null; decision?: string; tripId?: string | null; userId?: string | null } = {}) {
+export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "auto" | "motorcycle" | "pedestrian"; trafficAware?: boolean; departureTime?: string | null; decision?: string; tripId?: string | null; userId?: string | null; fresh?: boolean } = {}) {
   const body: Record<string, unknown> = {
     geo_coords: [
       [from.lat, from.lng],
@@ -135,7 +209,7 @@ export async function delhiveryRoute(from: LatLng, to: LatLng, opts: { mode?: "a
     ...(opts.trafficAware && opts.departureTime ? { departure_time: opts.departureTime } : {}),
     output_format: { encode_polyline: true, maneuvers: false },
   };
-  const r = await delhiveryCall("maps.route", "POST", "/route", body, { decision: opts.decision, tripId: opts.tripId, userId: opts.userId });
+  const r = await delhiveryCall("maps.route", "POST", "/route", body, { decision: opts.decision, tripId: opts.tripId, userId: opts.userId, fresh: opts.fresh });
   if (!r.ok) return { ...r, route: null as DelhiveryRoute | null };
   const sum = extractRouteSummary(r.data);
   return { ...r, route: sum ? ({ ...sum, trafficAware: Boolean(opts.trafficAware), departureTime: opts.trafficAware ? (opts.departureTime ?? null) : null, evidenceId: r.evidenceId, latencyMs: r.latencyMs } as DelhiveryRoute) : null };

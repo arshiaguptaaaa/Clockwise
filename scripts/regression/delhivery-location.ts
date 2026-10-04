@@ -2,7 +2,7 @@
 // format for /rvg, GeoJSON for /isochrone, sources_to_targets for /matrix). These prove the maths and the parsing,
 // NOT that Delhivery answers: that is only proven by a real response (see Developer Evidence).
 import assert from "node:assert/strict";
-import { parseReverse, parseIsochrone, pointInIsochrone, parseMatrix, parseSuggestions } from "../../src/lib/delhivery/client";
+import { resetFromHeaders, parseReverse, parseIsochrone, pointInIsochrone, parseMatrix, parseSuggestions } from "../../src/lib/delhivery/client";
 import { rankMeetup } from "../../src/lib/travel/meetup";
 import { fitVerdict } from "../../src/lib/travel/fit";
 
@@ -64,5 +64,15 @@ ok("fit: the one rule (>=15 spare is yes, 0-14 tight, negative no, outside reach
   assert.equal(fitVerdict(5, null), "TIGHT");
   assert.equal(fitVerdict(-1, null), "NO");
   assert.equal(fitVerdict(60, false), "NO");
+});
+ok("rate limit: Delhivery's epoch-style reset is honoured, seconds are honoured, junk falls back to a minute", () => {
+  const h = (m: Record<string, string>) => ({ get: (k: string) => m[k] ?? null });
+  const now = Date.UTC(2026, 9, 4, 12, 0, 0);
+  const epoch = Math.floor(Date.UTC(2026, 9, 5, 8, 31, 5) / 1000);
+  assert.equal(resetFromHeaders(h({ "x-ratelimit-reset": String(epoch) }), now), epoch * 1000);
+  assert.equal(resetFromHeaders(h({ "retry-after": String(epoch) }), now), epoch * 1000);
+  assert.equal(resetFromHeaders(h({ "retry-after": "30" }), now), now + 30_000);
+  assert.equal(resetFromHeaders(h({}), now), now + 60_000);
+  assert.ok(resetFromHeaders(h({ "retry-after": String(epoch + 99_999_999) }), now) <= now + 26 * 3_600_000);
 });
 console.log(`${n} delhivery location checks passed`);

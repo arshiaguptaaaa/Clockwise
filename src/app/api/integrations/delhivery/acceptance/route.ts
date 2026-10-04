@@ -11,7 +11,8 @@ export async function GET() {
   const userId = await getCurrentUserId();
   if (!userId) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   if (!isDelhiveryConfigured()) return NextResponse.json({ blocked: "DELHIVERY_CREDENTIALS_REQUIRED" }, { status: 503 });
-  const ctx = { decision: "acceptance", userId };
+  // fresh: the acceptance run must hit Delhivery for real, never a saved response.
+  const ctx = { decision: "acceptance", userId, fresh: true };
   const rows: { capability: string; ok: boolean; status: number | null; ms: number; used: string; evidenceId: string | null; blocked?: string | null; error?: string }[] = [];
   const add = (capability: string, r: { ok: boolean; httpStatus: number | null; latencyMs: number; evidenceId: string | null; blocked?: string | null; error?: string }, pass: boolean, used: string) =>
     rows.push({ capability, ok: r.ok && pass, status: r.httpStatus, ms: r.latencyMs, used, evidenceId: r.evidenceId, ...(r.ok ? {} : { blocked: r.blocked ?? null, error: r.error }) });
@@ -24,7 +25,7 @@ export async function GET() {
   add("Reverse geocode", rv, Boolean(rv.place?.locality || rv.place?.city), rv.place ? `${rv.place.locality ?? "?"}, ${rv.place.city ?? "?"}` : "no locality parsed");
   const a = { lat: 13.1986, lng: 77.7066 };
   const b = { lat: 12.9784, lng: 77.6408 };
-  const rt = await delhiveryRoute(a, b, { trafficAware: true, departureTime: "2026-12-13T21:15", decision: "acceptance", userId });
+  const rt = await delhiveryRoute(a, b, { trafficAware: true, departureTime: "2026-12-13T21:15", decision: "acceptance", userId, fresh: true });
   add("Route", rt, Boolean(rt.route), rt.route ? `${(rt.route.distanceMeters / 1000).toFixed(1)} km, ${Math.round(rt.route.durationSeconds / 60)} min (traffic-aware, 21:15)` : "no duration parsed");
   const mx = await delhiveryMatrix([a, b], [b, { lat: 12.9719, lng: 77.5937 }], "auto", ctx);
   const cell = mx.ok ? extractMatrixCell(mx.data) : null;

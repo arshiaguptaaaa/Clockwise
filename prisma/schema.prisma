@@ -1295,3 +1295,15 @@ model MessageReaction {
   @@unique([messageId, userId, emoji])
   @@index([messageId])
 }
+
+// Real Delhivery responses, kept to respect the access token's small call quota (50 per window at
+// the time of writing). Never holds credentials; live locations are never cached.
+// key "__ratelimit__" is the shared "do not call until" marker after an HTTP 429.
+model DelhiveryCache {
+  key          String   @id
+  op           String
+  requestJson  String
+  responseJson String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+}
