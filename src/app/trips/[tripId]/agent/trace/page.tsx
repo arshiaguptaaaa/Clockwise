@@ -20,10 +20,10 @@ const KIND_LABEL: Record<TraceEntry["kind"], string> = {
 
 // The causal chain the product is built to show, in order. Each row is the latest REAL event of that kind;
 // a step that hasn't happened yet shows as pending, never as made up.
-const CHAIN: { kind: string; label: string }[] = [
+const CHAIN: { kind: string; alt?: string; label: string }[] = [
   { kind: "GNANI_STT_COMPLETED", label: "Voice → words" },
   { kind: "TRAVELLER_ARRIVAL_UPDATED", label: "Arrival updated" },
-  { kind: "DELHIVERY_ROUTE_COMPLETED", label: "Route measured" },
+  { kind: "DELHIVERY_ROUTE_COMPLETED", alt: "ARRIVAL_ROUTE_COMPLETED", label: "Route measured" },
   { kind: "RENDEZVOUS_CONFLICT_DETECTED", label: "Conflict detected" },
   { kind: "COMMITMENT_RESCHEDULE_PROPOSED", label: "Change proposed" },
   { kind: "GROUP_APPROVED", label: "Group approved" },
@@ -74,14 +74,14 @@ export default async function AgentTracePage({
           <p className="eyebrow">The chain</p>
           <ol className="mt-3">
             {CHAIN.map((step, i) => {
-              const hit = [...entries].reverse().find((e) => e.title.startsWith(step.kind));
+              const hit = [...entries].reverse().find((e) => e.title.startsWith(step.kind) || (step.alt ? e.title.startsWith(step.alt) : false));
               return (
                 <li key={step.kind} className="relative grid grid-cols-[1.5rem_1fr] gap-x-3 pb-5 last:pb-0">
                   {i < CHAIN.length - 1 && <span aria-hidden className="absolute bottom-0 left-[0.55rem] top-5 w-px bg-border" />}
                   <span aria-hidden className={`mt-1 flex size-[1.1rem] items-center justify-center rounded-full text-[10px] ${hit ? "bg-accent text-accent-foreground" : "border border-border text-transparent"}`}>✓</span>
                   <div className={hit ? "" : "opacity-45"}>
                     <p className="font-display text-[19px] leading-tight tracking-[-0.01em]">{step.label}</p>
-                    <p className="mt-0.5 font-mono text-[11px] tracking-tight text-muted-foreground">{step.kind}{hit ? ` · ${formatTimestamp(hit.timestamp)}` : " · not yet"}</p>
+                    <p className="mt-0.5 font-mono text-[11px] tracking-tight text-muted-foreground">{hit && step.alt && hit.title.startsWith(step.alt) ? step.alt : step.kind}{hit ? ` · ${formatTimestamp(hit.timestamp)}` : " · not yet"}</p>
                   </div>
                 </li>
               );

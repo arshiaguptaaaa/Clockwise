@@ -21,7 +21,7 @@ export function ProposeSaved({ tripId, place, kind }: { tripId: string; place: A
             else setErr(r.error ?? "Couldn't propose it.");
           })
         }
-        className="cursor-pointer rounded-full bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground disabled:opacity-60"
+        className="btn btn-primary"
       >
         {done ? "PROPOSED TO THE GROUP" : "PROPOSE TO GROUP"}
       </button>

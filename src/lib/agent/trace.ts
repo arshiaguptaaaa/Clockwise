@@ -179,9 +179,10 @@ function describeEvent(kind: string, p: Record<string, unknown>): { understandin
         state: "Shown as a route card; no model estimate involved.",
       };
     }
+    case "ARRIVAL_ROUTE_COMPLETED":
     case "DELHIVERY_ROUTE_COMPLETED":
       return {
-        understanding: `DELHIVERY_ROUTE_COMPLETED — ${str(p.traveller)}: ${str(p.from)} → ${str(p.to)}, ${str(p.km)} km, ${str(p.minutes)} min${p.trafficAware ? ` (traffic-aware estimate for a ${str(p.departure).slice(11)} departure, hour-of-day model, not live traffic)` : ""}${p.fellBackFrom ? `; Delhivery wasn't available (${str(p.fellBackFrom)}) so ${str(p.provider)} answered` : ""}. Provider-returned numbers. Exact request and response: Developer Evidence${p.evidenceId ? ` (${str(p.evidenceId)})` : ""}.`,
+        understanding: `${kind} — ${str(p.traveller)}: ${str(p.from)} → ${str(p.to)}, ${str(p.km)} km, ${str(p.minutes)} min${p.trafficAware ? ` (traffic-aware estimate for a ${str(p.departure).slice(11)} departure, hour-of-day model, not live traffic)` : ""}${p.fellBackFrom ? `; Delhivery wasn't available (${str(p.fellBackFrom)}) so ${str(p.provider)} answered` : ""}. Provider-returned numbers. Exact request and response: Developer Evidence${p.evidenceId ? ` (${str(p.evidenceId)})` : ""}.`,
         state: "Stored on the traveller's journey as arrival → stay time; feeds the earliest-at-stay time used for every shared commitment.",
       };
     case "RENDEZVOUS_CONFLICT_DETECTED":

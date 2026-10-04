@@ -40,7 +40,8 @@ export async function recomputeRendezvous(tripId: string) {
         await prisma.tripEvent.create({
           data: {
             tripId,
-            kind: "DELHIVERY_ROUTE_COMPLETED",
+            // Named for the provider that actually answered: a Geoapify fallback is never logged as Delhivery.
+            kind: r.provider === "delhivery" ? "DELHIVERY_ROUTE_COMPLETED" : "ARRIVAL_ROUTE_COMPLETED",
             scope: "GROUP",
             actorUserId: j.userId,
             subjectUserId: j.userId,

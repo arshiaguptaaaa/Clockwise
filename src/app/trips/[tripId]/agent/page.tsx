@@ -87,7 +87,7 @@ export default async function MyClockwisePage({
   const owedTotal = owed.reduce((n, o) => n + o.amountMinor, 0);
   const rows: { href: string; label: string; value: string; hot?: boolean }[] = [
     { href: `/trips/${tripId}/agent/journey`, label: "Journey", value: journey ? `${journey.originName ?? "?"} → ${journey.destinationName ?? "?"}${journey.arriveLocal ? ` · lands ${timeLabel(journey.arriveLocal)}` : ""}` : "Add your ticket or flight" },
-    { href: `/trips/${tripId}/agent/ready`, label: "Before you go", value: "Weather, packing, what to sort" },
+    { href: `/trips/${tripId}/agent/ready`, label: "Before you go", value: "Weather and packing" },
     { href: `/trips/${tripId}/agent/saved`, label: "Saved", value: savedCount ? `${savedCount} place${savedCount === 1 ? "" : "s"}, just yours` : "Nothing yet" },
     { href: `/trips/${tripId}/budget`, label: "Budget", value: owed.length ? `You owe ${formatMoney(owedTotal, owed[0].currency)}` : "No one owes anyone", hot: owed.length > 0 },
   ];
