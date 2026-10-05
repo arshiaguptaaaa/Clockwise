@@ -2,7 +2,8 @@
 //   PASSIVE POINTER -> SUGGESTION (src/lib/ideas.ts) -> PROPOSAL (Proposal) -> CONFIRMED PLAN (Commitment)
 // Nothing in this file creates a Commitment, a Proposal or a chat message.
 import { prisma } from "@/lib/prisma";
-import { extractPointers, isAgreement, type ExtractedPointer, type PointerKind } from "./extract";
+import { getClockwiseUserId } from "@/lib/clockwise";
+import { extractPointers, isAgreement, isFirstPersonEcho, type ExtractedPointer, type PointerKind } from "./extract";
 
 export type PointerRow = {
   id: string;
@@ -91,7 +92,24 @@ export async function observeMessage(params: { tripId: string; userId: string; m
     if (p.kind === "DIET") await rememberDiet(tripId, userId, p.subject);
   }
 
-  if (found.length === 0 && isAgreement(text)) {
+  // "I'm vegetarian btw." then "I am too!": the echo is the speaker's own diet. Done in code, not left to the model.
+  if (isFirstPersonEcho(text) && !found.some((f) => f.kind === "DIET")) {
+    const at = (await prisma.message.findUnique({ where: { id: messageId }, select: { timestamp: true } }))?.timestamp ?? new Date();
+    const prev = await prisma.message.findFirst({
+      where: { tripId, channel: "GROUP", cardType: null, senderId: { notIn: [userId, await getClockwiseUserId()] }, timestamp: { lt: at } },
+      orderBy: { timestamp: "desc" },
+      select: { content: true, timestamp: true },
+    });
+    if (prev && at.getTime() - prev.timestamp.getTime() < 30 * 60_000) {
+      for (const p of extractPointers(prev.content).filter((d) => d.kind === "DIET")) {
+        const r = await recordPointer({ tripId, userId, messageId, ...p });
+        captured.push({ id: r.id, ...p, mentions: r.mentions, isNew: r.isNew });
+        await rememberDiet(tripId, userId, p.subject);
+      }
+    }
+  }
+
+  if (found.length === 0 && captured.length === 0 && isAgreement(text)) {
     const prev = await prisma.message.findFirst({
       where: { tripId, channel: "GROUP", cardType: null, timestamp: { lt: (await prisma.message.findUnique({ where: { id: messageId }, select: { timestamp: true } }))?.timestamp ?? new Date() } },
       orderBy: { timestamp: "desc" },

@@ -948,6 +948,21 @@ async function main() {
     await prisma.delhiveryCache.deleteMany({ where: { key: "__ratelimit__" } });
   });
 
+  await t("passive: \"I'm vegetarian btw.\" then \"I am too! Dosa sounds good.\" stores Ridhima's own diet in code, without the model", async () => {
+    const { observeMessage } = await import("../../src/lib/pointers/store");
+    const base = ((await prisma.message.findFirst({ where: { tripId: trip.id }, orderBy: { timestamp: "desc" } }))?.timestamp.getTime() ?? Date.now()) + 1000;
+    const m1 = await prisma.message.create({ data: { tripId: trip.id, channel: "GROUP", senderId: A.id, content: "I'm vegetarian btw.", timestamp: new Date(base) } });
+    await observeMessage({ tripId: trip.id, userId: A.id, messageId: m1.id, text: m1.content });
+    const m2 = await prisma.message.create({ data: { tripId: trip.id, channel: "GROUP", senderId: R.id, content: "I am too! Dosa sounds good.", timestamp: new Date(base + 5000) } });
+    await observeMessage({ tripId: trip.id, userId: R.id, messageId: m2.id, text: m2.content });
+    const rows = await prisma.travellerPreference.findMany({ where: { tripId: trip.id, key: "FOOD", value: "VEGETARIAN" } });
+    assert.deepEqual(rows.map((r) => r.userId).sort(), [A.id, R.id].sort());
+    // an echo with nothing to echo stores nothing
+    const m3 = await prisma.message.create({ data: { tripId: trip.id, channel: "GROUP", senderId: S.id, content: "me too!", timestamp: new Date(base + 9000) } });
+    const seen = await observeMessage({ tripId: trip.id, userId: S.id, messageId: m3.id, text: m3.content });
+    assert.equal(seen.captured.filter((c) => c.kind === "DIET").length, 0, "the message before it states no diet, so there is nothing to echo");
+  });
+
   console.log(`\n${passed} integration checks passed${failed ? `, ${failed} FAILED` : ""}`);
   await prisma.$disconnect();
   process.exit(failed ? 1 : 0);
