@@ -119,7 +119,7 @@ export async function doesThisFit(p: {
   const leaveBy = addMinutes(c.targetLocal, -(BUFFER_MIN + onMin + stayMin + toMin));
   const reason =
     verdict === "YES"
-      ? `${toMin} min each way, ${stayMin} min there, and still ${spare} min spare before ${c.name}.`
+      ? `${toMin} min each way, ${stayMin} min there, and ${spare >= 180 ? `still about ${Math.round(spare / 60)} h of slack` : `still ${spare} min spare`} before ${c.name}.`
       : verdict === "TIGHT"
         ? `It works with only ${spare} min to spare before ${c.name}.`
         : reach.inside === false
