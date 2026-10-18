@@ -1559,3 +1559,11 @@ model Feedback {
 
   @@index([createdAt])
 }
+
+// Shared rate-limit counters (admin login). Keys hold a salted hash of the client address, never the address itself.
+model RateLimitBucket {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+  updatedAt   DateTime @default(now())
+}

@@ -27,7 +27,8 @@ export async function createAdminSession(): Promise<void> {
   const store = await cookies();
   store.set(ADMIN_COOKIE, value, {
     httpOnly: true,
-    sameSite: "lax",
+    // Strict: the admin cookie is never sent on any cross-site request, which is CSRF defence in depth.
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: ADMIN_SESSION_SECONDS,
@@ -39,6 +40,18 @@ export async function isAdminAuthenticated(): Promise<boolean> {
   if (!key) return false;
   const store = await cookies();
   return sessionIsValid(store.get(ADMIN_COOKIE)?.value, key);
+}
+
+// The raw session cookie, only if it is a valid, unexpired admin session. Used to bind CSRF tokens to the session.
+export async function getAdminSessionValue(): Promise<string | null> {
+  const key = secret();
+  if (!key) return null;
+  const raw = (await cookies()).get(ADMIN_COOKIE)?.value;
+  return sessionIsValid(raw, key) ? (raw ?? null) : null;
+}
+
+export function adminSecretForCsrf(): string | null {
+  return secret();
 }
 
 export async function clearAdminSession(): Promise<void> {

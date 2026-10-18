@@ -1,15 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/session";
+import { requireAdminMutation } from "@/lib/admin-request";
 import { delhiverySuggest, delhiveryGeocode, delhiveryReverse, delhiveryRoute, delhiveryMatrix, delhiveryIsochrone, extractMatrixCell, pointInIsochrone, isDelhiveryConfigured, delhiveryRateLimitedFor } from "@/lib/delhivery/client";
 
 export const maxDuration = 60;
 
-// One real call per Delhivery capability, each recorded as Developer Evidence. Signed-in, read-only.
+// One real call per Delhivery capability, each recorded as Developer Evidence. Admin-only and POST-only (CSRF-protected): it spends provider calls and writes evidence rows.
 // Reports PASS only when the response was HTTP 2xx AND yielded the value Clockwise uses; anything else is
 // reported as it was (status, blocked reason) - nothing is mocked or retried until it looks green.
-export async function GET() {
-  const userId = await getCurrentUserId();
-  if (!userId) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+export async function POST(request: NextRequest) {
+  const denied = await requireAdminMutation(request);
+  if (denied) return denied;
+  const userId = (await getCurrentUserId()) ?? "admin";
   if (!isDelhiveryConfigured()) return NextResponse.json({ blocked: "DELHIVERY_CREDENTIALS_REQUIRED" }, { status: 503 });
   // fresh: the acceptance run must hit Delhivery for real, never a saved response.
   const ctx = { decision: "acceptance", userId, fresh: true };

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/session";
+import { requireAdminMutation } from "@/lib/admin-request";
 import { compactForEvidence, extractMatrixCell, delhiveryGeocode, delhiveryRoute, delhiveryMatrix, isDelhiveryConfigured, delhiveryBase } from "@/lib/delhivery/client";
 import { delhiverySearchRaw, delhiveryReverseRaw, delhiveryIsochroneRaw } from "@/lib/delhivery/client";
 import { resolveLocationText } from "@/lib/travel/geoapify-provider";
 
-// Signed-in, read-only capability probe. Calls the documented endpoints for a Bengaluru airport->Indiranagar
+// Admin-only, POST-only (CSRF-protected) capability probe: it makes real Delhivery calls that are recorded as rail calls. Calls the documented endpoints for a Bengaluru airport->Indiranagar
 // pair and returns the sanitised responses (never the token). ?from=...&to=...
-export async function GET(request: NextRequest) {
-  if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+export async function POST(request: NextRequest) {
+  const denied = await requireAdminMutation(request);
+  if (denied) return denied;
   if (!isDelhiveryConfigured()) return NextResponse.json({ blocked: "DELHIVERY_CREDENTIALS_REQUIRED", note: "Set DELHIVERY_MAPS_TOKEN (Get Access Token at delhivery.com/maps/developer)." }, { status: 503 });
   const q = request.nextUrl.searchParams;
   // ?op=suggest&q=Indiranagar | ?op=reverse&lat=&lng= | ?op=iso&lat=&lng=&seconds=  (raw, sanitised shapes)

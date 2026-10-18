@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/session";
+import { requireAdmin } from "@/lib/admin-request";
 import { GeminiAgentProvider } from "@/lib/agent/providers/gemini";
 import { AGENT_TOOLS } from "@/lib/agent/tools";
 import type { AgentMessage } from "@/lib/agent/provider";
 import { toAgentMessages } from "@/lib/agent/clockwise-agent";
 
-// Signed-in only. Sends tiny SYNTHETIC conversations to Gemini to find out which
+// Admin only. Sends tiny SYNTHETIC conversations to Gemini to find out which
 // request structures it rejects (400). No user data is involved. Reports status,
 // category and Google's own error text per case — never keys or contents.
 const U = (content: string): AgentMessage => ({ role: "user", content });
@@ -34,7 +34,8 @@ const CASES: Record<string, { messages: AgentMessage[]; withTools: boolean }> = 
 };
 
 export async function GET(request: NextRequest) {
-  if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const denied = await requireAdmin();
+  if (denied) return denied;
   const only = request.nextUrl.searchParams.get("case");
   const provider = new GeminiAgentProvider();
   const out: Record<string, unknown> = {};

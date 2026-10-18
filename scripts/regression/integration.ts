@@ -977,6 +977,26 @@ async function main() {
     assert.equal(e?.message.length, 500, "messages are capped");
   });
 
+  await t("rate limit: counters are shared through the database, atomic under concurrency, and reset when the window ends", async () => {
+    const { hitBucket, peekBucket, resetBucket } = await import("../../src/lib/rate-limit");
+    const key = `test-bucket-${Date.now()}`;
+    const t0 = new Date("2026-10-18T12:00:00Z");
+    // ten simultaneous requests (as if ten serverless instances) must count exactly ten
+    await Promise.all(Array.from({ length: 10 }, () => hitBucket(key, 15 * 60_000, t0)));
+    assert.equal((await peekBucket(key))?.count, 10, "no lost increments");
+    // the raw write and Prisma's read must agree on the moment, whatever time zone the database session uses
+    assert.equal((await peekBucket(key))?.windowStart.getTime(), t0.getTime(), "window start survives a raw write + Prisma read");
+    // still inside the window: keeps counting from the same window start
+    const inside = await hitBucket(key, 15 * 60_000, new Date(t0.getTime() + 5 * 60_000));
+    assert.equal(inside.count, 11);
+    assert.equal(inside.windowStart.getTime(), t0.getTime());
+    // after the window: starts again at 1
+    const after = await hitBucket(key, 15 * 60_000, new Date(t0.getTime() + 16 * 60_000));
+    assert.equal(after.count, 1);
+    await resetBucket(key);
+    assert.equal(await peekBucket(key), null);
+  });
+
   console.log(`\n${passed} integration checks passed${failed ? `, ${failed} FAILED` : ""}`);
   await prisma.$disconnect();
   process.exit(failed ? 1 : 0);

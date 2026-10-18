@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/session";
+import { requireAdmin } from "@/lib/admin-request";
 
-// Read-only capability probe (signed-in only): does the configured
+// Read-only capability probe (admin only): does the configured
 // GNANI_API_KEY authenticate against the Agent Builder Platform API, which is
 // where outbound calls live? Calls List Agents (GET) and reports only the HTTP
 // status and a short sanitised body — never the key. A 401/403 here means the
 // Speech key doesn't carry Platform access.
 export async function GET() {
-  if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const denied = await requireAdmin();
+  if (denied) return denied;
   const key = process.env.GNANI_PLATFORM_API_KEY;
   if (!key) return NextResponse.json({ configured: false, error: "GNANI_PLATFORM_API_KEY is not set (GNANI_API_KEY is the Speech key and is deliberately not used here)." }, { status: 503 });
   try {

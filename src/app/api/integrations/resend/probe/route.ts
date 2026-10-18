@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/session";
+import { requireAdmin } from "@/lib/admin-request";
 
-// Read-only audit of the email setup (signed-in only). Answers: is the API key
+// Read-only audit of the email setup (admin only). Answers: is the API key
 // present, which FROM address is in use, which sending domains exist and are
 // they verified. Resend only delivers to arbitrary recipients from a VERIFIED
 // domain; from the shared onboarding@resend.dev sender it only reaches the
 // account owner's own address. Never returns the key.
 export async function GET(request: NextRequest) {
-  if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const denied = await requireAdmin();
+  if (denied) return denied;
   const key = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL || "Clockwise <onboarding@resend.dev>";
   const fromDomain = (/@([^>\s]+)/.exec(from)?.[1] ?? "").toLowerCase();

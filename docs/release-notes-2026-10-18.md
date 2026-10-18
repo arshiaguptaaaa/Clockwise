@@ -64,10 +64,30 @@ unauthenticated request returns no canary data from any admin route, and an auth
 Also fixed: the admin login form could submit as a GET before the page's JavaScript loaded, which would have put the
 password in the URL; it is now a server-action form (POST, works without JavaScript).
 
-**Not changed (separate finding):** the diagnostic endpoints under `/api/integrations/*/probe` are guarded only by the demo
-"signed-in" cookie, which anyone can obtain through `/demo/join`. They return status/booleans, and the Pine one can create a
-UAT test link with `?create=1`. Consider gating them behind admin. There is also no rate limit on admin login, so use a long random
-password.
+**Third change set: probes, side effects, CSRF and login rate limit**
+- The diagnostic endpoints under `/api/integrations` (`gnani/probe`, `resend/probe`, `gemini/probe`, `geoapify/probe`,
+  `geoapify/airports`, `travel-inventory/status`, `pinelabs/probe`, `delhivery/probe`, `delhivery/acceptance`) were guarded only by
+  the demo "signed-in" cookie, which anyone can get from `/demo/join`. They now require an admin session and answer 401 otherwise.
+  Provider callbacks (`pinelabs/webhook`, `gnani/webhook`, `uber/callback`, `uber/connect`) keep their own authentication; the
+  trip-scoped `resend/deliveries` and `trips/*/rail-evidence` are unchanged.
+- **Side effects are POST-only and CSRF-protected.** Creating a Pine UAT payment link (`POST /api/integrations/pinelabs/probe`) and the
+  Delhivery probe and acceptance runs (which make metered calls and write rail-call rows) now require: admin session, same-site
+  request (Origin / Sec-Fetch-Site), and an `x-csrf-token` header (an HMAC of the admin session, from `GET /api/admin/csrf`). The old
+  `GET ...?create=1` no longer creates anything. The admin cookie is now `SameSite=Strict`.
+- **Admin login is rate-limited across instances.** Failures are counted in Postgres (`RateLimitBucket`, additive migration
+  `20261018220000_rate_limit_bucket`) per client address (stored only as a salted hash) and globally: 5 failures per address or 40 in
+  total within 15 minutes lock sign-in, and while locked the password is not even checked. If the counters cannot be read, sign-in
+  is refused rather than left unthrottled. Trade-off: a determined attacker can lock the owner out for 15 minutes by filling the
+  global counter.
+- Tests: `scripts/regression/admin-hardening.ts` (7 checks: CSRF token and origin rules, login gate, scan that every diagnostic route is
+  admin-only and every side-effecting route is POST-only) and one integration check (shared counters under 10 concurrent requests,
+  window reset, UTC-safe timestamps). Locally verified with HTTP requests: unauthenticated 401 on every probe; session without token
+  403; cross-site origin and bad token 403; valid token on a same-site request allowed (provider keys blanked, so no link could be
+  created); lockout after 5 wrong passwords, correct password refused during lockout and accepted after the window.
+- Usage note: with the new POST-only rule an admin triggers the Pine link test from the signed-in browser console: fetch
+  `/api/admin/csrf`, then `fetch('/api/integrations/pinelabs/probe', {method:'POST', headers:{'x-csrf-token': token}})`.
+
+See `docs/security-incident-2026-10-18-waitlist-exposure.md` for the waitlist exposure record.
 
 ## 5. A/B experiment status
 `clash_cta` (button wording) is instrumentation only. There is no result and no winner: the admin page shows "Too early to call" until each variant has 30 exposures.

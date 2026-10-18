@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/session";
+import { requireAdmin } from "@/lib/admin-request";
 import { getRoute, isGeoapifyConfigured, resolveLocationText, searchStays, searchNearbyRaw } from "@/lib/travel/geoapify-provider";
 
-// Signed-in only. Exercises the live Geoapify calls the product depends on and
+// Admin only. Exercises the live Geoapify calls the product depends on and
 // reports each step's outcome (never the key): geocoding, stay search, routing.
 //   ?from=Udaipur Airport&to=Lake Pichola&mode=drive
 export async function GET(request: NextRequest) {
-  if (!(await getCurrentUserId())) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const denied = await requireAdmin();
+  if (denied) return denied;
   if (!isGeoapifyConfigured()) return NextResponse.json({ configured: false });
   const q = request.nextUrl.searchParams;
   const fromText = q.get("from") ?? "Udaipur Airport";
