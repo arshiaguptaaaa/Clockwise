@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Fraunces } from "next/font/google";
 import "./globals.css";
+import { ClientBoot } from "@/components/ClientBoot";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -36,7 +37,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} ${fraunces.variable} h-full antialiased`}>
-      <body className="h-full flex flex-col">{children}</body>
+      <body className="h-full flex flex-col">
+        <ClientBoot />
+        {children}
+      </body>
     </html>
   );
 }

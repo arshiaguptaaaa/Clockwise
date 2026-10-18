@@ -10,6 +10,8 @@
 //
 // Everything numeric here is stored state or a provider route; the model only understood the human message.
 import { prisma } from "@/lib/prisma";
+import { trackEvent } from "@/lib/analytics";
+import { variantFor } from "@/lib/experiments";
 import { postActionCard } from "@/lib/action-cards";
 import { getClockwiseUserId } from "@/lib/clockwise";
 import { notify } from "@/lib/notifications";
@@ -227,6 +229,7 @@ export async function evaluateConsequences(p: { tripId: string; userId: string; 
     ].filter(Boolean).join(" ");
     const msg = await postActionCard({ tripId, channel: "GROUP", type: "DECISION", status: "PENDING", data: { title: "CLOCKWISE CAUGHT A CLASH ✦", context, clash: { clashId: clash.id } } });
     await prisma.tripClash.update({ where: { id: clash.id }, data: { messageId: msg.id } });
+    await trackEvent("clash_detected", { userId, tripId, dedupeKey: clash.id, props: { clashId: clash.id, hasSuggestion: !!suggested } });
     out.clashIds.push(clash.id);
   }
   void trip;
@@ -295,6 +298,7 @@ export async function proposeClash(clashId: string, actorId: string, chosenLocal
   if (!r.ok) return { ok: false, reply: r.reply };
   if (r.changed || r.verb !== "proposed") return { ok: true, reply: r.reply };
   await prisma.tripClash.update({ where: { id: c.id }, data: { status: "PROPOSED", proposalId: r.proposalId ?? null, suggestedLocal: local } });
+  await trackEvent("clash_proposed", { userId: actorId, tripId: c.tripId, experiment: "clash_cta", variant: variantFor("clash_cta", actorId), dedupeKey: c.id, props: { clashId: c.id, proposalId: r.proposalId ?? null } });
   const names = (await prisma.user.findMany({ where: { id: { in: affected } }, select: { id: true, name: true } })).map((u) => first(u.name));
   await ev(c.tripId, "GROUP_PROPOSAL_CREATED", actorId, c.travellerId, null, { proposalId: r.proposalId, commitment: c.commitmentName, from: c.targetLocal, to: local, voters: names, because, stage: "PROPOSAL", note: "Only the people the commitment involves vote. The Plan changes after they agree and the organiser confirms." }, ["proposals", "notifications", "chat"]);
   return { ok: true, reply: `PROPOSED TO GROUP ✦ Move ${c.commitmentName} to ${timeLabel(local)}. ${names.join(", ")} can accept or decline; ${c.commitmentName} stays at ${timeLabel(c.targetLocal)} until they agree and the organiser confirms.` };

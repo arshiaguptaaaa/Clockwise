@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { clashAction } from "@/app/clash-actions";
+import { trackClashExposureAction } from "@/app/analytics-actions";
+import { clashCtaLabel } from "@/lib/experiments";
 
 export type ClashView = {
   id: string;
@@ -24,6 +26,8 @@ export type ClashView = {
   affected: string[];
   // No routing data was available: the conflict is only that the plan starts before they even land.
   unknownTravel?: boolean;
+  // A/B: wording of the main button (see src/lib/experiments.ts). Recomputed server-side when exposure is logged.
+  ctaVariant?: string;
 };
 
 // CLOCKWISE CAUGHT A CLASH. LANDS AT is not AVAILABLE AT: the card shows both, and the three numbers between them.
@@ -33,6 +37,12 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
   const [error, setError] = useState<string | null>(null);
   const [showOptions, setShowOptions] = useState(false);
   const live = clash.status === "OPEN" || clash.status === "INFORMED";
+  const showsCta = live && !!clash.suggestedLabel;
+
+  // Exposure: logged once per (clash, viewer) when the main button is actually on screen.
+  useEffect(() => {
+    if (showsCta) void trackClashExposureAction(clash.id).catch(() => undefined);
+  }, [showsCta, clash.id]);
 
   function run(action: "PROPOSE" | "INFORM" | "CANCEL" | "LEAVE" | "LATER", local?: string) {
     setError(null);
@@ -109,7 +119,7 @@ export function ClashCard({ clash, canCancel }: { clash: ClashView; canCancel: b
         <div className="mt-3.5 flex flex-col gap-2">
           {clash.suggestedLabel && (
             <button type="button" disabled={pending} onClick={() => run("PROPOSE", clash.suggestedLocal ?? undefined)} className="btn btn-primary w-full" data-clash-propose>
-              {pending ? "Proposing…" : `Propose ${clash.suggestedLabel}`}
+              {pending ? "Proposing…" : clashCtaLabel(clash.ctaVariant ?? "control", clash.suggestedLabel)}
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import { MoreVertical, UserPlus } from "lucide-react";
 import { switchTraveller } from "@/app/actions";
@@ -80,6 +81,13 @@ export function TopBar({
                     Switch traveller
                   </button>
                 </form>
+                <Link
+                  href={`/trips/${tripId}/more`}
+                  onClick={() => setOpen(false)}
+                  className="block w-full rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-surface-muted"
+                >
+                  Install &amp; feedback
+                </Link>
               </div>
             </>
           )}

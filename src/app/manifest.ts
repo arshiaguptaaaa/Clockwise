@@ -4,18 +4,23 @@ import type { MetadataRoute } from "next";
 // the /icons/[size] route so there are no binary assets to keep in sync.
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "Clockwise",
     short_name: "Clockwise",
     description: "One trip. Many clocks.",
+    lang: "en-IN",
+    categories: ["travel", "productivity"],
     start_url: "/",
     scope: "/",
     display: "standalone",
+    orientation: "portrait",
     background_color: "#f7f8f6",
     theme_color: "#163a2c",
     icons: [
       { src: "/icons/192", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/icons/512", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icons/512", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      // Android crops maskable icons to a circle or squircle, so this one has its own safe-zone artwork.
+      { src: "/icons/maskable", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

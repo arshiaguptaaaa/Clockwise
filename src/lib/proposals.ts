@@ -9,6 +9,7 @@ import type { ApprovalDecision, ProposalStatus, ProposalType } from "@prisma/cli
 import { prisma } from "./prisma";
 import { executeConfirmedProposal, type ExecutionResult } from "./proposal-execution";
 import { notify } from "./notifications";
+import { trackEvent, clashIdForProposal } from "./analytics";
 
 export type ProposalPayload = {
   provider?: string;
@@ -325,6 +326,7 @@ export async function castApprovalVote(
     }
   }
 
+  await trackEvent("vote_cast", { userId: actorId, tripId: proposal.tripId, props: { proposalId, decision, clashId: await clashIdForProposal(proposalId) } });
   return { ok: true, proposalStatus };
 }
 
@@ -415,6 +417,7 @@ export async function organiserHardConfirm(proposalId: string, actorId: string):
         payloadSummary: `Proposal "${proposal.title}" (${proposalId}) executed: ${execution.summary}`,
       },
     });
+    await trackEvent("plan_updated", { userId: actorId, tripId: proposal.tripId, dedupeKey: proposalId, props: { proposalId, type: proposal.type, clashId: await clashIdForProposal(proposalId) } });
     return { ok: true, alreadyExecuted: false, executionSummary: execution.summary };
   }
 

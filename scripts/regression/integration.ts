@@ -963,6 +963,20 @@ async function main() {
     assert.equal(seen.captured.filter((c) => c.kind === "DIET").length, 0, "the message before it states no diet, so there is nothing to echo");
   });
 
+  await t("analytics: an exposure is counted once per (clash, viewer); events and errors and feedback are written", async () => {
+    const { trackEvent } = await import("../../src/lib/analytics");
+    const { logError } = await import("../../src/lib/error-log");
+    const key = `test-${Date.now()}`;
+    await trackEvent("experiment_exposure", { userId: A.id, tripId: trip.id, experiment: "clash_cta", variant: "control", dedupeKey: key });
+    await trackEvent("experiment_exposure", { userId: A.id, tripId: trip.id, experiment: "clash_cta", variant: "control", dedupeKey: key });
+    assert.equal(await prisma.productEvent.count({ where: { dedupeKey: `experiment_exposure:${key}` } }), 1, "a second render must not double-count");
+    await trackEvent("clash_detected", { userId: A.id, tripId: trip.id, props: { clashId: "x" } });
+    assert.ok((await prisma.productEvent.count({ where: { name: "clash_detected", tripId: trip.id } })) >= 1);
+    await logError({ source: "CLIENT", message: "x".repeat(900), path: "/trips/t/room" });
+    const e = await prisma.errorLog.findFirst({ orderBy: { createdAt: "desc" } });
+    assert.equal(e?.message.length, 500, "messages are capped");
+  });
+
   console.log(`\n${passed} integration checks passed${failed ? `, ${failed} FAILED` : ""}`);
   await prisma.$disconnect();
   process.exit(failed ? 1 : 0);

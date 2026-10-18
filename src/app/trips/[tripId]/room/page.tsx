@@ -18,6 +18,7 @@ import type { IdeaView } from "@/components/ideas/IdeaCard";
 import type { ClashView } from "@/components/clash/ClashCard";
 import { ActiveStrip, type ActiveItem } from "@/components/trip-room/ActiveStrip";
 import { timeLabel } from "@/lib/traveller/journey";
+import { variantFor } from "@/lib/experiments";
 
 // Server actions on this page run the agent (model + tool calls), which can take
 // 15–30s; give them an explicit budget rather than the platform default.
@@ -150,6 +151,7 @@ export default async function TripRoomChatPage({
       suggestedLabel: c.suggestedLocal ? timeLabel(c.suggestedLocal) : null,
       options,
       affected: (JSON.parse(c.affectedIds) as string[]).map(firstOf),
+      ctaVariant: currentUserId ? variantFor("clash_cta", currentUserId) : "control",
     };
   });
   // Pinned "Active" chips: anything still open. Built only from rows this page already loaded.

@@ -1512,3 +1512,50 @@ model PrivateNote {
   @@index([tripId, recipientId, status])
   @@index([tripId, senderId])
 }
+
+// Product analytics for the disruption loop (clash noticed -> proposed -> voted -> plan updated) and for A/B
+// exposures. Never holds message text or personal content: only ids, the event name and small counters.
+model ProductEvent {
+  id         String   @id @default(cuid())
+  name       String
+  userId     String?
+  tripId     String?
+  experiment String?
+  variant    String?
+  // JSON, small and non-personal
+  props      String?
+  // One row per (event, user, subject) when set, so an exposure is counted once however often the page renders.
+  dedupeKey  String?  @unique
+  createdAt  DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([experiment, variant])
+}
+
+// Client render errors and server request errors, so the admin page can show an error rate.
+model ErrorLog {
+  id        String   @id @default(cuid())
+  // CLIENT | SERVER
+  source    String
+  message   String
+  digest    String?
+  stack     String?
+  path      String?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// In-product feedback (usability research): one tap rating and an optional note.
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String?
+  tripId    String?
+  page      String
+  rating    Int?
+  message   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

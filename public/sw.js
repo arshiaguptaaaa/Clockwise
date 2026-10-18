@@ -1,7 +1,19 @@
-// Clockwise service worker: Web Push + notification clicks only. It does not
-// cache or intercept fetches, so it cannot interfere with Next.js routing.
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+// Clockwise service worker: Web Push, notification clicks, and ONE offline page. It does not cache app pages or
+// API calls, so it cannot serve stale trip data or interfere with Next.js routing: it only steps in when a page
+// navigation fails because the device is offline.
+const OFFLINE_CACHE = "clockwise-offline-v1";
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(OFFLINE_CACHE).then((c) => c.add("/offline")).catch(() => undefined).then(() => self.skipWaiting()));
+});
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== OFFLINE_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+  )
+);
+self.addEventListener("fetch", (event) => {
+  if (event.request.mode !== "navigate") return;
+  event.respondWith(fetch(event.request).catch(() => caches.match("/offline").then((r) => r || Response.error())));
+});
 
 self.addEventListener("push", (event) => {
   let data = { title: "Clockwise", body: "", href: "/" };
