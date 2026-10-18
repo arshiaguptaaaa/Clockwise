@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { getInsights, abVerdict } from "@/lib/insights";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { adminLogout } from "@/app/admin/admin-actions";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +8,9 @@ export const dynamic = "force-dynamic";
 const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(0)}%`);
 
 export default async function AdminInsightsPage() {
+  // Guard inside the page too: a layout redirect does not stop this page from rendering in parallel, and its data
+  // would still be streamed in the body of the redirect response. Check before any query runs.
+  if (!(await isAdminAuthenticated())) redirect("/admin/login");
   const d = await getInsights(30);
   const max = Math.max(1, ...d.funnel.map((s) => s.count));
   return (

@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { adminLogout } from "@/app/admin/admin-actions";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -18,6 +20,9 @@ function pct(numerator: number, denominator: number): string {
 }
 
 export default async function AdminWaitlistPage() {
+  // Guard inside the page too: a layout redirect does not stop this page from rendering in parallel, and its data
+  // would still be streamed in the body of the redirect response. Check before any query runs.
+  if (!(await isAdminAuthenticated())) redirect("/admin/login");
   const [totalSignups, landingPageViews, landingVisitors, signups, allSignupsBySource] =
     await Promise.all([
       prisma.waitlistSignup.count(),

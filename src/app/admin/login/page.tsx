@@ -1,21 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState } from "react";
 import { ClockwiseWordmark } from "@/components/ClockwiseWordmark";
 import { adminLogin } from "@/app/admin/admin-actions";
 
 export default function AdminLoginPage() {
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    startTransition(async () => {
-      const result = await adminLogin(formData);
-      if (result?.error) setError(result.error);
-    });
-  }
+  // A real <form action={...}> posts to the server action even before JavaScript has loaded, so the password can never
+  // fall back to a GET and end up in the URL, the browser history or request logs.
+  const [state, formAction, isPending] = useActionState(adminLogin, null);
+  const error = state?.error ?? null;
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-16">
@@ -23,7 +16,7 @@ export default function AdminLoginPage() {
         <ClockwiseWordmark className="justify-center" />
         <p className="mt-6 text-lg font-medium text-foreground">Admin</p>
 
-        <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-2">
+        <form action={formAction} className="mt-6 flex flex-col gap-2">
           <input
             type="password"
             name="password"

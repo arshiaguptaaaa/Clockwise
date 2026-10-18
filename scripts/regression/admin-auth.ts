@@ -80,12 +80,15 @@ function walk(dir: string): string[] {
     return statSync(p).isDirectory() ? walk(p) : [p];
   });
 }
-ok("every admin layout, route handler and server action has an admin guard", () => {
+ok("every admin layout, page, route handler and server action has an admin guard", () => {
   const root = join(__dirname, "../../src/app/admin");
   const exempt = new Set([join(root, "login/page.tsx"), join(root, "admin-actions.ts")]);
-  const files = walk(root).filter((f) => /(layout\.tsx|route\.ts|actions\.ts)$/.test(f) && !exempt.has(f));
+  const files = walk(root).filter((f) => /(layout\.tsx|page\.tsx|route\.ts|actions\.ts)$/.test(f) && !exempt.has(f));
   assert.ok(files.length >= 5, `expected several guarded files, found ${files.length}`);
   for (const f of files) assert.match(readFileSync(f, "utf8"), /isAdminAuthenticated\(\)/, `${f} has no admin guard`);
+  // pages guard themselves as well as through the layout: a layout redirect does not stop a page rendering in parallel,
+  // and its data then travels in the redirect response body (found in production on /admin/waitlist and /admin/insights)
+  for (const section of ["waitlist", "insights", "integrations"]) assert.ok(files.includes(join(root, section, "page.tsx")), `${section} page has no guard`);
   // each admin section has a guarding layout
   for (const section of ["waitlist", "insights", "integrations"]) assert.ok(files.includes(join(root, section, "layout.tsx")), `${section} has no layout guard`);
   // the CSV export is a route handler, which a layout does not protect

@@ -54,6 +54,16 @@ login (pages) or 401 (CSV export) for no cookie, an old-format forged cookie and
 login showed the "disabled" message; with a throwaway password, a wrong password was refused, the right one signed in, the
 insights page, CSV export and integrations page opened, the cookie was HttpOnly, and old-format cookies (empty key and correct key) were rejected.
 
+**Second finding, found by checking the first fix in production (ee977b9):** an unauthenticated request to `/admin/waitlist`
+returned 307 to the login page, but the response *body* still contained the waitlist email addresses, and `/admin/insights`
+contained feedback text. A layout redirect does not stop the page from rendering in parallel, so its data was streamed in the
+redirect response. This pre-dated the analytics work for `/admin/waitlist`; `/admin/insights` inherited the same pattern.
+No forged cookie or login was needed. **Fix:** each admin page (`waitlist`, `insights`, `integrations`) now checks admin before
+running any query, and the guard-coverage test requires every admin page to do so. Checked locally with canary rows: an
+unauthenticated request returns no canary data from any admin route, and an authenticated one does.
+Also fixed: the admin login form could submit as a GET before the page's JavaScript loaded, which would have put the
+password in the URL; it is now a server-action form (POST, works without JavaScript).
+
 **Not changed (separate finding):** the diagnostic endpoints under `/api/integrations/*/probe` are guarded only by the demo
 "signed-in" cookie, which anyone can obtain through `/demo/join`. They return status/booleans, and the Pine one can create a
 UAT test link with `?create=1`. Consider gating them behind admin. There is also no rate limit on admin login, so use a long random

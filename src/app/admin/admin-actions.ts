@@ -3,7 +3,8 @@
 import { redirect } from "next/navigation";
 import { verifyAdminPassword, createAdminSession, clearAdminSession, isAdminConfigured } from "@/lib/admin-auth";
 
-export async function adminLogin(formData: FormData): Promise<{ error: string } | void> {
+// Shaped for useActionState (previous state first) so the login form posts to this action even before JavaScript loads.
+export async function adminLogin(_prev: { error: string } | null, formData: FormData): Promise<{ error: string } | null> {
   const password = String(formData.get("password") ?? "");
   if (!isAdminConfigured()) return { error: "Admin sign-in is disabled on this deployment." };
   const ok = await verifyAdminPassword(password);
