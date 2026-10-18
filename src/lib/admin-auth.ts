@@ -1,45 +1,44 @@
 import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "crypto";
+import {
+  ADMIN_COOKIE,
+  ADMIN_SESSION_SECONDS,
+  adminSecret,
+  makeSessionValue,
+  passwordMatches,
+  sessionIsValid,
+} from "@/lib/admin-auth-core";
 
-// Single shared password (ADMIN_PASSWORD), appropriate for this MVP's one
-// operator. The session cookie is HMAC-signed with that same password so
-// it's tamper-evident even though it's also httpOnly — cheap defense in
-// depth, no separate secret to manage.
-const ADMIN_COOKIE = "clockwise_admin";
-const MAX_AGE = 60 * 60 * 8; // 8 hours
+// Single shared password (ADMIN_PASSWORD), appropriate for this MVP's one operator. The session cookie is
+// HMAC-signed with that same password and carries its own expiry. If ADMIN_PASSWORD is not configured, admin access
+// is disabled completely (see admin-auth-core.ts): no login succeeds and no cookie is ever accepted.
+const secret = () => adminSecret(process.env.ADMIN_PASSWORD);
 
-function sign(value: string): string {
-  const secret = process.env.ADMIN_PASSWORD ?? "";
-  return createHmac("sha256", secret).update(value).digest("hex");
+export function isAdminConfigured(): boolean {
+  return secret() !== null;
 }
 
 export async function verifyAdminPassword(password: string): Promise<boolean> {
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected || !password) return false;
-  const a = Buffer.from(password);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  return passwordMatches(password, secret());
 }
 
 export async function createAdminSession(): Promise<void> {
+  const value = makeSessionValue(secret());
+  if (!value) return;
   const store = await cookies();
-  const token = "admin";
-  store.set(ADMIN_COOKIE, `${token}.${sign(token)}`, {
+  store.set(ADMIN_COOKIE, value, {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: MAX_AGE,
+    maxAge: ADMIN_SESSION_SECONDS,
   });
 }
 
 export async function isAdminAuthenticated(): Promise<boolean> {
+  const key = secret();
+  if (!key) return false;
   const store = await cookies();
-  const raw = store.get(ADMIN_COOKIE)?.value;
-  if (!raw) return false;
-  const [token, signature] = raw.split(".");
-  if (!token || !signature) return false;
-  return signature === sign(token);
+  return sessionIsValid(store.get(ADMIN_COOKIE)?.value, key);
 }
 
 export async function clearAdminSession(): Promise<void> {
